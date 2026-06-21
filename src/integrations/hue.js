@@ -76,7 +76,7 @@ function hueRequest(bridgeIp, appKey, method, path, body) {
         // (équivalent du ServerCertificateValidationCallback => true du C#).
         rejectUnauthorized: false,
         headers: {
-          'hue-application-key': appKey,
+          ...(appKey ? { 'hue-application-key': appKey } : {}),
           ...(data ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } : {})
         },
         timeout: 4000
@@ -250,6 +250,29 @@ export function createHueIntegration(hueConfig = {}) {
     return { lights, scenes };
   }
 
+  // hue.register — création d'une clé d'application (appuyer sur le bouton du bridge
+  // dans les ~30 s avant l'appel). API v1 sans auth. Renvoie { appKey } dans l'ack.
+  async function register(payload = {}) {
+    const bridgeIp = String(payload.bridgeIp || payload.hueBridgeIp || hueConfig.bridgeIp || '').trim();
+    if (!bridgeIp) throw new Error('bridgeIp manquant');
+
+    const devicetype = String(payload.devicetype || 'Klixa#companion').trim();
+    const res = await hueRequest(bridgeIp, '', 'POST', '/api', { devicetype });
+    const entries = Array.isArray(res) ? res : [];
+
+    const success = entries.find((e) => e?.success?.username);
+    if (success) {
+      log.info('Clé d\'application Hue créée');
+      return { appKey: success.success.username };
+    }
+
+    const failure = entries.find((e) => e?.error);
+    if (failure?.error?.type === 101) {
+      throw new Error('Appuyez sur le bouton du bridge Hue puis réessayez');
+    }
+    throw new Error('Réponse inattendue du bridge Hue');
+  }
+
   async function healthcheck() {
     const creds = resolveCredentials();
     await hueRequest(creds.bridgeIp, creds.appKey, 'GET', '/clip/v2/resource/bridge', null);
@@ -260,7 +283,8 @@ export function createHueIntegration(hueConfig = {}) {
     id: 'hue',
     commands: {
       'hue.color': color,
-      'hue.discover': discover
+      'hue.discover': discover,
+      'hue.register': register
     },
     healthcheck
   };

@@ -49,7 +49,8 @@ registre d'intégrations). Le cloud n'enverra que des commandes connues.
 |----------|---------|-------|
 | `smoke.trigger` | `{ durationMs }` | Impulsion relais machine à fumée (durée bornée côté compagnon ET RPi) |
 | `hue.color` | `{ lightIds[], color, brightness?, transitionMs?, durationMs?, mode?, sceneId? }` | Couleur/scène Hue en direct sur le bridge (LAN). `mode:'simple'` = clignotement puis restauration. `sceneId` = rappel de scène. Credentials du `.env`, surchargeables par `bridgeIp`/`appKey` dans le payload. |
-| `hue.discover` | `{}` | Liste lampes + scènes du bridge. **Le résultat revient dans l'`ack`** (`{ lights[], scenes[] }`) — le cloud le persiste (plus de POST direct du C# vers `/api/hue/discovered`). |
+| `hue.discover` | `{ bridgeIp?, appKey? }` | Liste lampes + scènes du bridge. **Le résultat revient dans l'`ack`** (`{ lights[], scenes[] }`) — le cloud le persiste (plus de POST direct du C# vers `/api/hue/discovered`). |
+| `hue.register` | `{ bridgeIp?, devicetype? }` | Crée une clé d'application (appuyer sur le bouton du bridge avant l'appel). Renvoie `{ appKey }` dans l'`ack`, ou erreur « appuyez sur le bouton » si non pressé. |
 
 ## Heartbeat
 
