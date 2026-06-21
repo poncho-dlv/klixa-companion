@@ -55,6 +55,9 @@ export function createCloudLink(config, registry) {
     log.info(`Connexion à ${config.url}`);
     ws = new WebSocket(config.url, {
       headers: config.token ? { authorization: `Bearer ${config.token}` } : {},
+      // Échoue vite si le handshake n'aboutit pas (ex. 524 Cloudflare ~100 s) pour
+      // que le backoff de reconnexion s'applique au lieu de pendre.
+      handshakeTimeout: 10000,
     });
 
     ws.on('open', () => {
