@@ -12,12 +12,12 @@ Relais sur **GPIO 17** (BCM), comme le script de test initial
 
 ```bash
 sudo apt update && sudo apt install -y python3 python3-pip
-mkdir -p /home/pi/klixa-smoke && cd /home/pi/klixa-smoke
+mkdir -p /home/rpi_user/klixa-smoke && cd /home/rpi_user/klixa-smoke
 # Copier smoke_service.py et requirements.txt ici
 pip3 install -r requirements.txt --break-system-packages
 ```
 
-Créer `/home/pi/klixa-smoke/.env` :
+Créer `/home/rpi_user/klixa-smoke/.env` :
 
 ```bash
 SMOKE_GPIO_PIN=17

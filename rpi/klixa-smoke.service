@@ -5,10 +5,10 @@ After=network.target
 [Service]
 Type=simple
 # Adapter l'utilisateur et le chemin selon l'installation
-User=pi
-WorkingDirectory=/home/pi/klixa-smoke
-EnvironmentFile=/home/pi/klixa-smoke/.env
-ExecStart=/usr/bin/python3 /home/pi/klixa-smoke/smoke_service.py
+User=rpi_user
+WorkingDirectory=/home/rpi_user/klixa-smoke
+EnvironmentFile=/home/rpi_user/klixa-smoke/.env
+ExecStart=/usr/bin/python3 /home/rpi_user/klixa-smoke/smoke_service.py
 Restart=on-failure
 RestartSec=3
 

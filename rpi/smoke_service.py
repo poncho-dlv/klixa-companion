@@ -16,7 +16,7 @@ from gpiozero import OutputDevice
 
 PIN = int(os.environ.get("SMOKE_GPIO_PIN", "17"))
 PORT = int(os.environ.get("SMOKE_PORT", "8787"))
-TOKEN = os.environ.get("SMOKE_TOKEN", "")
+TOKEN = os.environ.get("SMOKE_SERVICE_TOKEN", "")
 MIN_MS = int(os.environ.get("SMOKE_MIN_MS", "50"))
 MAX_MS = int(os.environ.get("SMOKE_MAX_MS", "1500"))
 DEFAULT_MS = int(os.environ.get("SMOKE_DEFAULT_MS", "300"))
