@@ -35,6 +35,16 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
   let client = null;
   let connected = false;
   let stopped = false;
+  // Anti-spam : SB hors ligne → reconnexion auto en boucle. On logge la perte UNE fois,
+  // puis on se tait jusqu'au retour (onConnect remet le flag à zéro). Évite les pavés
+  // d'ERROR/WARN à chaque tentative.
+  let loggedOffline = false;
+
+  function noteOffline(msg, detail) {
+    if (stopped || loggedOffline) return;
+    loggedOffline = true;
+    log.warn(msg, detail);
+  }
 
   const events = Array.isArray(sbConfig.events) && sbConfig.events.length
     ? sbConfig.events
@@ -73,13 +83,16 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
       immediate: false,
       autoReconnect: true,
       retries: -1,
+      // Coupe le logger interne du client (sinon « Failed to reconnect (attempt N) » +
+      // stack traces déversés à chaque tentative). On gère nous-mêmes le minimum utile.
+      logLevel: 'none',
       onData: (payload) => forwardRaw(payload),
-      onConnect: () => { connected = true; log.info('Connecté à Streamer.bot'); },
+      onConnect: () => { connected = true; loggedOffline = false; log.info('Connecté à Streamer.bot'); },
       onDisconnect: () => {
         connected = false;
-        if (!stopped) log.warn('Connexion Streamer.bot perdue (reconnexion auto)');
+        noteOffline('Connexion Streamer.bot perdue (reconnexion auto en cours)');
       },
-      onError: (err) => { log.error('Erreur Streamer.bot', err?.message || String(err)); }
+      onError: (err) => { noteOffline('Connexion Streamer.bot indisponible (reconnexion auto en cours)', err?.message || String(err)); }
     });
 
     for (const name of events) {
@@ -87,7 +100,7 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
     }
 
     client.connect().catch((err) => {
-      log.warn('Connexion initiale Streamer.bot échouée (reconnexion auto)', err?.message || String(err));
+      noteOffline('Connexion initiale Streamer.bot échouée (reconnexion auto)', err?.message || String(err));
     });
   }
 

@@ -47,6 +47,9 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   let connected = false;
   let stopped = false;
   let reconnectTimer = null;
+  // Anti-spam : OBS hors ligne → on tente toutes les 5 s. On logge la perte UNE fois,
+  // puis silence jusqu'au retour (connect() réussi remet le flag à zéro).
+  let loggedOffline = false;
 
   function scheduleReconnect() {
     if (stopped || reconnectTimer) return;
@@ -58,10 +61,14 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     try {
       await obs.connect(url, obsConfig.password || undefined);
       connected = true;
+      loggedOffline = false;
       log.info('Connecté à OBS', { url });
     } catch (err) {
       connected = false;
-      log.warn('Connexion OBS échouée, nouvelle tentative dans 5 s', err.message);
+      if (!loggedOffline) {
+        loggedOffline = true;
+        log.warn('Connexion OBS indisponible (nouvelle tentative toutes les 5 s)', err.message);
+      }
       scheduleReconnect();
     }
   }
@@ -69,7 +76,10 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   obs.on('ConnectionClosed', () => {
     connected = false;
     if (!stopped) {
-      log.warn('Connexion OBS fermée');
+      if (!loggedOffline) {
+        loggedOffline = true;
+        log.warn('Connexion OBS fermée (reconnexion auto)');
+      }
       scheduleReconnect();
     }
   });
