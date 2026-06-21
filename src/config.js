@@ -46,4 +46,13 @@ export const config = {
     url: process.env.OBS_WS_URL || 'ws://127.0.0.1:4455',
     password: process.env.OBS_WS_PASSWORD || '',
   },
+  streamerbot: {
+    // Pont Streamer.bot : le compagnon héberge la connexion SB (sur le LAN avec SB).
+    enabled: bool(process.env.SB_ENABLED, true),
+    host: process.env.SB_HOST || '127.0.0.1',
+    port: int(process.env.SB_PORT, 8080),
+    endpoint: process.env.SB_ENDPOINT || '/',
+    password: process.env.SB_PASSWORD || '',
+    scheme: process.env.SB_SCHEME || 'ws',
+  },
 };

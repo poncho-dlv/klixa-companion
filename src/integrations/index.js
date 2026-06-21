@@ -1,6 +1,7 @@
 import { createSmokeIntegration } from './smoke.js';
 import { createHueIntegration } from './hue.js';
 import { createObsIntegration } from './obs.js';
+import { createStreamerbotIntegration } from './streamerbot.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('integrations');
@@ -32,6 +33,14 @@ export function registerIntegrations(registry, config, { emitEvent } = {}) {
       registry.register(createObsIntegration(config.obs, { emitEvent }));
     } catch (err) {
       log.error('Intégration OBS non chargée', err.message);
+    }
+  }
+
+  if (config.streamerbot.enabled) {
+    try {
+      registry.register(createStreamerbotIntegration(config.streamerbot, { emitEvent }));
+    } catch (err) {
+      log.error('Intégration Streamer.bot non chargée', err.message);
     }
   }
 }

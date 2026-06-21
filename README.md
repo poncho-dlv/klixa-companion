@@ -65,6 +65,8 @@ docker compose up -d --build
 | `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
 | `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |
 | `OBS_WS_PASSWORD` | Mot de passe obs-websocket (si activé dans OBS). |
+| `SB_ENABLED` | Active le pont Streamer.bot (défaut true). |
+| `SB_HOST` / `SB_PORT` / `SB_ENDPOINT` / `SB_PASSWORD` / `SB_SCHEME` | Connexion au WebSocket Streamer.bot sur le LAN (`SB_HOST` = IP du PC SB, pas 127.0.0.1 si compagnon sur NAS). |
 
 ## Ajouter une intégration
 

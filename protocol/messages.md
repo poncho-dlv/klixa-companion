@@ -61,8 +61,9 @@ côté cloud, dans le contexte du tenant résolu depuis le token. Pas de file : 
 | `hue.discover` | `{ bridgeIp?, appKey? }` | Liste lampes + scènes du bridge. **Le résultat revient dans l'`ack`** (`{ lights[], scenes[] }`) — le cloud le persiste (plus de POST direct du C# vers `/api/hue/discovered`). |
 | `hue.register` | `{ bridgeIp?, devicetype? }` | Crée une clé d'application (appuyer sur le bouton du bridge avant l'appel). Renvoie `{ appKey }` dans l'`ack`, ou erreur « appuyez sur le bouton » si non pressé. |
 | `obs.sync-overlay-token` | `{ overlayToken, overlayBase }` | Réécrit le token overlay dans les sources navigateur OBS dont l'URL commence par `overlayBase`. Renvoie `{ updated, alreadyOk, sources }`. (OBS natif via obs-websocket — remplace ObsSyncOverlayToken.cs.) |
+| `streamerbot.action` | `{ actionId, args? }` | Exécute une action Streamer.bot par id (raccourcis modération, actions déclenchées par overlay). Renvoie `{ requestId }`. |
 
-> OBS remonte aussi les events `Obs.SceneChanged` / `Obs.StreamingStarted` / `Obs.StreamingStopped` via le message `event` ci-dessus.
+> Remontent aussi via le message `event` : OBS (`Obs.SceneChanged`/`StreamingStarted`/`StreamingStopped`) et Streamer.bot (`General.Custom`, `Twitch.AutomaticRewardRedemption`, `Twitch.Announcement` — forwardés bruts). Pulsoid reste sur la connexion SB du cloud (pas via le compagnon).
 
 ## Heartbeat
 
