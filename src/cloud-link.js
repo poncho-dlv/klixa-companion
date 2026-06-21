@@ -27,6 +27,14 @@ export function createCloudLink(config, registry) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
+  // Remontée d'un event local vers le cloud (ex. OBS scènes/stream). Forme du payload =
+  // event « brut » { event:{source,type}, data } directement consommable par le cloud
+  // (processRawEvent). Émis seulement si la liaison est ouverte (pas de file : un event
+  // physique tardif n'a pas de sens à rejouer).
+  function sendEvent(payload) {
+    send({ type: 'event', payload });
+  }
+
   async function handleMessage(raw) {
     let msg;
     try {
@@ -93,5 +101,5 @@ export function createCloudLink(config, registry) {
     if (ws) ws.close();
   }
 
-  return { start, stop, send };
+  return { start, stop, send, sendEvent };
 }

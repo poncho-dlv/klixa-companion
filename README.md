@@ -62,6 +62,9 @@ docker compose up -d --build
 | `HUE_ENABLED` | Active l'intégration Hue native (défaut true). |
 | `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). |
 | `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`). Surchargeable par le payload de la commande. |
+| `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
+| `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |
+| `OBS_WS_PASSWORD` | Mot de passe obs-websocket (si activé dans OBS). |
 
 ## Ajouter une intégration
 

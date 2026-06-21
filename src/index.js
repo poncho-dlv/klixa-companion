@@ -9,9 +9,11 @@ import { createLocalServer } from './local-server.js';
 const log = createLogger('main');
 
 const registry = createIntegrationRegistry();
-registerIntegrations(registry, config);
-
 const cloudLink = createCloudLink(config.cloud, registry);
+
+// Les intégrations remontent leurs events via la liaison cloud (ex. OBS scènes/stream).
+registerIntegrations(registry, config, { emitEvent: (event) => cloudLink.sendEvent(event) });
+
 const localServer = createLocalServer(config, registry);
 
 cloudLink.start();
