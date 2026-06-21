@@ -71,8 +71,9 @@ export function createCloudLink(config, registry) {
       });
     });
     ws.on('message', (data) => handleMessage(data.toString()));
-    ws.on('close', () => {
-      log.warn('Liaison cloud fermée');
+    ws.on('close', (code, reason) => {
+      const detail = reason?.toString() || '';
+      log.warn(`Liaison cloud fermée${code ? ` (code ${code}${detail ? ` : ${detail}` : ''})` : ''}`);
       scheduleReconnect();
     });
     ws.on('error', (err) => {
