@@ -1,0 +1,4 @@
+gpiozero
+# Backend GPIO recommandé sur Raspberry Pi OS récent (Bookworm). Sur ancien OS,
+# gpiozero retombe sur RPi.GPIO automatiquement.
+lgpio
