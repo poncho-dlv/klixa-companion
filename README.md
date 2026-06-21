@@ -51,9 +51,8 @@ docker compose up -d --build
 
 | Variable | Description |
 |----------|-------------|
-| `CLOUD_WS_URL` | URL WS du serveur Klixa. Vide = mode local seul. |
-| `COMPANION_TOKEN` | Token d'authentification de la liaison cloud. |
-| `TENANT_ID` | Tenant Klixa rattaché au compagnon. |
+| `CLOUD_WS_URL` | URL WS du serveur Klixa (`wss://<host>/companion/ws`). Vide = mode local seul. |
+| `COMPANION_TOKEN` | Token d'auth dédié, généré côté Klixa (Paramètres → Compagnon). Distinct du token overlay. Le serveur en déduit le tenant. |
 | `PORT` | Port du serveur local (défaut 8786). |
 | `COMPANION_LOCAL_TOKEN` | Optionnel : protège `POST /commands/*` sur le LAN. |
 | `SMOKE_ENABLED` | Active l'intégration fumée (défaut true). |

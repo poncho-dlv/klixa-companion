@@ -5,8 +5,11 @@ connecte jamais au compagnon. Tous les messages sont du JSON (un objet par trame
 
 ## Authentification
 
-À la connexion, le compagnon présente un header HTTP `Authorization: Bearer <COMPANION_TOKEN>`
-puis envoie un message `hello`. Le cloud associe le token au tenant.
+À la connexion (sur le path `/companion/ws`), le compagnon présente un header HTTP
+`Authorization: Bearer <COMPANION_TOKEN>` puis envoie un message `hello`. **Le serveur
+résout le tenant à partir du token** (cache `token → tenantId`) ; le `tenantId` annoncé
+dans le `hello` est purement informatif et n'est jamais une source de confiance. Token
+invalide/manquant → handshake fermé avec le code `4401`.
 
 ## Compagnon → Cloud
 
