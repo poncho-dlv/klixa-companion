@@ -59,6 +59,9 @@ docker compose up -d --build
 | `SMOKE_SERVICE_URL` | URL du service GPIO sur le RPi (ex. `http://192.168.1.50:8787`). |
 | `SMOKE_SERVICE_TOKEN` | Secret partagé avec le service GPIO. |
 | `SMOKE_DEFAULT_MS` / `SMOKE_MIN_MS` / `SMOKE_MAX_MS` | Bornes de durée d'impulsion. |
+| `HUE_ENABLED` | Active l'intégration Hue native (défaut true). |
+| `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). |
+| `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`). Surchargeable par le payload de la commande. |
 
 ## Ajouter une intégration
 

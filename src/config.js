@@ -33,4 +33,10 @@ export const config = {
     minMs: int(process.env.SMOKE_MIN_MS, 50),
     maxMs: int(process.env.SMOKE_MAX_MS, 1500),
   },
+  hue: {
+    // Intégration Hue NATIVE : le compagnon parle directement au bridge sur le LAN.
+    enabled: bool(process.env.HUE_ENABLED, true),
+    bridgeIp: process.env.HUE_BRIDGE_IP || '',
+    appKey: process.env.HUE_APP_KEY || '',
+  },
 };
