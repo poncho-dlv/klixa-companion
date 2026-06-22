@@ -66,10 +66,25 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 5000);
   }
 
+  // OBS hors ligne avec pare-feu qui « drop » les paquets → obs.connect() peut rester
+  // bloqué ~2 min (timeout TCP de l'OS) avant d'échouer, ce qui fige la reconnexion et
+  // empêche de détecter le lancement d'OBS. On borne donc l'attente à 10 s puis on coupe.
+  function connectWithTimeout() {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        obs.disconnect().catch(() => {});
+        reject(new Error('timeout de connexion (10 s)'));
+      }, 10000);
+      obs.connect(url, obsConfig.password || undefined)
+        .then(() => { clearTimeout(timer); resolve(); })
+        .catch((err) => { clearTimeout(timer); reject(err); });
+    });
+  }
+
   async function connect() {
     if (stopped || connected) return;
     try {
-      await obs.connect(url, obsConfig.password || undefined);
+      await connectWithTimeout();
       connected = true;
       loggedOffline = false;
       log.info('Connecté à OBS', { url });
