@@ -33,6 +33,16 @@ export function urlMatchesBase(rawUrl, base) {
   return String(rawUrl).toLowerCase().startsWith(String(base).toLowerCase().replace(/\/+$/, ''));
 }
 
+// Décide quoi faire de l'URL d'une source navigateur (pur + testé) :
+//  - 'skip'   : URL hors origine overlay → ne pas toucher
+//  - 'ok'     : déjà le bon token → rien à faire
+//  - 'update' : réécrire avec l'URL renvoyée
+export function resolveOverlayUrlUpdate(currentUrl, base, token) {
+  if (!currentUrl || !urlMatchesBase(currentUrl, base)) return { action: 'skip', url: currentUrl };
+  if (extractToken(currentUrl) === token) return { action: 'ok', url: currentUrl };
+  return { action: 'update', url: setToken(currentUrl, token) };
+}
+
 /**
  * Intégration OBS NATIVE (obs-websocket) : le compagnon parle directement à OBS sur
  * le LAN. Remplace l'action Streamer.bot ObsSyncOverlayToken.cs ET la souscription SB
@@ -108,42 +118,35 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     const base = String(payload.overlayBase || '').trim();
     if (!base) throw new Error('overlayBase manquant (fourni par le serveur)');
 
-    const { scenes } = await obs.call('GetSceneList');
-    const processed = new Set();
+    // GetInputList renvoie TOUTES les sources connues d'OBS, quel que soit leur
+    // canevas/scène (y compris les sources non placées dans une scène). On ne parcourt
+    // donc plus les scènes horizontales classiques (GetSceneList), qui rataient les
+    // sources navigateur d'Aitum Vertical : celles-ci vivent sur un canevas séparé,
+    // absent de GetSceneList, mais bien présentes ici comme inputs `browser_source`.
+    const { inputs } = await obs.call('GetInputList');
     let updated = 0;
     let alreadyOk = 0;
+    let scanned = 0;
 
-    for (const scene of scenes || []) {
-      const sceneName = scene?.sceneName;
-      if (!sceneName) continue;
+    for (const input of inputs || []) {
+      const inputName = input?.inputName;
+      if (!inputName || input?.inputKind !== 'browser_source') continue;
+      scanned++;
 
-      let sceneItems;
-      try { ({ sceneItems } = await obs.call('GetSceneItemList', { sceneName })); }
+      let inputSettings;
+      try { ({ inputSettings } = await obs.call('GetInputSettings', { inputName })); }
       catch { continue; }
 
-      for (const item of sceneItems || []) {
-        const sourceName = item?.sourceName;
-        const inputKind = item?.inputKind;
-        if (!sourceName) continue;
-        if (inputKind && inputKind !== 'browser_source') continue;
-        if (processed.has(sourceName)) continue;
-        processed.add(sourceName);
+      const decision = resolveOverlayUrlUpdate(inputSettings?.url || '', base, token);
+      if (decision.action === 'ok') { alreadyOk++; continue; }
+      if (decision.action !== 'update') continue;
 
-        let inputSettings;
-        try { ({ inputSettings } = await obs.call('GetInputSettings', { inputName: sourceName })); }
-        catch { continue; }
-
-        const currentUrl = inputSettings?.url || '';
-        if (!currentUrl || !urlMatchesBase(currentUrl, base)) continue;
-        if (extractToken(currentUrl) === token) { alreadyOk++; continue; }
-
-        await obs.call('SetInputSettings', { inputName: sourceName, inputSettings: { url: setToken(currentUrl, token) } });
-        updated++;
-      }
+      await obs.call('SetInputSettings', { inputName, inputSettings: { url: decision.url } });
+      updated++;
     }
 
-    log.info('Sync token overlay terminé', { updated, alreadyOk, sources: processed.size });
-    return { updated, alreadyOk, sources: processed.size };
+    log.info('Sync token overlay terminé', { updated, alreadyOk, sources: scanned });
+    return { updated, alreadyOk, sources: scanned };
   }
 
   async function healthcheck() {
