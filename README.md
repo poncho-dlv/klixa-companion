@@ -68,6 +68,8 @@ docker compose up -d --build
 | `SB_ENABLED` | Active le pont Streamer.bot (défaut true). |
 | `SB_HOST` / `SB_PORT` / `SB_ENDPOINT` / `SB_PASSWORD` / `SB_SCHEME` | Connexion au WebSocket Streamer.bot sur le LAN (`SB_HOST` = IP du PC SB, pas 127.0.0.1 si compagnon sur NAS). |
 
+Le pont Streamer.bot relaie aussi `Pulsoid.HeartRatePulse` vers Klixa. Pour le mode BPM local, l'intégration Pulsoid doit être active dans Streamer.bot et la source BPM doit être réglée sur `Streamer.bot local` côté Klixa.
+
 ## Ajouter une intégration
 
 1. Créer `src/integrations/<nom>.js` exportant

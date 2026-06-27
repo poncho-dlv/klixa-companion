@@ -63,7 +63,7 @@ côté cloud, dans le contexte du tenant résolu depuis le token. Pas de file : 
 | `obs.sync-overlay-token` | `{ overlayToken, overlayBase }` | Réécrit le token overlay dans les sources navigateur OBS dont l'URL commence par `overlayBase`. Renvoie `{ updated, alreadyOk, sources }`. (OBS natif via obs-websocket — remplace ObsSyncOverlayToken.cs.) |
 | `streamerbot.action` | `{ actionId, args? }` | Exécute une action Streamer.bot par id (raccourcis modération, actions déclenchées par overlay). Renvoie `{ requestId }`. |
 
-> Remontent aussi via le message `event` : OBS (`Obs.SceneChanged`/`StreamingStarted`/`StreamingStopped`) et Streamer.bot (`General.Custom`, `Twitch.AutomaticRewardRedemption`, `Twitch.Announcement` — forwardés bruts). Pulsoid reste sur la connexion SB du cloud (pas via le compagnon).
+> Remontent aussi via le message `event` : OBS (`Obs.SceneChanged`/`StreamingStarted`/`StreamingStopped`) et Streamer.bot (`General.Custom`, `Twitch.Announcement`, `Pulsoid.HeartRatePulse` — forwardés bruts).
 
 ## Heartbeat
 

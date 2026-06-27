@@ -4,10 +4,11 @@ import { createLogger } from '../logger.js';
 const log = createLogger('streamerbot');
 
 // Events SB encore servis par le pont (le reste est natif côté cloud : EventSub Twitch,
-// API YouTube, WebCast TikTok, etc.). Pulsoid n'est PAS ici : il reste sur la connexion
-// SB du cloud (sera migré en natif plus tard, sans intermédiaire).
-const DEFAULT_EVENTS = [
+// API YouTube, WebCast TikTok, etc.). Pulsoid.HeartRatePulse est relayé ici pour
+// le mode BPM local via compagnon.
+export const DEFAULT_EVENTS = [
   'General.Custom',
+  'Pulsoid.HeartRatePulse',
   // AutomaticRewardRedemption migré en EventSub natif côté cloud
   // (channel.channel_points_automatic_reward_redemption.add) → plus relayé ici.
   'Twitch.Announcement'
