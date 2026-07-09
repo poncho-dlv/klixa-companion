@@ -3,19 +3,13 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('streamerbot');
 
-// Events SB encore servis par le pont (le reste est natif côté cloud : EventSub Twitch,
-// API YouTube, WebCast TikTok, etc.). Pulsoid.HeartRatePulse est relayé ici pour
-// le mode BPM local via compagnon.
+// Events SB encore servis par le pont. Les compteurs sont geres nativement cote Klixa.
 export const DEFAULT_EVENTS = [
-  'General.Custom',
-  'Pulsoid.HeartRatePulse',
-  // AutomaticRewardRedemption migré en EventSub natif côté cloud
-  // (channel.channel_points_automatic_reward_redemption.add) → plus relayé ici.
-  'Twitch.Announcement'
+  'Pulsoid.HeartRatePulse'
 ];
 
-// Args d'action SB : les valeurs objet sont sérialisées en JSON (comportement repris du
-// client SB cloud — Streamer.bot attend des arguments scalaires/strings).
+// Args d'action SB : les valeurs objet sont serialisees en JSON (comportement repris du
+// client SB cloud ; Streamer.bot attend des arguments scalaires/strings).
 function serializeArgs(args = {}) {
   const out = {};
   for (const [key, value] of Object.entries(args)) {
@@ -25,20 +19,16 @@ function serializeArgs(args = {}) {
 }
 
 /**
- * Pont Streamer.bot : le compagnon (sur le LAN, là où tourne SB) héberge la connexion
- * et fait transiter dans les deux sens — le cloud ne parle plus jamais à SB directement.
- *  - Events SB → cloud : forwardés BRUTS via `emitEvent` ({event:{source,type}, data}),
- *    le cloud les ingère comme avant (counter.add, alertes, activité…). Tuyau bête.
- *  - Commande `streamerbot.action` (cloud → SB) : exécute une action SB par id
- *    (raccourcis modération, actions déclenchées par overlay).
+ * Pont Streamer.bot : le compagnon (sur le LAN, la ou tourne SB) heberge la connexion
+ * et fait transiter dans les deux sens ; le cloud ne parle plus jamais a SB directement.
+ *  - Events SB -> cloud : Pulsoid.HeartRatePulse pour le mode BPM local.
+ *  - Commande `streamerbot.action` (cloud -> SB) : execute une action SB par id
+ *    (raccourcis moderation, actions declenchees par overlay).
  */
 export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) {
   let client = null;
   let connected = false;
   let stopped = false;
-  // Anti-spam : SB hors ligne → reconnexion auto en boucle. On logge la perte UNE fois,
-  // puis on se tait jusqu'au retour (onConnect remet le flag à zéro). Évite les pavés
-  // d'ERROR/WARN à chaque tentative.
   let loggedOffline = false;
 
   function noteOffline(msg, detail) {
@@ -60,18 +50,6 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
     emitEvent?.({ event, data: payload?.data ?? payload });
   }
 
-  // Broadcasts BRUTS (CPH.WebsocketBroadcastJson, ex. CounterAdd.cs pour `!add`) : ce ne
-  // sont PAS des events SB standard (pas captés par .on()). On les forwarde comme un
-  // General.Custom synthétique — le cloud les ingère (counter.add). Calqué sur le
-  // handleRawBroadcast de l'ancien client SB cloud.
-  function forwardRaw(payload) {
-    if (!payload || typeof payload !== 'object') return;
-    // Event SB standard (event = {source,type}) → déjà géré par les listeners .on().
-    if (payload.event && typeof payload.event === 'object' && payload.event.source && payload.event.type) return;
-    if (!String(payload.type || '').trim()) return;
-    emitEvent?.({ event: { source: 'General', type: 'Custom' }, data: payload });
-  }
-
   function connect() {
     if (stopped) return;
 
@@ -84,11 +62,8 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
       immediate: false,
       autoReconnect: true,
       retries: -1,
-      // Coupe le logger interne du client (sinon « Failed to reconnect (attempt N) » +
-      // stack traces déversés à chaque tentative). On gère nous-mêmes le minimum utile.
       logLevel: 'none',
-      onData: (payload) => forwardRaw(payload),
-      onConnect: () => { connected = true; loggedOffline = false; log.info('Connecté à Streamer.bot'); },
+      onConnect: () => { connected = true; loggedOffline = false; log.info('Connecte a Streamer.bot'); },
       onDisconnect: () => {
         connected = false;
         noteOffline('Connexion Streamer.bot perdue (reconnexion auto en cours)');
@@ -101,7 +76,7 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
     }
 
     client.connect().catch((err) => {
-      noteOffline('Connexion initiale Streamer.bot échouée (reconnexion auto)', err?.message || String(err));
+      noteOffline('Connexion initiale Streamer.bot echouee (reconnexion auto)', err?.message || String(err));
     });
   }
 
@@ -110,7 +85,7 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
   async function action(payload = {}) {
     const actionId = String(payload.actionId || payload.id || '').trim();
     if (!actionId) throw new Error('actionId manquant');
-    if (!connected || !client) throw new Error('Streamer.bot non connecté');
+    if (!connected || !client) throw new Error('Streamer.bot non connecte');
 
     const args = serializeArgs(payload.args && typeof payload.args === 'object' ? payload.args : {});
     const requestId = await client.doAction({ id: actionId }, args);
@@ -121,7 +96,7 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
     id: 'streamerbot',
     commands: { 'streamerbot.action': action },
     healthcheck: async () => {
-      if (!connected) throw new Error('Streamer.bot non connecté');
+      if (!connected) throw new Error('Streamer.bot non connecte');
       return { connected };
     },
     stop() {
