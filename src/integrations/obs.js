@@ -30,7 +30,17 @@ export function setToken(rawUrl, token) {
 
 export function urlMatchesBase(rawUrl, base) {
   if (!base) return false;
-  return String(rawUrl).toLowerCase().startsWith(String(base).toLowerCase().replace(/\/+$/, ''));
+  try {
+    const current = new URL(rawUrl);
+    const expected = new URL(base);
+    if (current.origin !== expected.origin) return false;
+
+    const basePath = expected.pathname.replace(/\/+$/, '');
+    if (!basePath) return true;
+    return current.pathname === basePath || current.pathname.startsWith(`${basePath}/`);
+  } catch {
+    return false;
+  }
 }
 
 // Décide quoi faire de l'URL d'une source navigateur (pur + testé) :

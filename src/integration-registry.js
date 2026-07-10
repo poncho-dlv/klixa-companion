@@ -7,7 +7,7 @@ const log = createLogger('registry');
  *   { id, commands: { 'nom.commande': async (payload) => result }, healthcheck?: async () => ({...}) }
  * Le registre agrège toutes les commandes dans une map unique pour le dispatch.
  */
-export function createIntegrationRegistry() {
+export function createIntegrationRegistry({ healthcheckTimeoutMs = 5000 } = {}) {
   const integrations = new Map(); // id -> integration
   const commands = new Map(); // name -> { integrationId, handler }
 
@@ -39,20 +39,38 @@ export function createIntegrationRegistry() {
   }
 
   async function healthcheck() {
-    const result = {};
-    for (const [id, integration] of integrations) {
+    const checks = [...integrations].map(async ([id, integration]) => {
       if (typeof integration.healthcheck !== 'function') {
-        result[id] = { ok: true };
-        continue;
+        return [id, { ok: true }];
       }
+      let timer;
       try {
-        result[id] = { ok: true, ...(await integration.healthcheck()) };
+        const timeout = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Healthcheck expiré après ${healthcheckTimeoutMs} ms`)), healthcheckTimeoutMs);
+        });
+        const details = await Promise.race([integration.healthcheck(), timeout]);
+        return [id, { ok: true, ...details }];
       } catch (err) {
-        result[id] = { ok: false, error: err.message };
+        return [id, { ok: false, error: err.message }];
+      } finally {
+        clearTimeout(timer);
       }
-    }
-    return result;
+    });
+    return Object.fromEntries(await Promise.all(checks));
   }
 
-  return { register, dispatch, listCommands, healthcheck };
+  async function stop() {
+    const stops = [];
+    for (const integration of integrations.values()) {
+      if (typeof integration.stop === 'function') {
+        stops.push(Promise.resolve().then(() => integration.stop()));
+      }
+    }
+    const results = await Promise.allSettled(stops);
+    for (const result of results) {
+      if (result.status === 'rejected') log.error('Erreur à l’arrêt d’une intégration', result.reason?.message);
+    }
+  }
+
+  return { register, dispatch, listCommands, healthcheck, stop };
 }

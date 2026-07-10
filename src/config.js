@@ -15,11 +15,14 @@ function int(value, fallback) {
 
 export const config = {
   port: int(process.env.PORT, 8786),
+  host: process.env.COMPANION_HOST || '127.0.0.1',
   localToken: process.env.COMPANION_LOCAL_TOKEN || '',
+  production: process.env.NODE_ENV === 'production',
   cloud: {
     url: process.env.CLOUD_WS_URL || '',
     token: process.env.COMPANION_TOKEN || '',
     tenantId: process.env.TENANT_ID || '',
+    heartbeatMs: int(process.env.CLOUD_HEARTBEAT_MS, 30000),
     reconnect: {
       minDelayMs: int(process.env.CLOUD_RECONNECT_MIN_MS, 1000),
       maxDelayMs: int(process.env.CLOUD_RECONNECT_MAX_MS, 30000),
@@ -38,6 +41,9 @@ export const config = {
     enabled: bool(process.env.HUE_ENABLED, true),
     bridgeIp: process.env.HUE_BRIDGE_IP || '',
     appKey: process.env.HUE_APP_KEY || '',
+    allowPayloadCredentials: bool(process.env.HUE_ALLOW_PAYLOAD_CREDENTIALS, false),
+    maxLights: int(process.env.HUE_MAX_LIGHTS, 50),
+    concurrency: int(process.env.HUE_CONCURRENCY, 5),
   },
   obs: {
     // Intégration OBS NATIVE (obs-websocket) : le compagnon parle directement à OBS sur le LAN.

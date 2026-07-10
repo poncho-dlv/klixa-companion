@@ -1,4 +1,5 @@
 import https from 'node:https';
+import net from 'node:net';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('hue');
@@ -44,23 +45,69 @@ export function clamp(value, min, max, fallback) {
   return Math.max(min, Math.min(max, n));
 }
 
+export function isPrivateBridgeIp(value) {
+  const ip = String(value || '').trim();
+  const version = net.isIP(ip);
+  if (version === 4) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 10
+      || a === 127
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168);
+  }
+  if (version === 6) {
+    const normalized = ip.toLowerCase();
+    return normalized === '::1'
+      || normalized.startsWith('fc')
+      || normalized.startsWith('fd')
+      || /^fe[89ab]/.test(normalized);
+  }
+  return false;
+}
+
+function assertPrivateBridgeIp(bridgeIp) {
+  if (!isPrivateBridgeIp(bridgeIp)) {
+    throw new Error('HUE_BRIDGE_IP doit être une adresse IP privée littérale');
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function normalizeLightIds(raw) {
-  if (Array.isArray(raw)) return raw.map((id) => String(id).trim()).filter(Boolean);
+export function normalizeLightIds(raw) {
+  let values;
+  if (Array.isArray(raw)) values = raw;
   if (typeof raw === 'string') {
     const text = raw.trim();
     try {
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed.map((id) => String(id).trim()).filter(Boolean);
+      if (Array.isArray(parsed)) values = parsed;
     } catch {
       // pas du JSON → liste séparée par virgules/retours ligne
     }
-    return text.split(/[,\n\r]/).map((id) => id.trim()).filter(Boolean);
+    if (!values) values = text.split(/[,\n\r]/);
   }
-  return [];
+  if (!values) return [];
+  return [...new Set(values
+    .filter((id) => ['string', 'number'].includes(typeof id))
+    .map((id) => String(id).trim())
+    .filter((id) => id && id.length <= 128))];
+}
+
+export async function mapWithConcurrency(items, limit, mapper) {
+  const concurrency = Math.max(1, Math.min(items.length || 1, Math.trunc(limit) || 1));
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return results;
 }
 
 // ── Client HTTP du bridge (API CLIP v2, HTTPS auto-signé) ────────────────────
@@ -107,12 +154,21 @@ function hueRequest(bridgeIp, appKey, method, path, body) {
  * (le cloud peut encore les fournir depuis la config Mongo du tenant).
  */
 export function createHueIntegration(hueConfig = {}) {
+  const maxLights = Math.max(1, Math.min(200, Math.trunc(hueConfig.maxLights) || 50));
+  const requestConcurrency = Math.max(1, Math.min(20, Math.trunc(hueConfig.concurrency) || 5));
+
+  function forEachLight(lightIds, operation) {
+    return mapWithConcurrency(lightIds, requestConcurrency, operation);
+  }
+
   function resolveCredentials(payload = {}) {
-    const bridgeIp = String(payload.bridgeIp || payload.hueBridgeIp || hueConfig.bridgeIp || '').trim();
-    const appKey = String(payload.appKey || payload.hueAppKey || hueConfig.appKey || '').trim();
+    const allowPayload = hueConfig.allowPayloadCredentials === true;
+    const bridgeIp = String((allowPayload && (payload.bridgeIp || payload.hueBridgeIp)) || hueConfig.bridgeIp || '').trim();
+    const appKey = String((allowPayload && (payload.appKey || payload.hueAppKey)) || hueConfig.appKey || '').trim();
     if (!bridgeIp || !appKey) {
       throw new Error('Bridge Hue non configuré (HUE_BRIDGE_IP / HUE_APP_KEY manquants)');
     }
+    assertPrivateBridgeIp(bridgeIp);
     return { bridgeIp, appKey };
   }
 
@@ -159,26 +215,26 @@ export function createHueIntegration(hueConfig = {}) {
   // Clignotement coloré puis restauration de l'état initial (mode alerte « simple »).
   async function blinkLights(creds, lightIds, xy, brightness, transitionMs, durationMs) {
     const previous = {};
-    for (const id of lightIds) {
+    await forEachLight(lightIds, async (id) => {
       try { previous[id] = await readLightState(creds, id); }
       catch (err) { log.warn(`Snapshot impossible pour ${id}`, err.message); }
-    }
+    });
 
     const endAt = Date.now() + durationMs;
     const pulseMs = Math.max(180, Math.min(450, Math.floor(durationMs / 4)));
 
-    while (Date.now() < endAt) {
-      await Promise.all(lightIds.map((id) => setLightColor(creds, id, xy, brightness, transitionMs)));
-      await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
-      await Promise.all(lightIds.map((id) => setLightOn(creds, id, false, transitionMs)));
-      await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
-    }
-
-    await Promise.all(lightIds.map((id) => setLightColor(creds, id, xy, brightness, transitionMs)));
-
-    for (const id of lightIds) {
-      try { await restoreLightState(creds, id, previous[id], transitionMs); }
-      catch (err) { log.warn(`Restauration impossible pour ${id}`, err.message); }
+    try {
+      while (Date.now() < endAt) {
+        await forEachLight(lightIds, (id) => setLightColor(creds, id, xy, brightness, transitionMs));
+        await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
+        await forEachLight(lightIds, (id) => setLightOn(creds, id, false, transitionMs));
+        await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
+      }
+    } finally {
+      await forEachLight(lightIds, async (id) => {
+        try { await restoreLightState(creds, id, previous[id], transitionMs); }
+        catch (err) { log.warn(`Restauration impossible pour ${id}`, err.message); }
+      });
     }
   }
 
@@ -198,6 +254,7 @@ export function createHueIntegration(hueConfig = {}) {
 
     const lightIds = normalizeLightIds(payload.lightIds ?? payload.hueLightIds);
     if (lightIds.length === 0) throw new Error('Aucune lampe cible (lightIds vide)');
+    if (lightIds.length > maxLights) throw new Error(`Trop de lampes ciblées (${lightIds.length}, maximum ${maxLights})`);
 
     const hex = String(payload.color || payload.hueColor || '').trim().toUpperCase();
     if (!isHexColor(hex)) throw new Error(`Couleur invalide: ${hex}`);
@@ -211,7 +268,7 @@ export function createHueIntegration(hueConfig = {}) {
     if (mode === 'simple') {
       await blinkLights(creds, lightIds, xy, brightness, transitionMs, durationMs);
     } else {
-      await Promise.all(lightIds.map((id) => setLightColor(creds, id, xy, brightness, transitionMs)));
+      await forEachLight(lightIds, (id) => setLightColor(creds, id, xy, brightness, transitionMs));
     }
 
     log.info('Commande couleur envoyée', { lights: lightIds.length, color: hex, mode: mode || 'steady' });
@@ -253,8 +310,10 @@ export function createHueIntegration(hueConfig = {}) {
   // hue.register — création d'une clé d'application (appuyer sur le bouton du bridge
   // dans les ~30 s avant l'appel). API v1 sans auth. Renvoie { appKey } dans l'ack.
   async function register(payload = {}) {
-    const bridgeIp = String(payload.bridgeIp || payload.hueBridgeIp || hueConfig.bridgeIp || '').trim();
+    const allowPayload = hueConfig.allowPayloadCredentials === true;
+    const bridgeIp = String((allowPayload && (payload.bridgeIp || payload.hueBridgeIp)) || hueConfig.bridgeIp || '').trim();
     if (!bridgeIp) throw new Error('bridgeIp manquant');
+    assertPrivateBridgeIp(bridgeIp);
 
     const devicetype = String(payload.devicetype || 'Klixa#companion').trim();
     const res = await hueRequest(bridgeIp, '', 'POST', '/api', { devicetype });

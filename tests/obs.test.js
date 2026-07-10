@@ -8,7 +8,14 @@ test('urlMatchesBase: ne matche que les URLs de l\'origine overlay', () => {
   assert.equal(urlMatchesBase(`${BASE}/Alerts/?wsToken=abc`, BASE), true);
   assert.equal(urlMatchesBase(`${BASE}/Alerts/`, `${BASE}/`), true); // base avec slash final
   assert.equal(urlMatchesBase('https://autre.site/Alerts/', BASE), false);
+  assert.equal(urlMatchesBase('https://overlays.klixa.live.attacker.example/Alerts/', BASE), false);
+  assert.equal(urlMatchesBase('http://overlays.klixa.live/Alerts/', BASE), false);
   assert.equal(urlMatchesBase(`${BASE}/x`, ''), false);
+});
+
+test('urlMatchesBase: respecte la frontière du chemin configuré', () => {
+  assert.equal(urlMatchesBase(`${BASE}/overlays/alerts`, `${BASE}/overlays`), true);
+  assert.equal(urlMatchesBase(`${BASE}/overlays-other/alerts`, `${BASE}/overlays`), false);
 });
 
 test('extractToken: lit wsToken/overlayToken/token', () => {

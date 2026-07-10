@@ -21,11 +21,24 @@ localServer.start();
 
 log.info('Compagnon Klixa démarré', { commands: registry.listCommands() });
 
-function shutdown(signal) {
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   log.info(`Arrêt (${signal})`);
-  cloudLink.stop();
-  localServer.stop();
-  process.exit(0);
+  const timeout = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve('timeout'), 5000);
+    timer.unref?.();
+  });
+  const stopped = Promise.allSettled([
+    cloudLink.stop(),
+    localServer.stop(),
+    registry.stop()
+  ]);
+  const result = await Promise.race([stopped, timeout]);
+  if (result === 'timeout') log.warn('Délai maximal d’arrêt atteint');
+  process.exitCode = 0;
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));
