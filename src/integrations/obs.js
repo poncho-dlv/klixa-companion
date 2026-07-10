@@ -174,6 +174,23 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     return { updated, alreadyOk, sources: scanned };
   }
 
+  // obs.get-scenes — liste les scènes du canevas programme (GetSceneList), ordonnées
+  // comme dans l'UI OBS (haut → bas : GetSceneList renvoie les sceneIndex croissants,
+  // 0 = bas de liste), + la scène courante. Consommé par la page admin « Écran
+  // dynamique » (mapping scène → titre/étapes).
+  async function getScenes() {
+    if (!connected) throw new Error('OBS non connecté');
+
+    const { scenes, currentProgramSceneName } = await obs.call('GetSceneList');
+    const names = (scenes || [])
+      .slice()
+      .sort((a, b) => (b?.sceneIndex ?? 0) - (a?.sceneIndex ?? 0))
+      .map((s) => s?.sceneName)
+      .filter(Boolean);
+
+    return { scenes: names, currentScene: currentProgramSceneName || '' };
+  }
+
   async function healthcheck() {
     if (!connected) throw new Error('OBS non connecté');
     return { url, connected };
@@ -181,7 +198,10 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
 
   return {
     id: 'obs',
-    commands: { 'obs.sync-overlay-token': syncOverlayToken },
+    commands: {
+      'obs.sync-overlay-token': syncOverlayToken,
+      'obs.get-scenes': getScenes
+    },
     healthcheck,
     stop() { stopped = true; clearTimeout(reconnectTimer); obs.disconnect().catch(() => {}); }
   };
