@@ -16,10 +16,11 @@ from gpiozero import OutputDevice
 
 PIN = int(os.environ.get("SMOKE_GPIO_PIN", "17"))
 PORT = int(os.environ.get("SMOKE_PORT", "8787"))
-TOKEN = os.environ.get("SMOKE_SERVICE_TOKEN", "")
+TOKEN = os.environ.get("SMOKE_TOKEN", "")
 MIN_MS = int(os.environ.get("SMOKE_MIN_MS", "50"))
 MAX_MS = int(os.environ.get("SMOKE_MAX_MS", "1500"))
 DEFAULT_MS = int(os.environ.get("SMOKE_DEFAULT_MS", "300"))
+MAX_BODY_BYTES = int(os.environ.get("SMOKE_MAX_BODY_BYTES", str(64 * 1024)))
 
 relais = OutputDevice(PIN, active_high=True, initial_value=False)
 
@@ -50,6 +51,10 @@ def declenche_fumee(duree_ms):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(10)
+
     def _send(self, status, obj):
         body = json.dumps(obj).encode("utf-8")
         self.send_response(status)
@@ -76,7 +81,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send(401, {"ok": False, "error": "Token invalide"})
             return
 
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._send(400, {"ok": False, "error": "Content-Length invalide"})
+            return
+        if length < 0:
+            self._send(400, {"ok": False, "error": "Content-Length invalide"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send(413, {"ok": False, "error": "Corps de requête trop volumineux"})
+            return
         raw = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(raw or b"{}")
@@ -93,6 +108,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server.daemon_threads = True
     print(f"[smoke] Service GPIO sur le port {PORT} (pin {PIN}, max {MAX_MS} ms)")
     try:
         server.serve_forever()
