@@ -11,7 +11,7 @@
   "homepage": "https://github.com/poncho-dlv/klixa-companion#readme",
   "bugs": "https://github.com/poncho-dlv/klixa-companion/issues",
   "type": "module",
-  "main": "src/index.js",
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node src/index.js",
     "desktop": "electron desktop/main.js",

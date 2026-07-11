@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { safeStorage } from 'electron';
+import electron from 'electron';
+
+const { safeStorage } = electron;
 
 const secretKeys = new Set(['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']);
 

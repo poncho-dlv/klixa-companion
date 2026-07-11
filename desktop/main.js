@@ -1,14 +1,29 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from 'electron';
+import electron from 'electron';
 import { createConfig } from '../src/config.js';
 import { startCompanion } from '../src/runtime.js';
 import { ConfigStore } from './config-store.js';
-import { autoUpdater } from 'electron-updater';
+import electronUpdaterPkg from 'electron-updater';
+import { createLogger, setLogFile } from '../src/logger.js';
 
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } = electron;
 const directory = path.dirname(fileURLToPath(import.meta.url));
+const logDir = path.join(app.getPath('userData'), 'logs');
+setLogFile(path.join(logDir, 'companion.log'));
+const log = createLogger('desktop');
+
+process.on('uncaughtException', (error) => {
+  log.error('uncaughtException', error.stack || error.message);
+  app.quit();
+});
+process.on('unhandledRejection', (reason) => {
+  log.error('unhandledRejection', reason?.stack || String(reason));
+});
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  log.warn('Verrou instance unique refuse, une instance tourne deja');
   app.quit();
   process.exit(0);
 }
@@ -72,6 +87,7 @@ async function restartRuntime(values) {
     runtime = startCompanion(createConfig({ ...process.env, ...values, NODE_ENV: 'production' }));
     updateStatus({ running: true, message: values.CLOUD_WS_URL ? 'Compagnon actif' : 'Actif en mode local' });
   } catch (error) {
+    log.error('Echec du demarrage du runtime', error.stack || error.message);
     updateStatus({ running: false, message: `Erreur : ${error.message}` });
     throw error;
   }
@@ -110,6 +126,7 @@ function registerIpc() {
 function configureUpdates(values) {
   const updateUrl = values.UPDATE_URL || process.env.KLIXA_UPDATE_URL;
   if (!app.isPackaged || !updateUrl) return;
+  const { autoUpdater } = electronUpdaterPkg;
   try {
     autoUpdater.setFeedURL({ provider: 'generic', url: updateUrl });
     autoUpdater.on('update-downloaded', () => updateStatus({ running: true, message: 'Mise a jour prete pour le prochain demarrage' }));
@@ -127,6 +144,7 @@ app.whenReady().then(async () => {
   tray = new Tray(trayImage());
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Ouvrir Klixa Companion', click: showWindow },
+    { label: 'Ouvrir les logs', click: () => shell.openPath(logDir) },
     { type: 'separator' },
     { label: 'Quitter', click: () => { quitting = true; app.quit(); } }
   ]));
@@ -135,6 +153,9 @@ app.whenReady().then(async () => {
   await restartRuntime(store.load());
   configureUpdates(store.load());
   if (!process.argv.includes('--hidden')) showWindow();
+}).catch((error) => {
+  log.error('Echec du demarrage de l\'application', error.stack || error.message);
+  showWindow();
 });
 
 app.on('second-instance', showWindow);
