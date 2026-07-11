@@ -8,7 +8,10 @@ import { autoUpdater } from 'electron-updater';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) app.quit();
+if (!gotLock) {
+  app.quit();
+  process.exit(0);
+}
 
 let window;
 let tray;
