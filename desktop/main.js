@@ -1,0 +1,140 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from 'electron';
+import { createConfig } from '../src/config.js';
+import { startCompanion } from '../src/runtime.js';
+import { ConfigStore } from './config-store.js';
+import { autoUpdater } from 'electron-updater';
+
+const directory = path.dirname(fileURLToPath(import.meta.url));
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.quit();
+
+let window;
+let tray;
+let runtime;
+let store;
+let status = { running: false, message: 'Demarrage...' };
+let quitting = false;
+
+function trayImage() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#6d5dfc"/><path d="M9 7v18h4v-7l6 7h5l-8-10 7-8h-5l-5 6V7z" fill="white"/></svg>`;
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`).resize({ width: 16, height: 16 });
+}
+
+function showWindow() {
+  window?.show();
+  window?.focus();
+}
+
+function createWindow() {
+  window = new BrowserWindow({
+    width: 720,
+    height: 780,
+    minWidth: 620,
+    minHeight: 650,
+    title: 'Klixa Companion',
+    show: false,
+    webPreferences: {
+      preload: path.join(directory, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  window.setMenuBarVisibility(false);
+  window.loadFile(path.join(directory, 'renderer', 'index.html'));
+  window.on('close', (event) => {
+    if (!quitting) {
+      event.preventDefault();
+      window.hide();
+    }
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+}
+
+function updateStatus(next) {
+  status = next;
+  window?.webContents.send('runtime:status', status);
+  tray?.setToolTip(`Klixa Companion - ${status.message}`);
+}
+
+async function restartRuntime(values) {
+  updateStatus({ running: false, message: 'Redemarrage...' });
+  await runtime?.stop();
+  try {
+    runtime = startCompanion(createConfig({ ...process.env, ...values, NODE_ENV: 'production' }));
+    updateStatus({ running: true, message: values.CLOUD_WS_URL ? 'Compagnon actif' : 'Actif en mode local' });
+  } catch (error) {
+    updateStatus({ running: false, message: `Erreur : ${error.message}` });
+    throw error;
+  }
+}
+
+function publicConfig(values) {
+  const result = { ...values };
+  for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
+    result[`${key}_CONFIGURED`] = Boolean(result[key]);
+    delete result[key];
+  }
+  result.AUTO_LAUNCH = app.getLoginItemSettings().openAtLogin;
+  return result;
+}
+
+function registerIpc() {
+  ipcMain.handle('config:get', () => publicConfig(store.load()));
+  ipcMain.handle('runtime:status', () => status);
+  ipcMain.handle('auto-launch:set', (_event, enabled) => {
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: ['--hidden'] });
+    return app.getLoginItemSettings().openAtLogin;
+  });
+  ipcMain.handle('config:save', async (_event, submitted) => {
+    const current = store.load();
+    const next = { ...current, ...submitted };
+    for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
+      if (!submitted[key]) next[key] = current[key] || '';
+    }
+    if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');
+    store.save(next);
+    await restartRuntime(next);
+    return publicConfig(next);
+  });
+}
+
+function configureUpdates(values) {
+  const updateUrl = values.UPDATE_URL || process.env.KLIXA_UPDATE_URL;
+  if (!app.isPackaged || !updateUrl) return;
+  try {
+    autoUpdater.setFeedURL({ provider: 'generic', url: updateUrl });
+    autoUpdater.on('update-downloaded', () => updateStatus({ running: true, message: 'Mise a jour prete pour le prochain demarrage' }));
+    autoUpdater.on('error', (error) => console.warn('[updater]', error.message));
+    autoUpdater.checkForUpdatesAndNotify();
+  } catch (error) {
+    console.warn('[updater]', error.message);
+  }
+}
+
+app.whenReady().then(async () => {
+  app.setAppUserModelId('live.klixa.companion');
+  store = new ConfigStore(app.getPath('userData'));
+  createWindow();
+  tray = new Tray(trayImage());
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Ouvrir Klixa Companion', click: showWindow },
+    { type: 'separator' },
+    { label: 'Quitter', click: () => { quitting = true; app.quit(); } }
+  ]));
+  tray.on('double-click', showWindow);
+  registerIpc();
+  await restartRuntime(store.load());
+  configureUpdates(store.load());
+  if (!process.argv.includes('--hidden')) showWindow();
+});
+
+app.on('second-instance', showWindow);
+app.on('window-all-closed', () => {});
+app.on('before-quit', () => { quitting = true; });
+app.on('will-quit', () => runtime?.stop());

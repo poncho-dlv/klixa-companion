@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>Klixa Companion</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header><div class="logo">K</div><div><h1>Klixa Companion</h1><p id="status">Demarrage...</p></div></header>
+    <form id="config">
+      <section><h2>Connexion Klixa</h2>
+        <label>Adresse du cloud<input name="CLOUD_WS_URL" type="url" placeholder="wss://app.klixa.live/companion/ws"></label>
+        <label>Token du compagnon<input name="COMPANION_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver le token"></label>
+      </section>
+      <section><h2>OBS</h2>
+        <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
+        <label>Adresse WebSocket<input name="OBS_WS_URL" placeholder="ws://127.0.0.1:4455"></label>
+        <label>Mot de passe<input name="OBS_WS_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
+      </section>
+      <section><h2>Streamer.bot</h2>
+        <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
+        <div class="row"><label>Hote<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
+        <label>Mot de passe<input name="SB_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
+      </section>
+      <section><label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label></section>
+      <div id="message" role="status"></div><button type="submit">Enregistrer et redemarrer</button>
+    </form>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>
