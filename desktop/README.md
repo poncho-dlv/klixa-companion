@@ -20,3 +20,8 @@ coffre du pipeline, jamais dans ce depot.
 Les mises a jour automatiques utilisent un flux HTTP generique electron-builder.
 Definir `KLIXA_UPDATE_URL` au lancement, ou `UPDATE_URL` dans la configuration
 deployee, puis publier l'EXE, son `.blockmap` et `latest.yml` a cette URL.
+
+Si l'upload web GitHub echoue, lancer le workflow `Publish release` depuis
+l'onglet Actions avec le tag concerne. Il construit puis attache automatiquement
+l'EXE, le blockmap et `latest.yml` a la release existante. Si elle n'existe pas,
+il cree un brouillon de release.
