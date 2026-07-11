@@ -2,16 +2,40 @@
   "name": "klixa-companion",
   "version": "0.1.0",
   "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, Streamer.bot) au serveur Klixa cloud via une connexion sortante.",
+  "author": "Klixa",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "desktop": "electron desktop/main.js",
+    "dist:win": "electron-builder --win nsis",
     "test": "node --test"
   },
   "dependencies": {
     "@streamerbot/client": "^1.12.2",
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.6.2",
     "obs-websocket-js": "^5.0.8",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "live.klixa.companion",
+    "productName": "Klixa Companion",
+    "directories": { "output": "release" },
+    "files": ["desktop/**/*", "src/**/*", "package.json"],
+    "asar": true,
+    "win": { "target": ["nsis"], "artifactName": "Klixa-Companion-Setup-${version}.${ext}" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

@@ -82,3 +82,20 @@ Le bridge Hue utilise un certificat local auto-signé : la chaîne TLS n'est pas
 
 Les commandes deviennent automatiquement disponibles via la liaison cloud
 (`capabilities`) et le serveur local (`POST /commands/<nom>.<action>`).
+
+## Application Windows pour les streamers
+
+Le compagnon peut tourner comme une application Windows discrete dans la zone
+de notification. Elle fournit un ecran de configuration, chiffre les secrets
+avec Windows et peut demarrer automatiquement a l'ouverture de session.
+
+```bash
+npm install
+npm run desktop       # developpement
+npm run dist:win      # installateur NSIS dans release/
+```
+
+L'installateur genere est `release/Klixa-Companion-Setup-<version>.exe`. Pour une
+diffusion publique sans avertissement SmartScreen, signer l'executable et
+l'installateur avec un certificat de signature de code avant publication. Voir
+[`desktop/README.md`](desktop/README.md) pour le parcours et la publication.
