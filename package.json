@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, Streamer.bot) au serveur Klixa cloud via une connexion sortante.",
   "author": "Klixa",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/poncho-dlv/klixa-companion.git"
+  },
+  "homepage": "https://github.com/poncho-dlv/klixa-companion#readme",
+  "bugs": "https://github.com/poncho-dlv/klixa-companion/issues",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

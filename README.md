@@ -1,5 +1,12 @@
 # Klixa Companion
 
+[![Licence Apache 2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+
+Klixa Companion est un logiciel open source distribue sous licence Apache-2.0.
+Le service cloud Klixa auquel il peut se connecter est un produit distinct et
+n'est pas inclus dans ce depot. La licence du compagnon n'accorde aucun droit
+sur les marques, services cloud ou autres produits Klixa.
+
 Agent local (hub) du projet [Klixa Live](../Overlays). Il fait le pont entre les
 intégrations **locales** (machine à fumée, et à terme Hue, Streamer.bot…) et le
 serveur Klixa, **sans jamais ouvrir de port entrant** : c'est le compagnon qui
@@ -99,3 +106,9 @@ L'installateur genere est `release/Klixa-Companion-Setup-<version>.exe`. Pour un
 diffusion publique sans avertissement SmartScreen, signer l'executable et
 l'installateur avec un certificat de signature de code avant publication. Voir
 [`desktop/README.md`](desktop/README.md) pour le parcours et la publication.
+
+## Contribuer et securite
+
+Consultez [CONTRIBUTING.md](CONTRIBUTING.md) avant de proposer une modification.
+Les vulnerabilites doivent etre signalees de maniere privee selon
+[SECURITY.md](SECURITY.md), jamais dans une issue publique.
