@@ -16,21 +16,41 @@ const disconnectBtn = document.querySelector('#disconnectBtn');
 const hueBridgeIp = document.querySelector('#hueBridgeIp');
 const huePairBtn = document.querySelector('#huePairBtn');
 const hueMessage = document.querySelector('#hueMessage');
+const hueStatus = document.querySelector('#hueStatus');
+const hueUnpairBtn = document.querySelector('#hueUnpairBtn');
+const smokeServiceUrl = document.querySelector('#smokeServiceUrl');
+const integrationStatusEls = new Map(
+  [...document.querySelectorAll('.integration-status[data-integration]')].map((el) => [el.dataset.integration, el])
+);
+
+// Champs secrets (mot de passe / token) : jamais reaffiches en clair. Une fois
+// configures cote store, le champ se verrouille sur un masque factice — cliquer
+// dessus (focus) le vide et le deverrouille pour saisir une nouvelle valeur. Tant
+// qu'il reste verrouille, sa valeur n'est pas envoyee a la sauvegarde (cf. submit
+// plus bas), donc pas de "laisser vide pour conserver" a interpreter.
+const SECRET_MASK = '••••••••';
+const secretFields = [
+  { input: document.querySelector('#obsWsPassword'), configuredKey: 'OBS_WS_PASSWORD_CONFIGURED' },
+  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED' },
+  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED' }
+];
 
 // Chemins FontAwesome (circle-check / triangle-exclamation) inlines en SVG : la CSP
 // interdit de charger une police/feuille de style externe, donc pas de webfont FA.
 const ICON_CHECK = 'M256 512a256 256 0 1 1 0-512 256 256 0 1 1 0 512zM374 145.7c-10.7-7.8-25.7-5.4-33.5 5.3L221.1 315.2 169 263.1c-9.4-9.4-24.6-9.4-33.9 0s-9.4 24.6 0 33.9l72 72c5 5 11.8 7.5 18.8 7s13.4-4.1 17.5-9.8L379.3 179.2c7.8-10.7 5.4-25.7-5.3-33.5z';
 const ICON_WARNING = 'M256 0c14.7 0 28.2 8.1 35.2 21l216 400c6.7 12.4 6.4 27.4-.8 39.5S486.1 480 472 480L40 480c-14.1 0-27.2-7.4-34.4-19.5s-7.5-27.1-.8-39.5l216-400c7-12.9 20.5-21 35.2-21zm0 352a32 32 0 1 0 0 64 32 32 0 1 0 0-64zm0-192c-18.2 0-32.7 15.5-31.4 33.7l7.4 104c.9 12.5 11.4 22.3 23.9 22.3 12.6 0 23-9.7 23.9-22.3l7.4-104c1.3-18.2-13.1-33.7-31.4-33.7z';
 
-let lastStatus = { running: false, message: 'Demarrage...' };
+let lastStatus = { running: false, message: 'Démarrage...' };
 let lastCloudStatus = { connected: false, features: {} };
+let lastConfig = {};
+let lastIntegrationStatus = null;
 
 // Le sous-titre reflete en priorite la liaison cloud (c'est ce qui interesse le
 // streamer au quotidien) et retombe sur le statut du runtime local sinon.
 function renderHeaderStatus() {
   const connected = Boolean(lastCloudStatus.connected);
   const ok = connected && lastStatus.running;
-  statusMessage.textContent = connected ? 'Compagnon connecte' : lastStatus.message;
+  statusMessage.textContent = connected ? 'Compagnon connecté' : lastStatus.message;
   statusLine.className = `status-line ${ok ? 'ok' : 'error'}`;
   statusIcon.querySelector('path').setAttribute('d', ok ? ICON_CHECK : ICON_WARNING);
 }
@@ -40,37 +60,130 @@ function renderStatus(status) {
   renderHeaderStatus();
 }
 
-// Tant que le compagnon n'est pas connecte au tenant Klixa, on n'affiche que la
-// section de pairing : pas d'integrations a configurer sans savoir a quel tenant on
-// parle. Une fois connecte, les features tenant (ex. machine a fumee) decident quelles
-// sections supplementaires sont pertinentes pour ce tenant precis, et la section de
-// pairing n'a plus lieu d'etre (le bouton de deconnexion du header prend le relais).
+// Le panneau pairing/integrations se base sur la config PERSISTEE (CLOUD_WS_URL
+// present ou non), pas sur le statut WS live : sauver la config ou appairer Hue
+// redemarre tout le runtime (donc coupe puis rouvre la liaison cloud un instant), et
+// piloter la visibilite des sections sur ce flottement faisait sauter toute la page
+// en haut a chaque sauvegarde. Le statut live (cloud:status) reste reserve au texte
+// du header et aux features tenant (ex. machine a fumee).
+function renderPairingUi() {
+  const linked = Boolean(lastConfig.CLOUD_WS_URL);
+  pairingSection.hidden = linked;
+  integrations.hidden = !linked;
+  disconnectBtn.hidden = !linked;
+}
+
+function renderHueUi() {
+  const enabled = Boolean(lastConfig.HUE_ENABLED);
+  const paired = Boolean(lastConfig.HUE_APP_KEY_CONFIGURED);
+  huePairBtn.hidden = paired;
+  hueUnpairBtn.hidden = !paired;
+  hueBridgeIp.readOnly = paired;
+
+  const icon = hueStatus.querySelector('path');
+  const span = hueStatus.querySelector('span');
+  if (!enabled) {
+    hueStatus.className = 'integration-status status-line';
+    icon.setAttribute('d', '');
+    span.textContent = 'Désactivé';
+  } else {
+    hueStatus.className = `integration-status status-line ${paired ? 'ok' : 'error'}`;
+    icon.setAttribute('d', paired ? ICON_CHECK : ICON_WARNING);
+    span.textContent = paired ? 'Appairé' : 'Non appairé';
+  }
+}
+
+// Statut connecte/deconnecte en direct par integration (OBS, Streamer.bot, fumee),
+// pousse par polling depuis le process main (cf. onIntegrationStatus). Absence de
+// cle = integration desactivee dans la config ; lastIntegrationStatus null = pas
+// encore recu le premier statut depuis le dernier (re)demarrage du runtime.
+function renderIntegrationStatus() {
+  for (const [id, el] of integrationStatusEls) {
+    const entry = lastIntegrationStatus?.[id];
+    const span = el.querySelector('span');
+    const icon = el.querySelector('path');
+    if (!entry) {
+      el.className = 'integration-status status-line';
+      icon.setAttribute('d', '');
+      span.textContent = lastIntegrationStatus === null ? 'Vérification...' : 'Désactivé';
+    } else {
+      el.className = `integration-status status-line ${entry.ok ? 'ok' : 'error'}`;
+      icon.setAttribute('d', entry.ok ? ICON_CHECK : ICON_WARNING);
+      span.textContent = entry.ok ? 'Connecté' : (entry.error || 'Non connecté');
+    }
+  }
+  // Pas de pairing pour la fumee (juste une URL + un token que le streamer tape
+  // lui-meme) : on verrouille l'URL tant que le service repond, pour eviter une
+  // modification accidentelle pendant que tout marche ; desactiver l'integration
+  // (ou une vraie coupure de service) la rend de nouveau editable.
+  smokeServiceUrl.readOnly = Boolean(lastIntegrationStatus?.smoke?.ok);
+}
+
+function lockSecretField(field) {
+  field.input.value = SECRET_MASK;
+  field.input.readOnly = true;
+  field.input.classList.add('masked-secret');
+  field.input.dataset.masked = 'true';
+}
+
+function unlockSecretField(field) {
+  field.input.value = '';
+  field.input.readOnly = false;
+  field.input.classList.remove('masked-secret');
+  field.input.dataset.masked = 'false';
+}
+
+function renderSecretFields(config) {
+  for (const field of secretFields) {
+    if (config[field.configuredKey]) lockSecretField(field);
+    else unlockSecretField(field);
+  }
+}
+
+for (const field of secretFields) {
+  field.input.addEventListener('focus', () => {
+    if (field.input.dataset.masked === 'true') unlockSecretField(field);
+  });
+}
+
+function renderIntegrationStatusUpdate(status) {
+  lastIntegrationStatus = status || {};
+  renderIntegrationStatus();
+}
+
 function renderCloudStatus(cloudStatus) {
   lastCloudStatus = cloudStatus || { connected: false, features: {} };
-  const connected = Boolean(lastCloudStatus.connected);
-  pairingSection.hidden = connected;
-  integrations.hidden = !connected;
-  smokeSection.hidden = !(connected && lastCloudStatus.features?.smoke === true);
-  disconnectBtn.hidden = !connected;
+  smokeSection.hidden = !(lastCloudStatus.connected && lastCloudStatus.features?.smoke === true);
   renderHeaderStatus();
 }
 
 function setForm(config) {
+  lastConfig = config;
   for (const field of form.elements) {
     if (!field.name) continue;
     if (field.type === 'checkbox') field.checked = config[field.name] !== false && config[field.name] !== 'false';
     else if (config[field.name] !== undefined) field.value = config[field.name];
   }
   autoLaunch.checked = Boolean(config.AUTO_LAUNCH);
+  renderPairingUi();
+  renderHueUi();
+  renderSecretFields(config);
 }
 
-Promise.all([window.klixa.getConfig(), window.klixa.getStatus(), window.klixa.getCloudStatus()]).then(([config, status, cloudStatus]) => {
+Promise.all([
+  window.klixa.getConfig(),
+  window.klixa.getStatus(),
+  window.klixa.getCloudStatus(),
+  window.klixa.getIntegrationStatus()
+]).then(([config, status, cloudStatus, integrationStatus]) => {
   setForm(config);
   renderStatus(status);
   renderCloudStatus(cloudStatus);
+  renderIntegrationStatusUpdate(integrationStatus);
 });
 window.klixa.onStatus(renderStatus);
 window.klixa.onCloudStatus(renderCloudStatus);
+window.klixa.onIntegrationStatus(renderIntegrationStatusUpdate);
 
 autoLaunch.addEventListener('change', async () => {
   autoLaunch.checked = await window.klixa.setAutoLaunch(autoLaunch.checked);
@@ -90,7 +203,7 @@ function startPairCountdown(expiresAt) {
     const remaining = Math.max(0, expiresAt - Date.now());
     const minutes = Math.floor(remaining / 60000);
     const seconds = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
-    pairCodeTimer.textContent = remaining > 0 ? `Expire dans ${minutes}:${seconds}` : 'Code expire.';
+    pairCodeTimer.textContent = remaining > 0 ? `Expire dans ${minutes}:${seconds}` : 'Code expiré.';
     if (remaining <= 0) stopPairCountdown();
   };
   tick();
@@ -118,7 +231,7 @@ pairBtn.addEventListener('click', async () => {
 
   pairBtn.disabled = true;
   pairMessage.className = '';
-  pairMessage.textContent = 'Generation du code...';
+  pairMessage.textContent = 'Génération du code...';
   try {
     const { userCode, expiresInMs } = await window.klixa.pairingStart({});
     pairingActive = true;
@@ -159,6 +272,17 @@ huePairBtn.addEventListener('click', async () => {
   }
 });
 
+hueUnpairBtn.addEventListener('click', async () => {
+  hueUnpairBtn.disabled = true;
+  hueMessage.className = '';
+  hueMessage.textContent = '';
+  try {
+    setForm(await window.klixa.hueDisconnect());
+  } finally {
+    hueUnpairBtn.disabled = false;
+  }
+});
+
 disconnectBtn.addEventListener('click', async () => {
   disconnectBtn.disabled = true;
   try {
@@ -172,11 +296,11 @@ window.klixa.onPairingStatus(async (statusUpdate) => {
   resetPairingUi();
   if (statusUpdate.phase === 'claimed') {
     pairMessage.className = 'ok';
-    pairMessage.textContent = 'Compagnon lie, connexion en cours...';
+    pairMessage.textContent = 'Compagnon lié, connexion en cours...';
     setForm(await window.klixa.getConfig());
   } else if (statusUpdate.phase === 'expired') {
     pairMessage.className = 'error';
-    pairMessage.textContent = 'Code expire, relance le pairing.';
+    pairMessage.textContent = 'Code expiré, relance le pairing.';
   } else {
     pairMessage.className = 'error';
     pairMessage.textContent = statusUpdate.message || 'Erreur de pairing.';
@@ -192,10 +316,15 @@ form.addEventListener('submit', async (event) => {
   const data = Object.fromEntries(new FormData(form));
   for (const checkbox of form.querySelectorAll('input[name][type=checkbox]')) data[checkbox.name] = checkbox.checked;
   if (data.SB_PORT) data.SB_PORT = String(Number(data.SB_PORT));
+  // Un champ secret encore verrouille (masque) n'a pas ete modifie : ne pas envoyer
+  // le masque factice, sinon il ecraserait le vrai secret stocke.
+  for (const field of secretFields) {
+    if (field.input.dataset.masked === 'true') delete data[field.input.name];
+  }
   try {
     setForm(await window.klixa.saveConfig(data));
     message.className = 'ok';
-    message.textContent = 'Configuration enregistree.';
+    message.textContent = 'Configuration enregistrée.';
   } catch (error) {
     message.className = 'error';
     message.textContent = error.message;

@@ -39,6 +39,10 @@ let quitting = false;
 // sans que la liaison WS au serveur Klixa soit etablie). Pilote l'affichage des
 // sections d'integration dans le renderer (masquees tant que non connecte).
 let cloudStatus = { connected: false, features: {} };
+// Statut connecte/deconnecte par integration (OBS, Streamer.bot, fumee, Hue), pousse
+// par polling depuis runtime.js (cf. onIntegrationStatus). Cle = id d'integration,
+// absente si l'integration est desactivee dans la config.
+let integrationStatus = {};
 
 function trayImage() {
   return nativeImage.createFromPath(path.join(directory, 'icon.ico')).resize({ width: 16, height: 16 });
@@ -89,14 +93,23 @@ function updateCloudStatus(next) {
   window?.webContents.send('cloud:status', cloudStatus);
 }
 
+function updateIntegrationStatus(next) {
+  integrationStatus = next || {};
+  window?.webContents.send('integration:status', integrationStatus);
+}
+
 async function restartRuntime(values) {
   updateStatus({ running: false, message: 'Redemarrage...' });
   updateCloudStatus({ connected: false, features: {} });
+  // Pas de reset d'integrationStatus ici (contrairement a cloudStatus) : le prochain
+  // healthcheck (lance immediatement par startCompanion) l'ecrasera vite avec des
+  // valeurs a jour, et remettre a {} entre-temps ferait clignoter chaque section en
+  // « Desactive » a chaque sauvegarde de config, ce qu'on veut justement eviter.
   await runtime?.stop();
   try {
     runtime = startCompanion(
       createConfig({ ...process.env, ...values, NODE_ENV: 'production' }),
-      { onCloudStatus: updateCloudStatus }
+      { onCloudStatus: updateCloudStatus, onIntegrationStatus: updateIntegrationStatus }
     );
     updateStatus({ running: true, message: values.CLOUD_WS_URL ? 'Compagnon actif' : 'Actif en mode local' });
   } catch (error) {
@@ -181,6 +194,7 @@ function registerIpc() {
   ipcMain.handle('config:get', () => publicConfig(store.load()));
   ipcMain.handle('runtime:status', () => status);
   ipcMain.handle('cloud:status', () => cloudStatus);
+  ipcMain.handle('integration:status', () => integrationStatus);
   ipcMain.handle('auto-launch:set', (_event, enabled) => {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: LOGIN_ITEM_ARGS });
     return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
@@ -205,6 +219,13 @@ function registerIpc() {
     const { appKey } = await registerHueBridge(trimmedIp);
     const current = store.load();
     const next = { ...current, HUE_BRIDGE_IP: trimmedIp, HUE_APP_KEY: appKey };
+    store.save(next);
+    await restartRuntime(next);
+    return publicConfig(next);
+  });
+  ipcMain.handle('hue:disconnect', async () => {
+    const current = store.load();
+    const next = { ...current, HUE_APP_KEY: '' };
     store.save(next);
     await restartRuntime(next);
     return publicConfig(next);
