@@ -23,6 +23,16 @@ const integrationStatusEls = new Map(
   [...document.querySelectorAll('.integration-status[data-integration]')].map((el) => [el.dataset.integration, el])
 );
 
+// Champs non-secrets (URL/hôte/port) verrouillés tant que l'intégration correspondante
+// répond — même intention que le verrouillage des secrets ci-dessous : éviter une
+// modification accidentelle pendant que tout marche. Le toggle *_ENABLED reste toujours
+// éditable (le désactiver est l'échappatoire pour reconfigurer une intégration bloquée).
+const INTEGRATION_PLAIN_FIELDS = {
+  obs: [document.querySelector('input[name="OBS_WS_URL"]')],
+  streamerbot: [document.querySelector('input[name="SB_HOST"]'), document.querySelector('input[name="SB_PORT"]')],
+  smoke: [smokeServiceUrl]
+};
+
 // Champs secrets (mot de passe / token) : jamais reaffiches en clair. Une fois
 // configures cote store, le champ se verrouille sur un masque factice — cliquer
 // dessus (focus) le vide et le deverrouille pour saisir une nouvelle valeur. Tant
@@ -30,9 +40,9 @@ const integrationStatusEls = new Map(
 // plus bas), donc pas de "laisser vide pour conserver" a interpreter.
 const SECRET_MASK = '••••••••';
 const secretFields = [
-  { input: document.querySelector('#obsWsPassword'), configuredKey: 'OBS_WS_PASSWORD_CONFIGURED' },
-  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED' },
-  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED' }
+  { input: document.querySelector('#obsWsPassword'), configuredKey: 'OBS_WS_PASSWORD_CONFIGURED', statusId: 'obs' },
+  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED', statusId: 'streamerbot' },
+  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED', statusId: 'smoke' }
 ];
 
 // Chemins FontAwesome (circle-check / triangle-exclamation) inlines en SVG : la CSP
@@ -112,16 +122,27 @@ function renderIntegrationStatus() {
       span.textContent = entry.ok ? 'Connecté' : (entry.error || 'Non connecté');
     }
   }
-  // Pas de pairing pour la fumee (juste une URL + un token que le streamer tape
-  // lui-meme) : on verrouille l'URL tant que le service repond, pour eviter une
-  // modification accidentelle pendant que tout marche ; desactiver l'integration
-  // (ou une vraie coupure de service) la rend de nouveau editable.
-  smokeServiceUrl.readOnly = Boolean(lastIntegrationStatus?.smoke?.ok);
+
+  // Pas de pairing pour OBS/Streamer.bot/la fumee (juste des champs que le streamer
+  // tape lui-meme) : tant qu'une integration repond, TOUS ses champs (URL/hote/port +
+  // secret) se verrouillent, pour eviter une modification accidentelle pendant que tout
+  // marche ; desactiver l'integration (ou une vraie coupure de service) les rend de
+  // nouveau editables.
+  for (const [id, fields] of Object.entries(INTEGRATION_PLAIN_FIELDS)) {
+    const connected = Boolean(lastIntegrationStatus?.[id]?.ok);
+    for (const field of fields) field.readOnly = connected;
+  }
+  for (const field of secretFields) {
+    if (!field.statusId) continue;
+    // Le statut live est l'unique autorite : connecte = lecture seule,
+    // deconnecte = editable, meme si le masque factice est encore affiche.
+    const connected = Boolean(lastIntegrationStatus?.[field.statusId]?.ok);
+    field.input.readOnly = connected;
+  }
 }
 
 function lockSecretField(field) {
   field.input.value = SECRET_MASK;
-  field.input.readOnly = true;
   field.input.classList.add('masked-secret');
   field.input.dataset.masked = 'true';
 }
@@ -138,10 +159,15 @@ function renderSecretFields(config) {
     if (config[field.configuredKey]) lockSecretField(field);
     else unlockSecretField(field);
   }
+  // Le masque indique seulement qu'un secret existe. Le statut de connexion est
+  // l'unique source de verite pour savoir si le champ est editable.
+  renderIntegrationStatus();
 }
 
 for (const field of secretFields) {
   field.input.addEventListener('focus', () => {
+    const connected = Boolean(lastIntegrationStatus?.[field.statusId]?.ok);
+    if (connected) return;
     if (field.input.dataset.masked === 'true') unlockSecretField(field);
   });
 }
