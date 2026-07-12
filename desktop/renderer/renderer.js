@@ -13,6 +13,9 @@ const pairingSection = document.querySelector('#pairingSection');
 const integrations = document.querySelector('#integrations');
 const smokeSection = document.querySelector('#section-smoke');
 const disconnectBtn = document.querySelector('#disconnectBtn');
+const hueBridgeIp = document.querySelector('#hueBridgeIp');
+const huePairBtn = document.querySelector('#huePairBtn');
+const hueMessage = document.querySelector('#hueMessage');
 
 // Chemins FontAwesome (circle-check / triangle-exclamation) inlines en SVG : la CSP
 // interdit de charger une police/feuille de style externe, donc pas de webfont FA.
@@ -129,6 +132,30 @@ pairBtn.addEventListener('click', async () => {
     pairMessage.textContent = error.message;
   } finally {
     pairBtn.disabled = false;
+  }
+});
+
+// Appairage Hue : 100% local (le bridge est appelé par le process main, pas par le
+// cloud). Presser le bouton physique du bridge juste avant de cliquer.
+huePairBtn.addEventListener('click', async () => {
+  const bridgeIp = hueBridgeIp.value.trim();
+  if (!bridgeIp) {
+    hueMessage.className = 'error';
+    hueMessage.textContent = 'Renseigne l\'IP du bridge.';
+    return;
+  }
+  huePairBtn.disabled = true;
+  hueMessage.className = '';
+  hueMessage.textContent = 'Appairage en cours...';
+  try {
+    setForm(await window.klixa.hueRegister(bridgeIp));
+    hueMessage.className = 'ok';
+    hueMessage.textContent = 'Bridge appairé.';
+  } catch (error) {
+    hueMessage.className = 'error';
+    hueMessage.textContent = error.message;
+  } finally {
+    huePairBtn.disabled = false;
   }
 });
 

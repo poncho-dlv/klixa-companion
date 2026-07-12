@@ -39,10 +39,10 @@ return {
   },
   hue: {
     // Intégration Hue NATIVE : le compagnon parle directement au bridge sur le LAN.
+    // bridgeIp/appKey viennent EXCLUSIVEMENT d'ici (jamais du cloud, cf. hue.js).
     enabled: bool(env.HUE_ENABLED, true),
     bridgeIp: env.HUE_BRIDGE_IP || '',
     appKey: env.HUE_APP_KEY || '',
-    allowPayloadCredentials: bool(env.HUE_ALLOW_PAYLOAD_CREDENTIALS, false),
     maxLights: int(env.HUE_MAX_LIGHTS, 50),
     concurrency: int(env.HUE_CONCURRENCY, 5),
   },

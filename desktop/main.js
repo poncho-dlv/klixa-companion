@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { createConfig } from '../src/config.js';
 import { startCompanion } from '../src/runtime.js';
+import { registerHueBridge } from '../src/integrations/hue.js';
 import { ConfigStore } from './config-store.js';
 import electronUpdaterPkg from 'electron-updater';
 import { createLogger, setLogFile } from '../src/logger.js';
@@ -191,6 +192,19 @@ function registerIpc() {
       if (!submitted[key]) next[key] = current[key] || '';
     }
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');
+    store.save(next);
+    await restartRuntime(next);
+    return publicConfig(next);
+  });
+  // Appairage Hue déclenché LOCALEMENT (bouton dans l'UI desktop) : appelle le bridge
+  // directement (aucun aller-retour cloud), persiste bridgeIp/appKey via le ConfigStore
+  // chiffré existant. Klixa ne voit jamais l'IP ni la clé, même transitoirement.
+  ipcMain.handle('hue:register', async (_event, { bridgeIp } = {}) => {
+    const trimmedIp = String(bridgeIp || '').trim();
+    if (!trimmedIp) throw new Error('IP du bridge requise');
+    const { appKey } = await registerHueBridge(trimmedIp);
+    const current = store.load();
+    const next = { ...current, HUE_BRIDGE_IP: trimmedIp, HUE_APP_KEY: appKey };
     store.save(next);
     await restartRuntime(next);
     return publicConfig(next);

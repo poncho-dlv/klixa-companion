@@ -53,8 +53,10 @@
         </section>
         <section><h2>Philips Hue</h2>
           <label class="toggle"><input name="HUE_ENABLED" type="checkbox"> Activer Hue</label>
-          <label>IP du bridge<input name="HUE_BRIDGE_IP" placeholder="192.168.1.40"></label>
-          <label>Cle d'application<input name="HUE_APP_KEY" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
+          <label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label>
+          <label>Cle d'application<input name="HUE_APP_KEY" id="hueAppKey" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
+          <button type="button" id="huePairBtn">Appairer (presser le bouton du bridge avant)</button>
+          <p id="hueMessage" role="status"></p>
         </section>
       </div>
       <section>

@@ -73,9 +73,8 @@ docker compose up -d --build
 | `SMOKE_SERVICE_TOKEN` | Secret partagé avec le service GPIO. |
 | `SMOKE_DEFAULT_MS` / `SMOKE_MIN_MS` / `SMOKE_MAX_MS` | Bornes de durée d'impulsion. |
 | `HUE_ENABLED` | Active l'intégration Hue native (défaut true). |
-| `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). |
-| `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`). |
-| `HUE_ALLOW_PAYLOAD_CREDENTIALS` | Autorise explicitement les credentials Hue venant du cloud (défaut false). La cible reste limitée à une IP privée littérale. |
+| `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). En usage desktop, se configure et s'appaire depuis l'app Klixa Companion — jamais fourni par le cloud. |
+| `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`), obtenue par appairage. Jamais fournie par le cloud. |
 | `HUE_MAX_LIGHTS` / `HUE_CONCURRENCY` | Limite de lampes par commande (50) et de requêtes Hue simultanées (5). |
 | `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
 | `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |
