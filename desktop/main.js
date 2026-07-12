@@ -217,6 +217,13 @@ function registerIpc() {
   ipcMain.handle('pairing:cancel', () => {
     stopPairingPoll();
   });
+  ipcMain.handle('cloud:disconnect', async () => {
+    const current = store.load();
+    const next = { ...current, CLOUD_WS_URL: '', COMPANION_TOKEN: '' };
+    store.save(next);
+    await restartRuntime(next);
+    return publicConfig(next);
+  });
 }
 
 function configureUpdates(values) {

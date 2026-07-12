@@ -9,9 +9,22 @@
 </head>
 <body>
   <main>
-    <header><div class="logo">K</div><div><h1>Klixa Companion</h1><p id="status">Demarrage...</p></div></header>
+    <header>
+      <div class="logo">K</div>
+      <div class="header-text">
+        <h1>Klixa Companion</h1>
+        <p id="status" class="status-line">
+          <svg id="statusIcon" class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+          <span id="statusMessage">Demarrage...</span>
+        </p>
+      </div>
+      <button type="button" id="disconnectBtn" class="disconnect-btn" hidden>
+        <svg viewBox="0 0 512 512" aria-hidden="true"><path d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"/></svg>
+        Deconnecter
+      </button>
+    </header>
     <form id="config">
-      <section><h2>Connexion Klixa</h2>
+      <section id="pairingSection"><h2>Connexion Klixa</h2>
         <div class="pairing">
           <button type="button" id="pairBtn">Lier ce compagnon</button>
           <div id="pairCode" class="pair-code" hidden>
@@ -21,7 +34,6 @@
           </div>
           <p id="pairMessage" role="status"></p>
         </div>
-        <p id="connectedStatus" class="ok" hidden>Compagnon connecte. &#9989;</p>
       </section>
       <div id="integrations" hidden>
         <section><h2>OBS</h2>
@@ -44,9 +56,12 @@
           <label>IP du bridge<input name="HUE_BRIDGE_IP" placeholder="192.168.1.40"></label>
           <label>Cle d'application<input name="HUE_APP_KEY" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
         </section>
-        <div id="message" role="status"></div><button type="submit" id="saveBtn">Enregistrer et redemarrer</button>
       </div>
-      <section><label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label></section>
+      <section>
+        <label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label>
+        <div id="message" role="status"></div>
+        <button type="submit" id="saveBtn">Enregistrer et redemarrer</button>
+      </section>
     </form>
   </main>
   <script src="renderer.js"></script>
