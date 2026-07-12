@@ -24,6 +24,16 @@ export function createIntegrationRegistry({ healthcheckTimeoutMs = 5000 } = {}) 
     log.info(`Intégration enregistrée : ${integration.id}`, Object.keys(integration.commands || {}));
   }
 
+  async function unregister(id) {
+    const integration = integrations.get(id);
+    if (!integration) return;
+    integrations.delete(id);
+    for (const [name, entry] of commands) {
+      if (entry.integrationId === id) commands.delete(name);
+    }
+    if (typeof integration.stop === 'function') await integration.stop();
+  }
+
   async function dispatch(name, payload) {
     const entry = commands.get(name);
     if (!entry) {
@@ -72,5 +82,5 @@ export function createIntegrationRegistry({ healthcheckTimeoutMs = 5000 } = {}) 
     }
   }
 
-  return { register, dispatch, listCommands, healthcheck, stop };
+  return { register, unregister, dispatch, listCommands, healthcheck, stop };
 }

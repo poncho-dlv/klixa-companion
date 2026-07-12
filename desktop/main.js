@@ -182,6 +182,25 @@ async function pollPairingOnce() {
 
 function publicConfig(values) {
   const result = { ...values };
+  try {
+    const obsUrl = new URL(result.OBS_WS_URL || 'ws://127.0.0.1:4455');
+    result.OBS_WS_HOST = obsUrl.hostname;
+    result.OBS_WS_PORT = obsUrl.port || (obsUrl.protocol === 'wss:' ? '443' : '4455');
+  } catch {
+    result.OBS_WS_HOST = '127.0.0.1';
+    result.OBS_WS_PORT = '4455';
+  }
+  delete result.OBS_WS_URL;
+  try {
+    const smokeUrl = new URL(result.SMOKE_SERVICE_URL);
+    result.SMOKE_SERVICE_HOST = smokeUrl.hostname;
+    result.SMOKE_SERVICE_PORT = smokeUrl.port || (smokeUrl.protocol === 'https:' ? '443' : '80');
+  } catch {
+    result.SMOKE_SERVICE_HOST = '';
+    result.SMOKE_SERVICE_PORT = '8787';
+  }
+  delete result.SMOKE_SERVICE_URL;
+  result.HUE_BRIDGE_PORT = String(result.HUE_BRIDGE_PORT || 443);
   for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
     result[`${key}_CONFIGURED`] = Boolean(result[key]);
     delete result[key];
@@ -199,35 +218,61 @@ function registerIpc() {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: LOGIN_ITEM_ARGS });
     return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
   });
-  ipcMain.handle('config:save', async (_event, submitted) => {
+  ipcMain.handle('config:save', async (_event, submitted, { integrationId } = {}) => {
     const current = store.load();
-    const next = { ...current, ...submitted };
+    const obsHost = String(submitted.OBS_WS_HOST || '').trim();
+    const obsPort = Number.parseInt(submitted.OBS_WS_PORT, 10);
+    if (!obsHost) throw new Error('IP ou hôte OBS requis');
+    if (!Number.isInteger(obsPort) || obsPort < 1 || obsPort > 65535) throw new Error('Port OBS invalide');
+    const obsUrl = new URL(`ws://${obsHost.includes(':') && !obsHost.startsWith('[') ? `[${obsHost}]` : obsHost}:${obsPort}`);
+    const normalizedSubmitted = { ...submitted, OBS_WS_URL: obsUrl.href.replace(/\/$/, '') };
+    delete normalizedSubmitted.OBS_WS_HOST;
+    delete normalizedSubmitted.OBS_WS_PORT;
+    const smokeHost = String(submitted.SMOKE_SERVICE_HOST || '').trim();
+    const smokePort = Number.parseInt(submitted.SMOKE_SERVICE_PORT || '8787', 10);
+    if (smokeHost && (!Number.isInteger(smokePort) || smokePort < 1 || smokePort > 65535)) throw new Error('Port machine à fumée invalide');
+    normalizedSubmitted.SMOKE_SERVICE_URL = smokeHost
+      ? new URL(`http://${smokeHost.includes(':') && !smokeHost.startsWith('[') ? `[${smokeHost}]` : smokeHost}:${smokePort}`).href.replace(/\/$/, '')
+      : '';
+    delete normalizedSubmitted.SMOKE_SERVICE_HOST;
+    delete normalizedSubmitted.SMOKE_SERVICE_PORT;
+    const huePort = Number.parseInt(submitted.HUE_BRIDGE_PORT || '443', 10);
+    if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error('Port Hue invalide');
+    normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
+    const next = { ...current, ...normalizedSubmitted };
     for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
-      if (!submitted[key]) next[key] = current[key] || '';
+      if (!normalizedSubmitted[key]) next[key] = current[key] || '';
     }
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');
     store.save(next);
-    await restartRuntime(next);
+    const nextRuntimeConfig = createConfig({ ...process.env, ...next, NODE_ENV: 'production' });
+    if (['obs', 'streamerbot', 'smoke'].includes(integrationId) && runtime?.reconfigureIntegration) {
+      await runtime.reconfigureIntegration(integrationId, nextRuntimeConfig);
+    } else {
+      await restartRuntime(next);
+    }
     return publicConfig(next);
   });
   // Appairage Hue déclenché LOCALEMENT (bouton dans l'UI desktop) : appelle le bridge
   // directement (aucun aller-retour cloud), persiste bridgeIp/appKey via le ConfigStore
   // chiffré existant. Klixa ne voit jamais l'IP ni la clé, même transitoirement.
-  ipcMain.handle('hue:register', async (_event, { bridgeIp } = {}) => {
+  ipcMain.handle('hue:register', async (_event, { bridgeIp, bridgePort } = {}) => {
     const trimmedIp = String(bridgeIp || '').trim();
     if (!trimmedIp) throw new Error('IP du bridge requise');
-    const { appKey } = await registerHueBridge(trimmedIp);
+    const port = Number.parseInt(bridgePort || '443', 10);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port Hue invalide');
+    const { appKey } = await registerHueBridge(trimmedIp, port);
     const current = store.load();
-    const next = { ...current, HUE_BRIDGE_IP: trimmedIp, HUE_APP_KEY: appKey };
+    const next = { ...current, HUE_BRIDGE_IP: trimmedIp, HUE_BRIDGE_PORT: String(port), HUE_APP_KEY: appKey };
     store.save(next);
-    await restartRuntime(next);
+    await runtime.reconfigureIntegration('hue', createConfig({ ...process.env, ...next, NODE_ENV: 'production' }));
     return publicConfig(next);
   });
   ipcMain.handle('hue:disconnect', async () => {
     const current = store.load();
     const next = { ...current, HUE_APP_KEY: '' };
     store.save(next);
-    await restartRuntime(next);
+    await runtime.reconfigureIntegration('hue', createConfig({ ...process.env, ...next, NODE_ENV: 'production' }));
     return publicConfig(next);
   });
   ipcMain.handle('pairing:start', async (_event, { baseUrl } = {}) => {

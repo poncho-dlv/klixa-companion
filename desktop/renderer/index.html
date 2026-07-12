@@ -44,8 +44,9 @@
             </p>
           </div>
           <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
-          <label>Adresse WebSocket<input name="OBS_WS_URL" placeholder="ws://127.0.0.1:4455"></label>
+          <div class="row"><label>IP ou hôte<input name="OBS_WS_HOST" placeholder="127.0.0.1"></label><label>Port<input name="OBS_WS_PORT" type="number" min="1" max="65535" placeholder="4455"></label></div>
           <label>Mot de passe<input name="OBS_WS_PASSWORD" id="obsWsPassword" type="password" autocomplete="new-password"></label>
+          <button type="button" id="obsConnectionBtn">Connecter</button>
         </section>
         <section>
           <div class="section-head"><h2>Streamer.bot</h2>
@@ -57,6 +58,7 @@
           <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
           <div class="row"><label>Hôte<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
           <label>Mot de passe<input name="SB_PASSWORD" id="sbPassword" type="password" autocomplete="new-password"></label>
+          <button type="button" id="streamerbotConnectionBtn">Connecter</button>
         </section>
         <section id="section-smoke" hidden>
           <div class="section-head"><h2>Machine à fumée</h2>
@@ -66,8 +68,9 @@
             </p>
           </div>
           <label class="toggle"><input name="SMOKE_ENABLED" type="checkbox"> Activer la machine à fumée</label>
-          <label>URL du service<input name="SMOKE_SERVICE_URL" id="smokeServiceUrl" placeholder="http://192.168.1.50:8787"></label>
+          <div class="row"><label>IP ou hôte<input name="SMOKE_SERVICE_HOST" id="smokeServiceHost" placeholder="192.168.1.50"></label><label>Port<input name="SMOKE_SERVICE_PORT" type="number" min="1" max="65535" placeholder="8787"></label></div>
           <label>Token du service<input name="SMOKE_SERVICE_TOKEN" id="smokeServiceToken" type="password" autocomplete="new-password"></label>
+          <button type="button" id="smokeConnectionBtn">Connecter</button>
         </section>
         <section>
           <div class="section-head"><h2>Philips Hue</h2>
@@ -77,7 +80,7 @@
             </p>
           </div>
           <label class="toggle"><input name="HUE_ENABLED" type="checkbox"> Activer Hue</label>
-          <label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label>
+          <div class="row"><label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label>Port<input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
           <button type="button" id="huePairBtn">Appairer (presser le bouton du bridge avant)</button>
           <button type="button" id="hueUnpairBtn" class="disconnect-btn" hidden>Déconnecter</button>
           <p id="hueMessage" role="status"></p>

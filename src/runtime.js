@@ -1,6 +1,6 @@
 import { createLogger } from './logger.js';
 import { createIntegrationRegistry } from './integration-registry.js';
-import { registerIntegrations } from './integrations/index.js';
+import { registerIntegration, registerIntegrations } from './integrations/index.js';
 import { createCloudLink } from './cloud-link.js';
 import { createLocalServer } from './local-server.js';
 
@@ -37,6 +37,11 @@ export function startCompanion(config, { onCloudStatus, onIntegrationStatus } = 
   let stopping;
   return {
     commands: registry.listCommands(),
+    async reconfigureIntegration(id, nextConfig) {
+      await registry.unregister(id);
+      registerIntegration(registry, id, nextConfig, { emitEvent: (event) => cloudLink.sendEvent(event) });
+      if (onIntegrationStatus) onIntegrationStatus(await registry.healthcheck());
+    },
     stop() {
       if (healthTimer) clearInterval(healthTimer);
       stopping ||= Promise.allSettled([cloudLink.stop(), localServer.stop(), registry.stop()]);

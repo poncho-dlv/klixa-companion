@@ -14,11 +14,18 @@ const integrations = document.querySelector('#integrations');
 const smokeSection = document.querySelector('#section-smoke');
 const disconnectBtn = document.querySelector('#disconnectBtn');
 const hueBridgeIp = document.querySelector('#hueBridgeIp');
+const hueBridgePort = document.querySelector('#hueBridgePort');
 const huePairBtn = document.querySelector('#huePairBtn');
 const hueMessage = document.querySelector('#hueMessage');
 const hueStatus = document.querySelector('#hueStatus');
 const hueUnpairBtn = document.querySelector('#hueUnpairBtn');
-const smokeServiceUrl = document.querySelector('#smokeServiceUrl');
+const smokeServiceHost = document.querySelector('#smokeServiceHost');
+const obsEnabled = document.querySelector('input[name="OBS_ENABLED"]');
+const obsConnectionBtn = document.querySelector('#obsConnectionBtn');
+const streamerbotEnabled = document.querySelector('input[name="SB_ENABLED"]');
+const streamerbotConnectionBtn = document.querySelector('#streamerbotConnectionBtn');
+const smokeEnabled = document.querySelector('input[name="SMOKE_ENABLED"]');
+const smokeConnectionBtn = document.querySelector('#smokeConnectionBtn');
 const integrationStatusEls = new Map(
   [...document.querySelectorAll('.integration-status[data-integration]')].map((el) => [el.dataset.integration, el])
 );
@@ -28,9 +35,14 @@ const integrationStatusEls = new Map(
 // modification accidentelle pendant que tout marche. Le toggle *_ENABLED reste toujours
 // éditable (le désactiver est l'échappatoire pour reconfigurer une intégration bloquée).
 const INTEGRATION_PLAIN_FIELDS = {
-  obs: [document.querySelector('input[name="OBS_WS_URL"]')],
+  obs: [document.querySelector('input[name="OBS_WS_HOST"]'), document.querySelector('input[name="OBS_WS_PORT"]')],
   streamerbot: [document.querySelector('input[name="SB_HOST"]'), document.querySelector('input[name="SB_PORT"]')],
-  smoke: [smokeServiceUrl]
+  smoke: [smokeServiceHost, document.querySelector('input[name="SMOKE_SERVICE_PORT"]')]
+};
+const INTEGRATION_ENABLED_KEYS = {
+  obs: 'OBS_ENABLED',
+  streamerbot: 'SB_ENABLED',
+  smoke: 'SMOKE_ENABLED'
 };
 
 // Champs secrets (mot de passe / token) : jamais reaffiches en clair. Une fois
@@ -54,6 +66,7 @@ let lastStatus = { running: false, message: 'Démarrage...' };
 let lastCloudStatus = { connected: false, features: {} };
 let lastConfig = {};
 let lastIntegrationStatus = null;
+const pendingConnections = new Set();
 
 // Le sous-titre reflete en priorite la liaison cloud (c'est ce qui interesse le
 // streamer au quotidien) et retombe sur le statut du runtime local sinon.
@@ -84,11 +97,13 @@ function renderPairingUi() {
 }
 
 function renderHueUi() {
-  const enabled = Boolean(lastConfig.HUE_ENABLED);
+  const enabled = lastConfig.HUE_ENABLED !== false && lastConfig.HUE_ENABLED !== 'false';
   const paired = Boolean(lastConfig.HUE_APP_KEY_CONFIGURED);
+  const connected = Boolean(lastIntegrationStatus?.hue?.ok);
   huePairBtn.hidden = paired;
   hueUnpairBtn.hidden = !paired;
-  hueBridgeIp.readOnly = paired;
+  hueBridgeIp.readOnly = connected;
+  hueBridgePort.readOnly = connected;
 
   const icon = hueStatus.querySelector('path');
   const span = hueStatus.querySelector('span');
@@ -97,9 +112,9 @@ function renderHueUi() {
     icon.setAttribute('d', '');
     span.textContent = 'Désactivé';
   } else {
-    hueStatus.className = `integration-status status-line ${paired ? 'ok' : 'error'}`;
-    icon.setAttribute('d', paired ? ICON_CHECK : ICON_WARNING);
-    span.textContent = paired ? 'Appairé' : 'Non appairé';
+    hueStatus.className = `integration-status status-line ${connected ? 'ok' : 'error'}`;
+    icon.setAttribute('d', connected ? ICON_CHECK : ICON_WARNING);
+    span.textContent = connected ? 'Connecté' : 'Non connecté';
   }
 }
 
@@ -115,7 +130,11 @@ function renderIntegrationStatus() {
     if (!entry) {
       el.className = 'integration-status status-line';
       icon.setAttribute('d', '');
-      span.textContent = lastIntegrationStatus === null ? 'Vérification...' : 'Désactivé';
+      const enabledKey = INTEGRATION_ENABLED_KEYS[id];
+      const explicitlyDisabled = lastConfig[enabledKey] === false || lastConfig[enabledKey] === 'false';
+      span.textContent = lastIntegrationStatus === null
+        ? 'Vérification...'
+        : (explicitlyDisabled ? 'Désactivé' : 'Non connecté');
     } else {
       el.className = `integration-status status-line ${entry.ok ? 'ok' : 'error'}`;
       icon.setAttribute('d', entry.ok ? ICON_CHECK : ICON_WARNING);
@@ -139,6 +158,20 @@ function renderIntegrationStatus() {
     const connected = Boolean(lastIntegrationStatus?.[field.statusId]?.ok);
     field.input.readOnly = connected;
   }
+
+  renderConnectionButton('obs', obsConnectionBtn);
+  renderConnectionButton('streamerbot', streamerbotConnectionBtn);
+  renderConnectionButton('smoke', smokeConnectionBtn);
+}
+
+function renderConnectionButton(id, button) {
+  const connected = Boolean(lastIntegrationStatus?.[id]?.ok);
+  const pending = pendingConnections.has(id);
+  button.textContent = pending
+    ? (connected ? 'Déconnexion en cours…' : 'Connexion en cours…')
+    : (connected ? 'Déconnecter' : 'Connecter');
+  button.disabled = pending;
+  button.classList.toggle('disconnect-btn', connected);
 }
 
 function lockSecretField(field) {
@@ -174,7 +207,20 @@ for (const field of secretFields) {
 
 function renderIntegrationStatusUpdate(status) {
   lastIntegrationStatus = status || {};
+  for (const [id, enabledInput] of [
+    ['obs', obsEnabled],
+    ['streamerbot', streamerbotEnabled],
+    ['smoke', smokeEnabled]
+  ]) {
+    if (pendingConnections.has(id)) {
+      const disconnecting = !enabledInput.checked;
+      if ((disconnecting && !lastIntegrationStatus[id]) || (!disconnecting && lastIntegrationStatus[id]?.ok)) {
+        pendingConnections.delete(id);
+      }
+    }
+  }
   renderIntegrationStatus();
+  renderHueUi();
 }
 
 function renderCloudStatus(cloudStatus) {
@@ -210,6 +256,28 @@ Promise.all([
 window.klixa.onStatus(renderStatus);
 window.klixa.onCloudStatus(renderCloudStatus);
 window.klixa.onIntegrationStatus(renderIntegrationStatusUpdate);
+
+function bindConnectionButton(id, enabledInput, button) {
+  button.addEventListener('click', () => {
+    const connected = Boolean(lastIntegrationStatus?.[id]?.ok);
+    enabledInput.checked = !connected;
+    if (!form.reportValidity()) {
+      enabledInput.checked = connected;
+      return;
+    }
+    pendingConnections.add(id);
+    renderIntegrationStatus();
+    form.requestSubmit();
+    setTimeout(() => {
+      if (!pendingConnections.delete(id)) return;
+      renderIntegrationStatus();
+    }, 12000);
+  });
+}
+
+bindConnectionButton('obs', obsEnabled, obsConnectionBtn);
+bindConnectionButton('streamerbot', streamerbotEnabled, streamerbotConnectionBtn);
+bindConnectionButton('smoke', smokeEnabled, smokeConnectionBtn);
 
 autoLaunch.addEventListener('change', async () => {
   autoLaunch.checked = await window.klixa.setAutoLaunch(autoLaunch.checked);
@@ -278,16 +346,18 @@ pairBtn.addEventListener('click', async () => {
 // cloud). Presser le bouton physique du bridge juste avant de cliquer.
 huePairBtn.addEventListener('click', async () => {
   const bridgeIp = hueBridgeIp.value.trim();
+  const bridgePort = Number.parseInt(hueBridgePort.value || '443', 10);
   if (!bridgeIp) {
     hueMessage.className = 'error';
     hueMessage.textContent = 'Renseigne l\'IP du bridge.';
     return;
   }
   huePairBtn.disabled = true;
+  huePairBtn.textContent = 'Connexion en cours…';
   hueMessage.className = '';
   hueMessage.textContent = 'Appairage en cours...';
   try {
-    setForm(await window.klixa.hueRegister(bridgeIp));
+    setForm(await window.klixa.hueRegister(bridgeIp, bridgePort));
     hueMessage.className = 'ok';
     hueMessage.textContent = 'Bridge appairé.';
   } catch (error) {
@@ -295,6 +365,7 @@ huePairBtn.addEventListener('click', async () => {
     hueMessage.textContent = error.message;
   } finally {
     huePairBtn.disabled = false;
+    huePairBtn.textContent = 'Appairer (presser le bouton du bridge avant)';
   }
 });
 
@@ -342,16 +413,24 @@ form.addEventListener('submit', async (event) => {
   const data = Object.fromEntries(new FormData(form));
   for (const checkbox of form.querySelectorAll('input[name][type=checkbox]')) data[checkbox.name] = checkbox.checked;
   if (data.SB_PORT) data.SB_PORT = String(Number(data.SB_PORT));
+  if (data.OBS_WS_PORT) data.OBS_WS_PORT = String(Number(data.OBS_WS_PORT));
+  if (data.SMOKE_SERVICE_PORT) data.SMOKE_SERVICE_PORT = String(Number(data.SMOKE_SERVICE_PORT));
   // Un champ secret encore verrouille (masque) n'a pas ete modifie : ne pas envoyer
   // le masque factice, sinon il ecraserait le vrai secret stocke.
   for (const field of secretFields) {
     if (field.input.dataset.masked === 'true') delete data[field.input.name];
   }
+  const integrationId = pendingConnections.size === 1 ? [...pendingConnections][0] : undefined;
   try {
-    setForm(await window.klixa.saveConfig(data));
+    setForm(await window.klixa.saveConfig(data, integrationId));
+    if (!obsEnabled.checked) pendingConnections.delete('obs');
+    if (!streamerbotEnabled.checked) pendingConnections.delete('streamerbot');
+    if (!smokeEnabled.checked) pendingConnections.delete('smoke');
     message.className = 'ok';
     message.textContent = 'Configuration enregistrée.';
   } catch (error) {
+    pendingConnections.clear();
+    renderIntegrationStatus();
     message.className = 'error';
     message.textContent = error.message;
   } finally {

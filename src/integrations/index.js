@@ -12,7 +12,11 @@ const log = createLogger('integrations');
  * ajouter ici les futures intégrations locales (Streamer.bot, etc.).
  */
 export function registerIntegrations(registry, config, { emitEvent } = {}) {
-  if (config.smoke.enabled) {
+  for (const id of ['smoke', 'hue', 'obs', 'streamerbot']) registerIntegration(registry, id, config, { emitEvent });
+}
+
+export function registerIntegration(registry, id, config, { emitEvent } = {}) {
+  if (id === 'smoke' && config.smoke.enabled) {
     try {
       registry.register(createSmokeIntegration(config.smoke));
     } catch (err) {
@@ -20,7 +24,7 @@ export function registerIntegrations(registry, config, { emitEvent } = {}) {
     }
   }
 
-  if (config.hue.enabled) {
+  if (id === 'hue' && config.hue.enabled) {
     try {
       registry.register(createHueIntegration(config.hue));
     } catch (err) {
@@ -28,7 +32,7 @@ export function registerIntegrations(registry, config, { emitEvent } = {}) {
     }
   }
 
-  if (config.obs.enabled) {
+  if (id === 'obs' && config.obs.enabled) {
     try {
       registry.register(createObsIntegration(config.obs, { emitEvent }));
     } catch (err) {
@@ -36,7 +40,7 @@ export function registerIntegrations(registry, config, { emitEvent } = {}) {
     }
   }
 
-  if (config.streamerbot.enabled) {
+  if (id === 'streamerbot' && config.streamerbot.enabled) {
     try {
       registry.register(createStreamerbotIntegration(config.streamerbot, { emitEvent }));
     } catch (err) {

@@ -2,8 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('klixa', {
   getConfig: () => ipcRenderer.invoke('config:get'),
-  saveConfig: (config) => ipcRenderer.invoke('config:save', config),
-  hueRegister: (bridgeIp) => ipcRenderer.invoke('hue:register', { bridgeIp }),
+  saveConfig: (config, integrationId) => ipcRenderer.invoke('config:save', config, { integrationId }),
+  hueRegister: (bridgeIp, bridgePort) => ipcRenderer.invoke('hue:register', { bridgeIp, bridgePort }),
   hueDisconnect: () => ipcRenderer.invoke('hue:disconnect'),
   getStatus: () => ipcRenderer.invoke('runtime:status'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('auto-launch:set', enabled),

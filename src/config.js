@@ -42,6 +42,7 @@ return {
     // bridgeIp/appKey viennent EXCLUSIVEMENT d'ici (jamais du cloud, cf. hue.js).
     enabled: bool(env.HUE_ENABLED, true),
     bridgeIp: env.HUE_BRIDGE_IP || '',
+    bridgePort: int(env.HUE_BRIDGE_PORT, 443),
     appKey: env.HUE_APP_KEY || '',
     maxLights: int(env.HUE_MAX_LIGHTS, 50),
     concurrency: int(env.HUE_CONCURRENCY, 5),
