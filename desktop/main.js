@@ -34,6 +34,10 @@ let runtime;
 let store;
 let status = { running: false, message: 'Demarrage...' };
 let quitting = false;
+// Statut du handshake cloud (distinct de `status` : le runtime local peut demarrer
+// sans que la liaison WS au serveur Klixa soit etablie). Pilote l'affichage des
+// sections d'integration dans le renderer (masquees tant que non connecte).
+let cloudStatus = { connected: false, features: {} };
 
 function trayImage() {
   return nativeImage.createFromPath(path.join(directory, 'icon.ico')).resize({ width: 16, height: 16 });
@@ -79,11 +83,20 @@ function updateStatus(next) {
   tray?.setToolTip(`Klixa Companion - ${status.message}`);
 }
 
+function updateCloudStatus(next) {
+  cloudStatus = { connected: false, features: {}, ...next };
+  window?.webContents.send('cloud:status', cloudStatus);
+}
+
 async function restartRuntime(values) {
   updateStatus({ running: false, message: 'Redemarrage...' });
+  updateCloudStatus({ connected: false, features: {} });
   await runtime?.stop();
   try {
-    runtime = startCompanion(createConfig({ ...process.env, ...values, NODE_ENV: 'production' }));
+    runtime = startCompanion(
+      createConfig({ ...process.env, ...values, NODE_ENV: 'production' }),
+      { onCloudStatus: updateCloudStatus }
+    );
     updateStatus({ running: true, message: values.CLOUD_WS_URL ? 'Compagnon actif' : 'Actif en mode local' });
   } catch (error) {
     log.error('Echec du demarrage du runtime', error.stack || error.message);
@@ -166,6 +179,7 @@ function publicConfig(values) {
 function registerIpc() {
   ipcMain.handle('config:get', () => publicConfig(store.load()));
   ipcMain.handle('runtime:status', () => status);
+  ipcMain.handle('cloud:status', () => cloudStatus);
   ipcMain.handle('auto-launch:set', (_event, enabled) => {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: LOGIN_ITEM_ARGS });
     return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;

@@ -7,10 +7,26 @@ const pairCode = document.querySelector('#pairCode');
 const pairCodeValue = document.querySelector('#pairCodeValue');
 const pairCodeTimer = document.querySelector('#pairCodeTimer');
 const pairMessage = document.querySelector('#pairMessage');
+const pairingBox = document.querySelector('.pairing');
+const connectedStatus = document.querySelector('#connectedStatus');
+const integrations = document.querySelector('#integrations');
+const smokeSection = document.querySelector('#section-smoke');
 
 function renderStatus(status) {
   statusText.textContent = status.message;
   statusText.className = status.running ? 'ok' : 'error';
+}
+
+// Tant que le compagnon n'est pas connecte au tenant Klixa, on n'affiche que la
+// section de pairing : pas d'integrations a configurer sans savoir a quel tenant on
+// parle. Une fois connecte, les features tenant (ex. machine a fumee) decident quelles
+// sections supplementaires sont pertinentes pour ce tenant precis.
+function renderCloudStatus(cloudStatus) {
+  const connected = Boolean(cloudStatus?.connected);
+  pairingBox.hidden = connected;
+  connectedStatus.hidden = !connected;
+  integrations.hidden = !connected;
+  smokeSection.hidden = !(connected && cloudStatus?.features?.smoke === true);
 }
 
 function setForm(config) {
@@ -22,11 +38,13 @@ function setForm(config) {
   autoLaunch.checked = Boolean(config.AUTO_LAUNCH);
 }
 
-Promise.all([window.klixa.getConfig(), window.klixa.getStatus()]).then(([config, status]) => {
+Promise.all([window.klixa.getConfig(), window.klixa.getStatus(), window.klixa.getCloudStatus()]).then(([config, status, cloudStatus]) => {
   setForm(config);
   renderStatus(status);
+  renderCloudStatus(cloudStatus);
 });
 window.klixa.onStatus(renderStatus);
+window.klixa.onCloudStatus(renderCloudStatus);
 
 autoLaunch.addEventListener('change', async () => {
   autoLaunch.checked = await window.klixa.setAutoLaunch(autoLaunch.checked);
@@ -76,8 +94,7 @@ pairBtn.addEventListener('click', async () => {
   pairMessage.className = '';
   pairMessage.textContent = 'Generation du code...';
   try {
-    const baseUrl = form.elements.CLOUD_PAIR_URL.value.trim() || undefined;
-    const { userCode, expiresInMs } = await window.klixa.pairingStart({ baseUrl });
+    const { userCode, expiresInMs } = await window.klixa.pairingStart({});
     pairingActive = true;
     pairCodeValue.textContent = userCode;
     pairCode.hidden = false;
@@ -96,7 +113,7 @@ window.klixa.onPairingStatus(async (statusUpdate) => {
   resetPairingUi();
   if (statusUpdate.phase === 'claimed') {
     pairMessage.className = 'ok';
-    pairMessage.textContent = 'Compagnon lie et connecte.';
+    pairMessage.textContent = 'Compagnon lie, connexion en cours...';
     setForm(await window.klixa.getConfig());
   } else if (statusUpdate.phase === 'expired') {
     pairMessage.className = 'error';
@@ -109,7 +126,7 @@ window.klixa.onPairingStatus(async (statusUpdate) => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = form.querySelector('button');
+  const button = document.querySelector('#saveBtn');
   button.disabled = true;
   message.className = '';
   message.textContent = 'Enregistrement...';

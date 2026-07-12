@@ -21,35 +21,32 @@
           </div>
           <p id="pairMessage" role="status"></p>
         </div>
-        <details>
-          <summary>Configuration manuelle / autre instance</summary>
-          <label>Adresse du cloud<input name="CLOUD_WS_URL" type="url" placeholder="wss://app.klixa.live/companion/ws"></label>
-          <label>Token du compagnon<input name="COMPANION_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver le token"></label>
-          <label>URL de l'instance (pour le pairing)<input name="CLOUD_PAIR_URL" type="url" placeholder="https://klixa.live"></label>
-        </details>
+        <p id="connectedStatus" class="ok" hidden>Compagnon connecte. &#9989;</p>
       </section>
-      <section><h2>OBS</h2>
-        <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
-        <label>Adresse WebSocket<input name="OBS_WS_URL" placeholder="ws://127.0.0.1:4455"></label>
-        <label>Mot de passe<input name="OBS_WS_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
-      </section>
-      <section><h2>Streamer.bot</h2>
-        <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
-        <div class="row"><label>Hote<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
-        <label>Mot de passe<input name="SB_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
-      </section>
-      <section><h2>Machine a fumee</h2>
-        <label class="toggle"><input name="SMOKE_ENABLED" type="checkbox"> Activer la machine a fumee</label>
-        <label>URL du service<input name="SMOKE_SERVICE_URL" placeholder="http://192.168.1.50:8787"></label>
-        <label>Token du service<input name="SMOKE_SERVICE_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
-      </section>
-      <section><h2>Philips Hue</h2>
-        <label class="toggle"><input name="HUE_ENABLED" type="checkbox"> Activer Hue</label>
-        <label>IP du bridge<input name="HUE_BRIDGE_IP" placeholder="192.168.1.40"></label>
-        <label>Cle d'application<input name="HUE_APP_KEY" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
-      </section>
+      <div id="integrations" hidden>
+        <section><h2>OBS</h2>
+          <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
+          <label>Adresse WebSocket<input name="OBS_WS_URL" placeholder="ws://127.0.0.1:4455"></label>
+          <label>Mot de passe<input name="OBS_WS_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
+        </section>
+        <section><h2>Streamer.bot</h2>
+          <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
+          <div class="row"><label>Hote<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
+          <label>Mot de passe<input name="SB_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
+        </section>
+        <section id="section-smoke" hidden><h2>Machine a fumee</h2>
+          <label class="toggle"><input name="SMOKE_ENABLED" type="checkbox"> Activer la machine a fumee</label>
+          <label>URL du service<input name="SMOKE_SERVICE_URL" placeholder="http://192.168.1.50:8787"></label>
+          <label>Token du service<input name="SMOKE_SERVICE_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
+        </section>
+        <section><h2>Philips Hue</h2>
+          <label class="toggle"><input name="HUE_ENABLED" type="checkbox"> Activer Hue</label>
+          <label>IP du bridge<input name="HUE_BRIDGE_IP" placeholder="192.168.1.40"></label>
+          <label>Cle d'application<input name="HUE_APP_KEY" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
+        </section>
+        <div id="message" role="status"></div><button type="submit" id="saveBtn">Enregistrer et redemarrer</button>
+      </div>
       <section><label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label></section>
-      <div id="message" role="status"></div><button type="submit">Enregistrer et redemarrer</button>
     </form>
   </main>
   <script src="renderer.js"></script>

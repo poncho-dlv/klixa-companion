@@ -6,9 +6,9 @@ import { createLocalServer } from './local-server.js';
 
 const log = createLogger('runtime');
 
-export function startCompanion(config) {
+export function startCompanion(config, { onCloudStatus } = {}) {
   const registry = createIntegrationRegistry();
-  const cloudLink = createCloudLink(config.cloud, registry);
+  const cloudLink = createCloudLink(config.cloud, registry, { onCloudStatus });
   registerIntegrations(registry, config, { emitEvent: (event) => cloudLink.sendEvent(event) });
   const localServer = createLocalServer(config, registry);
   cloudLink.start();
