@@ -8,7 +8,7 @@ import { ConfigStore } from './config-store.js';
 import electronUpdaterPkg from 'electron-updater';
 import { createLogger, setLogFile } from '../src/logger.js';
 
-const { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } = electron;
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const logDir = path.join(app.getPath('userData'), 'logs');
 setLogFile(path.join(logDir, 'companion.log'));
@@ -326,6 +326,81 @@ function registerIpc() {
 // check au lancement laisserait passer les MAJ publiees entre-temps.
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
+async function promptRestartToInstall(version) {
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: 'Mise à jour prête',
+    message: `Klixa Companion ${version} est prêt à être installé.`,
+    detail: 'Redémarrer maintenant pour appliquer la mise à jour, ou plus tard depuis le menu de la zone de notification.',
+    buttons: ['Redémarrer maintenant', 'Plus tard'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (response === 0) {
+    const { autoUpdater } = electronUpdaterPkg;
+    autoUpdater.quitAndInstall();
+  }
+}
+
+// Verification manuelle declenchee depuis le menu tray « A propos », pour ne pas
+// attendre le prochain check periodique (UPDATE_CHECK_INTERVAL_MS). Feedback via
+// dialogues natifs (fonctionne meme fenetre fermee, contrairement a la banniere UI).
+async function checkForUpdatesManually() {
+  if (!app.isPackaged) {
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Mise à jour',
+      message: 'Vérification indisponible en développement (application non empaquetée).'
+    });
+    return;
+  }
+  const { autoUpdater } = electronUpdaterPkg;
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const latestVersion = result?.updateInfo?.version;
+    if (!latestVersion || latestVersion === app.getVersion()) {
+      await dialog.showMessageBox({
+        type: 'info',
+        title: 'Mise à jour',
+        message: `Vous utilisez déjà la dernière version (${app.getVersion()}).`
+      });
+      return;
+    }
+    // Le telechargement demarre automatiquement (autoDownload=true) ; le dialogue
+    // « pret a installer » (promptRestartToInstall) prendra le relais tout seul.
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Mise à jour',
+      message: `Nouvelle version disponible : ${latestVersion}`,
+      detail: 'Téléchargement en cours en arrière-plan. Une notification apparaîtra une fois l\'installation prête.'
+    });
+  } catch (error) {
+    log.warn('Echec du check manuel de mise a jour', error.message);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Mise à jour',
+      message: 'Échec de la vérification des mises à jour',
+      detail: error.message
+    });
+  }
+}
+
+function showAboutDialog() {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'À propos de Klixa Companion',
+    message: 'Klixa Companion',
+    detail: `Version ${app.getVersion()}`,
+    buttons: ['Vérifier les mises à jour', 'Fermer'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  }).then(({ response }) => {
+    if (response === 0) checkForUpdatesManually();
+  });
+}
+
 function configureUpdates() {
   if (!app.isPackaged) return;
   const { autoUpdater } = electronUpdaterPkg;
@@ -354,6 +429,10 @@ function configureUpdates() {
     log.info('Mise a jour telechargee', info.version);
     updateStatus({ running: true, message: `Mise a jour ${info.version} prete pour le prochain demarrage` });
     pushUpdateState({ phase: 'ready', version: info.version });
+    // Prompt natif en plus de la banniere de la fenetre (souvent fermee/masquee, l'app
+    // vit en tray) : sans ca, l'install attendrait un `quit` reel qui peut se faire
+    // attendre des jours.
+    promptRestartToInstall(info.version);
   });
   autoUpdater.on('error', (error) => {
     log.warn('Echec de mise a jour', error.message);
@@ -373,6 +452,7 @@ app.whenReady().then(async () => {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Ouvrir Klixa Companion', click: showWindow },
     { label: 'Ouvrir les logs', click: () => shell.openPath(logDir) },
+    { label: 'À propos', click: showAboutDialog },
     { type: 'separator' },
     { label: 'Quitter', click: () => { quitting = true; app.quit(); } }
   ]));

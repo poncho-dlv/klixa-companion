@@ -19,8 +19,10 @@
    `server/companion-hub.js`.
 4. Fermer la fenetre : le compagnon continue dans la zone de notification.
 
-Le menu de l'icone permet de rouvrir ou quitter l'application. L'option de
-demarrage Windows est configuree pour l'utilisateur courant, sans droits admin.
+Le menu de l'icone permet de rouvrir l'application, ouvrir les logs, consulter
+« À propos » (version courante + bouton « Vérifier les mises à jour » qui court-circuite
+le check périodique de 4h, cf. section suivante) ou quitter. L'option de demarrage
+Windows est configuree pour l'utilisateur courant, sans droits admin.
 
 ## Developpement et publication
 
@@ -35,9 +37,15 @@ electron-builder ecrit `app-update.yml` dans les ressources au build, aucune URL
 gerer a la main. Le compagnon verifie une mise a jour au demarrage puis toutes les
 `UPDATE_CHECK_INTERVAL_MS` (4h, `desktop/main.js`) — il tourne en tray potentiellement
 plusieurs jours, un seul check au lancement ne suffit pas. Telechargement automatique
-en arriere-plan ; une fois prete, une banniere dans l'UI ("Redemarrer et installer")
-declenche `autoUpdater.quitAndInstall()`. `KLIXA_UPDATE_URL` reste une surcharge pour
-pointer vers un flux HTTP generique auto-heberge (tests uniquement).
+en arriere-plan ; une fois prete, un dialogue natif ET une banniere dans l'UI
+("Redemarrer et installer") declenchent `autoUpdater.quitAndInstall()` — le dialogue
+fonctionne meme fenetre fermee (l'app vit en tray). `KLIXA_UPDATE_URL` reste une
+surcharge pour pointer vers un flux HTTP generique auto-heberge (tests uniquement).
+
+Le menu tray « À propos » affiche la version courante et propose « Vérifier les mises
+à jour » : declenche un check immediat (`autoUpdater.checkForUpdates()`) sans attendre
+le prochain tick de `UPDATE_CHECK_INTERVAL_MS`, avec retour via dialogues natifs (a jour
+/ telechargement en cours / erreur).
 
 ⚠️ **Une release `draft` (creee par `Publish release`) est invisible pour
 l'auto-updater** : il faut explicitement la publier sur GitHub (bouton "Publish
