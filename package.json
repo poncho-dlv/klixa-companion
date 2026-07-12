@@ -35,6 +35,7 @@
     "directories": { "output": "release" },
     "files": ["desktop/**/*", "src/**/*", "package.json"],
     "asar": true,
+    "publish": { "provider": "github", "owner": "poncho-dlv", "repo": "klixa-companion" },
     "win": { "target": ["nsis"], "artifactName": "Klixa-Companion-Setup-${version}.${ext}" },
     "nsis": {
       "oneClick": false,

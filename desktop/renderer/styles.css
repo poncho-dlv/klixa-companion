@@ -17,3 +17,7 @@ input.masked-secret[readonly]{cursor:pointer;letter-spacing:2px}
 details{margin-top:14px;color:#bdc1d7;font-size:13px}
 details summary{cursor:pointer;color:#aeb3cf;padding:4px 0}
 
+.update-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 18px;padding:12px 16px;background:#1c2a44;border:1px solid #2f4a7a;border-radius:10px;font-size:13px;color:#cfe0ff}
+.update-banner[hidden]{display:none}
+.update-banner button{width:auto;flex-shrink:0;padding:8px 14px;font-size:13px}
+

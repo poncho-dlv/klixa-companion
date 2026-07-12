@@ -13,6 +13,9 @@ const pairingSection = document.querySelector('#pairingSection');
 const integrations = document.querySelector('#integrations');
 const smokeSection = document.querySelector('#section-smoke');
 const disconnectBtn = document.querySelector('#disconnectBtn');
+const updateBanner = document.querySelector('#updateBanner');
+const updateBannerMessage = document.querySelector('#updateBannerMessage');
+const updateInstallBtn = document.querySelector('#updateInstallBtn');
 const hueBridgeIp = document.querySelector('#hueBridgeIp');
 const hueBridgePort = document.querySelector('#hueBridgePort');
 const huePairBtn = document.querySelector('#huePairBtn');
@@ -221,6 +224,30 @@ function renderIntegrationStatusUpdate(status) {
   renderIntegrationStatus();
   renderHueUi();
 }
+
+// Seuls `downloading`/`ready` meritent une banniere visible : `checking`/`idle` sont
+// silencieux (verifications frequentes, rien a signaler la plupart du temps) et
+// `error` reste dans les logs plutot que d'inquieter pour un echec transitoire
+// (prochain check dans UPDATE_CHECK_INTERVAL_MS, cf. main.js).
+function renderUpdateStatus(update) {
+  const phase = update?.phase;
+  if (phase === 'downloading') {
+    updateBanner.hidden = false;
+    updateInstallBtn.hidden = true;
+    updateBannerMessage.textContent = `Téléchargement de la mise à jour ${update.version}...`;
+  } else if (phase === 'ready') {
+    updateBanner.hidden = false;
+    updateInstallBtn.hidden = false;
+    updateBannerMessage.textContent = `Mise à jour ${update.version} prête.`;
+  } else {
+    updateBanner.hidden = true;
+    updateInstallBtn.hidden = true;
+  }
+}
+
+updateInstallBtn.addEventListener('click', () => window.klixa.installUpdate());
+window.klixa.getUpdateStatus().then(renderUpdateStatus);
+window.klixa.onUpdateStatus(renderUpdateStatus);
 
 function renderCloudStatus(cloudStatus) {
   lastCloudStatus = cloudStatus || { connected: false, features: {} };

@@ -43,6 +43,11 @@ let cloudStatus = { connected: false, features: {} };
 // par polling depuis runtime.js (cf. onIntegrationStatus). Cle = id d'integration,
 // absente si l'integration est desactivee dans la config.
 let integrationStatus = {};
+// Statut du mecanisme de mise a jour (idle/checking/downloading/ready/error), pousse
+// au renderer pour afficher une banniere. `ready` = redemarrage necessaire pour
+// appliquer (autoUpdater.quitAndInstall), propose via un bouton plutot que d'attendre
+// une fermeture complete (l'app reste en tray, un `quit` reel peut se faire attendre).
+let updateState = { phase: 'idle' };
 
 function trayImage() {
   return nativeImage.createFromPath(path.join(directory, 'icon.ico')).resize({ width: 16, height: 16 });
@@ -96,6 +101,11 @@ function updateCloudStatus(next) {
 function updateIntegrationStatus(next) {
   integrationStatus = next || {};
   window?.webContents.send('integration:status', integrationStatus);
+}
+
+function pushUpdateState(next) {
+  updateState = next;
+  window?.webContents.send('update:status', updateState);
 }
 
 async function restartRuntime(values) {
@@ -304,20 +314,55 @@ function registerIpc() {
     await restartRuntime(next);
     return publicConfig(next);
   });
+  ipcMain.handle('update:status', () => updateState);
+  ipcMain.handle('update:install', () => {
+    const { autoUpdater } = electronUpdaterPkg;
+    autoUpdater.quitAndInstall();
+  });
 }
 
-function configureUpdates(values) {
-  const updateUrl = values.UPDATE_URL || process.env.KLIXA_UPDATE_URL;
-  if (!app.isPackaged || !updateUrl) return;
+// Frequence de re-check en plus de celui au demarrage : le compagnon tourne en tray
+// potentiellement plusieurs jours (toute la duree d'un live et au-dela), un seul
+// check au lancement laisserait passer les MAJ publiees entre-temps.
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+function configureUpdates() {
+  if (!app.isPackaged) return;
   const { autoUpdater } = electronUpdaterPkg;
-  try {
-    autoUpdater.setFeedURL({ provider: 'generic', url: updateUrl });
-    autoUpdater.on('update-downloaded', () => updateStatus({ running: true, message: 'Mise a jour prete pour le prochain demarrage' }));
-    autoUpdater.on('error', (error) => console.warn('[updater]', error.message));
-    autoUpdater.checkForUpdatesAndNotify();
-  } catch (error) {
-    console.warn('[updater]', error.message);
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  // Provider GitHub embarque au build via `build.publish` (package.json) : aucune URL
+  // a fournir en prod, electron-builder ecrit app-update.yml dans les resources.
+  // KLIXA_UPDATE_URL reste une surcharge pour tester un flux generique auto-heberge.
+  const overrideUrl = process.env.KLIXA_UPDATE_URL;
+  if (overrideUrl) {
+    try {
+      autoUpdater.setFeedURL({ provider: 'generic', url: overrideUrl });
+    } catch (error) {
+      log.warn('Feed URL de mise a jour invalide', error.message);
+    }
   }
+
+  autoUpdater.on('checking-for-update', () => pushUpdateState({ phase: 'checking' }));
+  autoUpdater.on('update-available', (info) => {
+    log.info('Mise a jour disponible', info.version);
+    pushUpdateState({ phase: 'downloading', version: info.version });
+  });
+  autoUpdater.on('update-not-available', () => pushUpdateState({ phase: 'idle' }));
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info('Mise a jour telechargee', info.version);
+    updateStatus({ running: true, message: `Mise a jour ${info.version} prete pour le prochain demarrage` });
+    pushUpdateState({ phase: 'ready', version: info.version });
+  });
+  autoUpdater.on('error', (error) => {
+    log.warn('Echec de mise a jour', error.message);
+    pushUpdateState({ phase: 'error', message: error.message });
+  });
+
+  const check = () => autoUpdater.checkForUpdates().catch((error) => log.warn('Echec du check de mise a jour', error.message));
+  check();
+  setInterval(check, UPDATE_CHECK_INTERVAL_MS);
 }
 
 app.whenReady().then(async () => {
@@ -334,7 +379,7 @@ app.whenReady().then(async () => {
   tray.on('double-click', showWindow);
   registerIpc();
   await restartRuntime(store.load());
-  configureUpdates(store.load());
+  configureUpdates();
   if (!process.argv.includes('--hidden')) showWindow();
 }).catch((error) => {
   log.error('Echec du demarrage de l\'application', error.stack || error.message);

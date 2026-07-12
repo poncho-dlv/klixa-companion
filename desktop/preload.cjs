@@ -15,5 +15,8 @@ contextBridge.exposeInMainWorld('klixa', {
   pairingStart: (options) => ipcRenderer.invoke('pairing:start', options),
   pairingCancel: () => ipcRenderer.invoke('pairing:cancel'),
   onPairingStatus: (callback) => ipcRenderer.on('pairing:status', (_event, status) => callback(status)),
-  disconnect: () => ipcRenderer.invoke('cloud:disconnect')
+  disconnect: () => ipcRenderer.invoke('cloud:disconnect'),
+  getUpdateStatus: () => ipcRenderer.invoke('update:status'),
+  onUpdateStatus: (callback) => ipcRenderer.on('update:status', (_event, status) => callback(status)),
+  installUpdate: () => ipcRenderer.invoke('update:install')
 });
