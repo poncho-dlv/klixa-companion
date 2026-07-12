@@ -201,7 +201,7 @@ function publicConfig(values) {
   }
   delete result.SMOKE_SERVICE_URL;
   result.HUE_BRIDGE_PORT = String(result.HUE_BRIDGE_PORT || 443);
-  for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
+  for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY']) {
     result[`${key}_CONFIGURED`] = Boolean(result[key]);
     delete result[key];
   }
@@ -240,7 +240,7 @@ function registerIpc() {
     if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error('Port Hue invalide');
     normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
     const next = { ...current, ...normalizedSubmitted };
-    for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
+    for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY']) {
       if (!normalizedSubmitted[key]) next[key] = current[key] || '';
     }
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');

@@ -32,7 +32,6 @@ return {
   smoke: {
     enabled: bool(env.SMOKE_ENABLED, true),
     serviceUrl: env.SMOKE_SERVICE_URL || '',
-    serviceToken: env.SMOKE_SERVICE_TOKEN || '',
     defaultMs: int(env.SMOKE_DEFAULT_MS, 300),
     minMs: int(env.SMOKE_MIN_MS, 50),
     maxMs: int(env.SMOKE_MAX_MS, 1500),

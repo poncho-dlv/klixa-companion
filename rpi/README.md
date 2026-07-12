@@ -22,13 +22,10 @@ Créer `/home/rpi_user/klixa-smoke/.env` :
 ```bash
 SMOKE_GPIO_PIN=17
 SMOKE_PORT=8787
-SMOKE_TOKEN=un-secret-partage-avec-le-compagnon
 SMOKE_MIN_MS=50
 SMOKE_MAX_MS=1500
 SMOKE_DEFAULT_MS=300
 ```
-
-> `SMOKE_TOKEN` doit être identique à `SMOKE_SERVICE_TOKEN` côté compagnon.
 
 ## Lancer en service (systemd)
 
@@ -45,7 +42,6 @@ journalctl -u klixa-smoke -f
 curl http://localhost:8787/health
 curl -X POST http://localhost:8787/smoke/trigger \
   -H "content-type: application/json" \
-  -H "x-smoke-token: un-secret-partage-avec-le-compagnon" \
   -d '{"durationMs":300}'
 ```
 
@@ -55,3 +51,4 @@ curl -X POST http://localhost:8787/smoke/trigger \
   ne peut pas rester bloqué « on » via une commande.
 - Impulsion unique : une requête pendant une impulsion en cours reçoit `409`.
 - Le relais est remis à `off` à l'arrêt du service.
+- Le service doit rester accessible uniquement sur le LAN et ne jamais être exposé à Internet.

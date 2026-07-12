@@ -70,7 +70,6 @@ docker compose up -d --build
 | `COMPANION_LOCAL_TOKEN` | Protège `POST /commands/*`. Obligatoire en production si l’écoute n’est pas limitée à loopback. |
 | `SMOKE_ENABLED` | Active l'intégration fumée (défaut true). |
 | `SMOKE_SERVICE_URL` | URL du service GPIO sur le RPi (ex. `http://192.168.1.50:8787`). |
-| `SMOKE_SERVICE_TOKEN` | Secret partagé avec le service GPIO. |
 | `SMOKE_DEFAULT_MS` / `SMOKE_MIN_MS` / `SMOKE_MAX_MS` | Bornes de durée d'impulsion. |
 | `HUE_ENABLED` | Active l'intégration Hue native (défaut true). |
 | `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). En usage desktop, se configure et s'appaire depuis l'app Klixa Companion — jamais fourni par le cloud. |
