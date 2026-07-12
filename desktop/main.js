@@ -36,8 +36,7 @@ let status = { running: false, message: 'Demarrage...' };
 let quitting = false;
 
 function trayImage() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#6d5dfc"/><path d="M9 7v18h4v-7l6 7h5l-8-10 7-8h-5l-5 6V7z" fill="white"/></svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`).resize({ width: 16, height: 16 });
+  return nativeImage.createFromPath(path.join(directory, 'icon.ico')).resize({ width: 16, height: 16 });
 }
 
 function showWindow() {
@@ -93,13 +92,15 @@ async function restartRuntime(values) {
   }
 }
 
+const LOGIN_ITEM_ARGS = ['--hidden'];
+
 function publicConfig(values) {
   const result = { ...values };
   for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
     result[`${key}_CONFIGURED`] = Boolean(result[key]);
     delete result[key];
   }
-  result.AUTO_LAUNCH = app.getLoginItemSettings().openAtLogin;
+  result.AUTO_LAUNCH = app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
   return result;
 }
 
@@ -107,8 +108,8 @@ function registerIpc() {
   ipcMain.handle('config:get', () => publicConfig(store.load()));
   ipcMain.handle('runtime:status', () => status);
   ipcMain.handle('auto-launch:set', (_event, enabled) => {
-    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: ['--hidden'] });
-    return app.getLoginItemSettings().openAtLogin;
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: LOGIN_ITEM_ARGS });
+    return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
   });
   ipcMain.handle('config:save', async (_event, submitted) => {
     const current = store.load();
