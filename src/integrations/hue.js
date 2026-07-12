@@ -111,12 +111,13 @@ export async function mapWithConcurrency(items, limit, mapper) {
 }
 
 // ── Client HTTP du bridge (API CLIP v2, HTTPS auto-signé) ────────────────────
-function hueRequest(bridgeIp, appKey, method, path, body) {
+function hueRequest(bridgeIp, bridgePort, appKey, method, path, body) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const req = https.request(
       {
         host: String(bridgeIp).trim().replace(/\/+$/, ''),
+        port: bridgePort || 443,
         path,
         method,
         // Le bridge Hue présente un certificat auto-signé → on ne valide pas la chaîne
@@ -147,11 +148,40 @@ function hueRequest(bridgeIp, appKey, method, path, body) {
   });
 }
 
+// hue.register — création d'une clé d'application (appuyer sur le bouton du bridge
+// dans les ~30 s avant l'appel). API v1 sans auth. Fonction indépendante de
+// createHueIntegration : appelée aussi bien par la commande `hue.register` (via
+// local-server.js) que directement par le process Electron `main` (IPC `hue:register`,
+// appairage déclenché depuis l'UI desktop — l'appKey résultante n'est JAMAIS envoyée
+// au cloud, uniquement persistée localement par l'appelant).
+export async function registerHueBridge(bridgeIp, bridgePort = 443, devicetype = 'Klixa#companion') {
+  const ip = String(bridgeIp || '').trim();
+  if (!ip) throw new Error('bridgeIp manquant');
+  assertPrivateBridgeIp(ip);
+
+  const res = await hueRequest(ip, bridgePort, '', 'POST', '/api', { devicetype: String(devicetype || 'Klixa#companion').trim() });
+  const entries = Array.isArray(res) ? res : [];
+
+  const success = entries.find((e) => e?.success?.username);
+  if (success) {
+    log.info('Clé d\'application Hue créée');
+    return { appKey: success.success.username };
+  }
+
+  const failure = entries.find((e) => e?.error);
+  if (failure?.error?.type === 101) {
+    throw new Error('Appuyez sur le bouton du bridge Hue puis réessayez');
+  }
+  throw new Error('Réponse inattendue du bridge Hue');
+}
+
 /**
  * Intégration Philips Hue NATIVE : le compagnon parle directement au bridge sur le
  * LAN (plus de passage par Streamer.bot/HueAlert.cs/HueDiscover.cs). Les credentials
- * (IP du bridge, clé d'application) viennent du .env, surchargeables par le payload
- * (le cloud peut encore les fournir depuis la config Mongo du tenant).
+ * (IP du bridge, clé d'application) viennent EXCLUSIVEMENT de la config locale
+ * (`.env` ou config desktop chiffrée) — plus aucune surcharge par le payload cloud
+ * (retiré avec `allowPayloadCredentials` : le cloud ne doit structurellement plus
+ * jamais pouvoir fournir une IP/clé de bridge).
  */
 export function createHueIntegration(hueConfig = {}) {
   const maxLights = Math.max(1, Math.min(200, Math.trunc(hueConfig.maxLights) || 50));
@@ -161,19 +191,19 @@ export function createHueIntegration(hueConfig = {}) {
     return mapWithConcurrency(lightIds, requestConcurrency, operation);
   }
 
-  function resolveCredentials(payload = {}) {
-    const allowPayload = hueConfig.allowPayloadCredentials === true;
-    const bridgeIp = String((allowPayload && (payload.bridgeIp || payload.hueBridgeIp)) || hueConfig.bridgeIp || '').trim();
-    const appKey = String((allowPayload && (payload.appKey || payload.hueAppKey)) || hueConfig.appKey || '').trim();
+  function resolveCredentials() {
+    const bridgeIp = String(hueConfig.bridgeIp || '').trim();
+    const bridgePort = Number.parseInt(hueConfig.bridgePort, 10) || 443;
+    const appKey = String(hueConfig.appKey || '').trim();
     if (!bridgeIp || !appKey) {
-      throw new Error('Bridge Hue non configuré (HUE_BRIDGE_IP / HUE_APP_KEY manquants)');
+      throw new Error('Bridge Hue non configuré (à faire depuis l\'app Klixa Companion, section Philips Hue)');
     }
     assertPrivateBridgeIp(bridgeIp);
-    return { bridgeIp, appKey };
+    return { bridgeIp, bridgePort, appKey };
   }
 
   async function setLightColor(creds, lightId, xy, brightness, transitionMs) {
-    return hueRequest(creds.bridgeIp, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, {
+    return hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, {
       on: { on: true },
       dimming: { brightness },
       color: { xy },
@@ -182,14 +212,14 @@ export function createHueIntegration(hueConfig = {}) {
   }
 
   async function setLightOn(creds, lightId, on, transitionMs) {
-    return hueRequest(creds.bridgeIp, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, {
+    return hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, {
       on: { on },
       dynamics: { duration: transitionMs }
     });
   }
 
   async function readLightState(creds, lightId) {
-    const res = await hueRequest(creds.bridgeIp, creds.appKey, 'GET', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, null);
+    const res = await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, null);
     const d = res?.data?.[0];
     if (!d) return null;
     return {
@@ -209,7 +239,7 @@ export function createHueIntegration(hueConfig = {}) {
     if (state.xy) body.color = { xy: state.xy };
     if (Number.isFinite(state.mirek)) body.color_temperature = { mirek: state.mirek };
     if (state.effect && state.effect !== 'no_effect') body.effects = { effect: state.effect };
-    await hueRequest(creds.bridgeIp, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, body);
+    await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, body);
   }
 
   // Clignotement coloré puis restauration de l'état initial (mode alerte « simple »).
@@ -241,11 +271,11 @@ export function createHueIntegration(hueConfig = {}) {
   // hue.color — couleur/scène. Payload : { lightIds, color, brightness, transitionMs,
   // durationMs, mode ('simple' = clignotement), sceneId }.
   async function color(payload = {}) {
-    const creds = resolveCredentials(payload);
+    const creds = resolveCredentials();
 
     const sceneId = String(payload.sceneId || payload.hueSceneId || '').trim();
     if (sceneId) {
-      await hueRequest(creds.bridgeIp, creds.appKey, 'PUT', `/clip/v2/resource/scene/${encodeURIComponent(sceneId)}`, {
+      await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/scene/${encodeURIComponent(sceneId)}`, {
         recall: { action: 'active' }
       });
       log.info('Scène activée', { sceneId });
@@ -276,13 +306,13 @@ export function createHueIntegration(hueConfig = {}) {
   }
 
   // hue.discover — liste lampes + scènes (résultat renvoyé dans l'ack au cloud).
-  async function discover(payload = {}) {
-    const creds = resolveCredentials(payload);
+  async function discover() {
+    const creds = resolveCredentials();
 
     const [lightsRes, scenesRes, roomsRes] = await Promise.all([
-      hueRequest(creds.bridgeIp, creds.appKey, 'GET', '/clip/v2/resource/light', null),
-      hueRequest(creds.bridgeIp, creds.appKey, 'GET', '/clip/v2/resource/scene', null),
-      hueRequest(creds.bridgeIp, creds.appKey, 'GET', '/clip/v2/resource/room', null)
+      hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/light', null),
+      hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/scene', null),
+      hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/room', null)
     ]);
 
     const roomNames = new Map();
@@ -307,34 +337,25 @@ export function createHueIntegration(hueConfig = {}) {
     return { lights, scenes };
   }
 
-  // hue.register — création d'une clé d'application (appuyer sur le bouton du bridge
-  // dans les ~30 s avant l'appel). API v1 sans auth. Renvoie { appKey } dans l'ack.
+  // hue.register — conservée dans le registre de commandes pour local-server.js
+  // (déclenchement manuel/scripté sur le LAN) ; le cloud ne l'appelle plus (l'IP du
+  // bridge n'est jamais annoncée par Klixa). Utilise l'IP déjà en config locale si le
+  // payload n'en fournit pas.
   async function register(payload = {}) {
-    const allowPayload = hueConfig.allowPayloadCredentials === true;
-    const bridgeIp = String((allowPayload && (payload.bridgeIp || payload.hueBridgeIp)) || hueConfig.bridgeIp || '').trim();
-    if (!bridgeIp) throw new Error('bridgeIp manquant');
-    assertPrivateBridgeIp(bridgeIp);
+    return registerHueBridge(payload.bridgeIp || hueConfig.bridgeIp, hueConfig.bridgePort, payload.devicetype);
+  }
 
-    const devicetype = String(payload.devicetype || 'Klixa#companion').trim();
-    const res = await hueRequest(bridgeIp, '', 'POST', '/api', { devicetype });
-    const entries = Array.isArray(res) ? res : [];
-
-    const success = entries.find((e) => e?.success?.username);
-    if (success) {
-      log.info('Clé d\'application Hue créée');
-      return { appKey: success.success.username };
-    }
-
-    const failure = entries.find((e) => e?.error);
-    if (failure?.error?.type === 101) {
-      throw new Error('Appuyez sur le bouton du bridge Hue puis réessayez');
-    }
-    throw new Error('Réponse inattendue du bridge Hue');
+  // hue.status — statut d'appairage, AUCUNE IP/clé dans la réponse (consommé par
+  // Klixa pour afficher « Appairé » dans le wizard, sans jamais voir le secret).
+  async function status() {
+    const bridgeIp = String(hueConfig.bridgeIp || '').trim();
+    const appKey = String(hueConfig.appKey || '').trim();
+    return { bridgeConfigured: Boolean(bridgeIp), paired: Boolean(bridgeIp && appKey) };
   }
 
   async function healthcheck() {
     const creds = resolveCredentials();
-    await hueRequest(creds.bridgeIp, creds.appKey, 'GET', '/clip/v2/resource/bridge', null);
+    await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/bridge', null);
     return { bridgeIp: creds.bridgeIp };
   }
 
@@ -343,7 +364,8 @@ export function createHueIntegration(hueConfig = {}) {
     commands: {
       'hue.color': color,
       'hue.discover': discover,
-      'hue.register': register
+      'hue.register': register,
+      'hue.status': status
     },
     healthcheck
   };

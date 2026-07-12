@@ -57,6 +57,10 @@ docker compose up -d --build
 
 ## Variables d'environnement
 
+> Ce tableau concerne le mode Docker/NAS headless (`.env` manuel). L'app desktop
+> (`desktop/`) peut obtenir `CLOUD_WS_URL`/`COMPANION_TOKEN` automatiquement via un
+> pairing par code a 6 chiffres — voir [desktop/README.md](desktop/README.md).
+
 | Variable | Description |
 |----------|-------------|
 | `CLOUD_WS_URL` | URL WS du serveur Klixa (`wss://<host>/companion/ws`). Vide = mode local seul. |
@@ -66,12 +70,10 @@ docker compose up -d --build
 | `COMPANION_LOCAL_TOKEN` | Protège `POST /commands/*`. Obligatoire en production si l’écoute n’est pas limitée à loopback. |
 | `SMOKE_ENABLED` | Active l'intégration fumée (défaut true). |
 | `SMOKE_SERVICE_URL` | URL du service GPIO sur le RPi (ex. `http://192.168.1.50:8787`). |
-| `SMOKE_SERVICE_TOKEN` | Secret partagé avec le service GPIO. |
 | `SMOKE_DEFAULT_MS` / `SMOKE_MIN_MS` / `SMOKE_MAX_MS` | Bornes de durée d'impulsion. |
 | `HUE_ENABLED` | Active l'intégration Hue native (défaut true). |
-| `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). |
-| `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`). |
-| `HUE_ALLOW_PAYLOAD_CREDENTIALS` | Autorise explicitement les credentials Hue venant du cloud (défaut false). La cible reste limitée à une IP privée littérale. |
+| `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). En usage desktop, se configure et s'appaire depuis l'app Klixa Companion — jamais fourni par le cloud. |
+| `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`), obtenue par appairage. Jamais fournie par le cloud. |
 | `HUE_MAX_LIGHTS` / `HUE_CONCURRENCY` | Limite de lampes par commande (50) et de requêtes Hue simultanées (5). |
 | `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
 | `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |

@@ -66,7 +66,7 @@ export function createCommandDeduplicator({
  * client : il ouvre la connexion, le cloud pousse des commandes dedans. Aucune
  * connexion entrante n'est nécessaire (NAS/RPi restent injoignables de l'extérieur).
  */
-export function createCloudLink(config, registry) {
+export function createCloudLink(config, registry, { onCloudStatus = () => {} } = {}) {
   let ws = null;
   let stopped = false;
   let attempt = 0;
@@ -101,6 +101,13 @@ export function createCloudLink(config, registry) {
       msg = JSON.parse(raw);
     } catch {
       log.warn('Message illisible ignoré');
+      return;
+    }
+    // Confirmation du handshake cloud (envoyée par le serveur juste après l'upgrade WS,
+    // porte les features tenant — ex. machine à fumée — pour que l'app desktop n'affiche
+    // que les intégrations effectivement autorisées).
+    if (msg.type === 'connected') {
+      onCloudStatus({ connected: true, features: msg.features && typeof msg.features === 'object' ? msg.features : {} });
       return;
     }
     if (msg.type !== 'command') return;
@@ -159,6 +166,7 @@ export function createCloudLink(config, registry) {
       stopHeartbeat = null;
       const detail = reason?.toString() || '';
       log.warn(`Liaison cloud fermée${code ? ` (code ${code}${detail ? ` : ${detail}` : ''})` : ''}`);
+      onCloudStatus({ connected: false, features: {} });
       scheduleReconnect();
     });
     ws.on('error', (err) => {

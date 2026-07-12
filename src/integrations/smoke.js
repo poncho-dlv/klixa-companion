@@ -26,7 +26,6 @@ export function createSmokeIntegration(smokeConfig) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(smokeConfig.serviceToken ? { 'x-smoke-token': smokeConfig.serviceToken } : {}),
       },
       body: JSON.stringify({ durationMs }),
       signal: AbortSignal.timeout(5000),

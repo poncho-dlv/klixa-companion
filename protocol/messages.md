@@ -57,9 +57,10 @@ côté cloud, dans le contexte du tenant résolu depuis le token. Pas de file : 
 | Commande | Payload | Effet |
 |----------|---------|-------|
 | `smoke.trigger` | `{ durationMs }` | Impulsion relais machine à fumée (durée bornée côté compagnon ET RPi) |
-| `hue.color` | `{ lightIds[], color, brightness?, transitionMs?, durationMs?, mode?, sceneId? }` | Couleur/scène Hue en direct sur le bridge (LAN). `mode:'simple'` = clignotement puis restauration. `sceneId` = rappel de scène. Credentials du `.env`, surchargeables par `bridgeIp`/`appKey` dans le payload. |
-| `hue.discover` | `{ bridgeIp?, appKey? }` | Liste lampes + scènes du bridge. **Le résultat revient dans l'`ack`** (`{ lights[], scenes[] }`) — le cloud le persiste (plus de POST direct du C# vers `/api/hue/discovered`). |
-| `hue.register` | `{ bridgeIp?, devicetype? }` | Crée une clé d'application (appuyer sur le bouton du bridge avant l'appel). Renvoie `{ appKey }` dans l'`ack`, ou erreur « appuyez sur le bouton » si non pressé. |
+| `hue.color` | `{ lightIds[], color, brightness?, transitionMs?, durationMs?, mode?, sceneId? }` | Couleur/scène Hue en direct sur le bridge (LAN). `mode:'simple'` = clignotement puis restauration. `sceneId` = rappel de scène. Credentials TOUJOURS lues en local (`.env`/config desktop) — plus aucune surcharge possible par le payload cloud. |
+| `hue.discover` | `{}` | Liste lampes + scènes du bridge (credentials locales). **Le résultat revient dans l'`ack`** (`{ lights[], scenes[] }` — noms/ids uniquement, aucune IP) — le cloud le persiste (plus de POST direct du C# vers `/api/hue/discovered`). |
+| `hue.status` | `{}` | Statut d'appairage : `{ bridgeConfigured, paired }` (booléens, aucune IP/clé dans la réponse). Consommé par Klixa pour afficher l'état d'appairage dans le wizard admin. |
+| `hue.register` | `{ bridgeIp?, devicetype? }` | Crée une clé d'application (appuyer sur le bouton du bridge avant l'appel), persiste `bridgeIp`/`appKey` en config locale. **N'est plus déclenchée par le cloud** — Klixa ne connaît jamais l'IP du bridge, même transitoirement. L'appairage se fait exclusivement depuis l'UI desktop du compagnon (IPC → `registerHueBridge`, hors du protocole cloud) ; la commande reste dans le registre pour un déclenchement local via `local-server.js` (`POST /commands/hue.register`). |
 | `obs.sync-overlay-token` | `{ overlayToken, overlayBase }` | Réécrit le token overlay dans les sources navigateur OBS dont l'URL commence par `overlayBase`. Renvoie `{ updated, alreadyOk, sources }`. (OBS natif via obs-websocket — remplace ObsSyncOverlayToken.cs.) |
 | `streamerbot.action` | `{ actionId, args? }` | Exécute une action Streamer.bot par id (raccourcis modération, actions déclenchées par overlay). Renvoie `{ requestId }`. |
 

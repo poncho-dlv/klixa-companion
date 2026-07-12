@@ -9,24 +9,91 @@
 </head>
 <body>
   <main>
-    <header><div class="logo">K</div><div><h1>Klixa Companion</h1><p id="status">Demarrage...</p></div></header>
+    <header>
+      <div class="logo">K</div>
+      <div class="header-text">
+        <h1>Klixa Companion</h1>
+        <p id="status" class="status-line">
+          <svg id="statusIcon" class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+          <span id="statusMessage">Démarrage...</span>
+        </p>
+      </div>
+      <button type="button" id="disconnectBtn" class="disconnect-btn" hidden>
+        <svg viewBox="0 0 512 512" aria-hidden="true"><path d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"/></svg>
+        Déconnecter
+      </button>
+    </header>
+    <div id="updateBanner" class="update-banner" role="status" hidden>
+      <span id="updateBannerMessage"></span>
+      <button type="button" id="updateInstallBtn" hidden>Redémarrer et installer</button>
+    </div>
     <form id="config">
-      <section><h2>Connexion Klixa</h2>
-        <label>Adresse du cloud<input name="CLOUD_WS_URL" type="url" placeholder="wss://app.klixa.live/companion/ws"></label>
-        <label>Token du compagnon<input name="COMPANION_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver le token"></label>
+      <section id="pairingSection"><h2>Connexion Klixa</h2>
+        <div class="pairing">
+          <button type="button" id="pairBtn">Lier ce compagnon</button>
+          <div id="pairCode" class="pair-code" hidden>
+            <p class="pair-code-value" id="pairCodeValue"></p>
+            <p>Va sur ta console Klixa, Paramètres puis Compagnon, et entre ce code.</p>
+            <p id="pairCodeTimer"></p>
+          </div>
+          <p id="pairMessage" role="status"></p>
+        </div>
       </section>
-      <section><h2>OBS</h2>
-        <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
-        <label>Adresse WebSocket<input name="OBS_WS_URL" placeholder="ws://127.0.0.1:4455"></label>
-        <label>Mot de passe<input name="OBS_WS_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
+      <div id="integrations" hidden>
+        <section>
+          <div class="section-head"><h2>OBS</h2>
+            <p class="integration-status status-line" data-integration="obs">
+              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+              <span></span>
+            </p>
+          </div>
+          <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
+          <div class="row"><label>IP ou hôte<input name="OBS_WS_HOST" placeholder="127.0.0.1"></label><label>Port<input name="OBS_WS_PORT" type="number" min="1" max="65535" placeholder="4455"></label></div>
+          <label>Mot de passe<input name="OBS_WS_PASSWORD" id="obsWsPassword" type="password" autocomplete="new-password"></label>
+          <button type="button" id="obsConnectionBtn">Connecter</button>
+        </section>
+        <section>
+          <div class="section-head"><h2>Streamer.bot</h2>
+            <p class="integration-status status-line" data-integration="streamerbot">
+              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+              <span></span>
+            </p>
+          </div>
+          <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
+          <div class="row"><label>Hôte<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
+          <label>Mot de passe<input name="SB_PASSWORD" id="sbPassword" type="password" autocomplete="new-password"></label>
+          <button type="button" id="streamerbotConnectionBtn">Connecter</button>
+        </section>
+        <section id="section-smoke" hidden>
+          <div class="section-head"><h2>Machine à fumée</h2>
+            <p class="integration-status status-line" data-integration="smoke">
+              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+              <span></span>
+            </p>
+          </div>
+          <label class="toggle"><input name="SMOKE_ENABLED" type="checkbox"> Activer la machine à fumée</label>
+          <div class="row"><label>IP ou hôte<input name="SMOKE_SERVICE_HOST" id="smokeServiceHost" placeholder="192.168.1.50"></label><label>Port<input name="SMOKE_SERVICE_PORT" type="number" min="1" max="65535" placeholder="8787"></label></div>
+          <button type="button" id="smokeConnectionBtn">Connecter</button>
+        </section>
+        <section>
+          <div class="section-head"><h2>Philips Hue</h2>
+            <p id="hueStatus" class="integration-status status-line">
+              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+              <span></span>
+            </p>
+          </div>
+          <label class="toggle"><input name="HUE_ENABLED" type="checkbox"> Activer Hue</label>
+          <div class="row"><label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label>Port<input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
+          <button type="button" id="huePairBtn">Appairer (presser le bouton du bridge avant)</button>
+          <button type="button" id="hueUnpairBtn" class="disconnect-btn" hidden>Déconnecter</button>
+          <p id="hueMessage" role="status"></p>
+        </section>
+      </div>
+      <section>
+        <label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label>
+        <div id="message" role="status"></div>
+        <button type="submit" id="saveBtn">Enregistrer et redémarrer</button>
       </section>
-      <section><h2>Streamer.bot</h2>
-        <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
-        <div class="row"><label>Hote<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
-        <label>Mot de passe<input name="SB_PASSWORD" type="password" placeholder="Laisser vide pour conserver"></label>
-      </section>
-      <section><label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label></section>
-      <div id="message" role="status"></div><button type="submit">Enregistrer et redemarrer</button>
     </form>
   </main>
   <script src="renderer.js"></script>

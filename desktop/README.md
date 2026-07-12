@@ -2,9 +2,21 @@
 
 ## Parcours utilisateur
 
-1. Installer `Klixa-Companion-Setup-<version>.exe`.
-2. Renseigner l'URL WebSocket Klixa et le token genere dans le dashboard.
-3. Verifier les reglages OBS et Streamer.bot, puis enregistrer.
+1. Installer `Klixa-Companion-Setup-<version>.exe`. Au premier lancement, seule la
+   section « Connexion Klixa » est visible (aucune config exposee tant que le
+   compagnon n'est lie a aucun tenant).
+2. Cliquer « Lier ce compagnon » : un code a 6 chiffres s'affiche. Le saisir dans la
+   console Klixa, Parametres puis Compagnon, pendant qu'il est valide (10 minutes).
+   L'URL WebSocket et le token sont recuperes automatiquement, sans copier-coller
+   (device-code flow, cf. `server/companion-pairing-service.js` cote Klixa ; instance
+   ciblee = `https://klixa.live`, en dur cote client desktop — pas de champ pour la
+   surcharger, cf. `desktop/config-store.js`).
+3. Une fois connecte, les sections d'integration (OBS, Streamer.bot, Philips Hue)
+   apparaissent ; verifier les reglages puis enregistrer. La section « Machine a
+   fumee » ne s'affiche que si la feature tenant correspondante est activee cote
+   Klixa (Instance Admin, desactivee par defaut — materiel physique, opt-in
+   explicite) : le serveur pousse les features au compagnon a chaque connexion, cf.
+   `server/companion-hub.js`.
 4. Fermer la fenetre : le compagnon continue dans la zone de notification.
 
 Le menu de l'icone permet de rouvrir ou quitter l'application. L'option de
@@ -17,11 +29,23 @@ l'installateur dans `release/`. Incrementer la version de `package.json` et sign
 les artefacts avant publication. Les secrets de signature doivent rester dans le
 coffre du pipeline, jamais dans ce depot.
 
-Les mises a jour automatiques utilisent un flux HTTP generique electron-builder.
-Definir `KLIXA_UPDATE_URL` au lancement, ou `UPDATE_URL` dans la configuration
-deployee, puis publier l'EXE, son `.blockmap` et `latest.yml` a cette URL.
+Les mises a jour automatiques utilisent le provider `github` d'electron-builder
+(`build.publish` dans `package.json`, deduit du depot `poncho-dlv/klixa-companion`) :
+electron-builder ecrit `app-update.yml` dans les ressources au build, aucune URL a
+gerer a la main. Le compagnon verifie une mise a jour au demarrage puis toutes les
+`UPDATE_CHECK_INTERVAL_MS` (4h, `desktop/main.js`) — il tourne en tray potentiellement
+plusieurs jours, un seul check au lancement ne suffit pas. Telechargement automatique
+en arriere-plan ; une fois prete, une banniere dans l'UI ("Redemarrer et installer")
+declenche `autoUpdater.quitAndInstall()`. `KLIXA_UPDATE_URL` reste une surcharge pour
+pointer vers un flux HTTP generique auto-heberge (tests uniquement).
 
-Si l'upload web GitHub echoue, lancer le workflow `Publish release` depuis
-l'onglet Actions avec le tag concerne. Il construit puis attache automatiquement
-l'EXE, le blockmap et `latest.yml` a la release existante. Si elle n'existe pas,
-il cree un brouillon de release.
+⚠️ **Une release `draft` (creee par `Publish release`) est invisible pour
+l'auto-updater** : il faut explicitement la publier sur GitHub (bouton "Publish
+release") pour que les clients installes la detectent — c'est le garde-fou de
+rollout avant diffusion large.
+
+Publier une nouvelle version : incrementer `version` dans `package.json`, pousser un
+tag `vX.Y.Z` → le workflow `Publish release` construit et attache l'EXE, le blockmap
+et `latest.yml` a une release (brouillon si elle n'existe pas). Verifier le build puis
+publier la release. Si l'upload echoue, relancer le workflow depuis l'onglet Actions
+avec le tag concerne.

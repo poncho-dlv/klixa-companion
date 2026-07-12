@@ -32,17 +32,17 @@ return {
   smoke: {
     enabled: bool(env.SMOKE_ENABLED, true),
     serviceUrl: env.SMOKE_SERVICE_URL || '',
-    serviceToken: env.SMOKE_SERVICE_TOKEN || '',
     defaultMs: int(env.SMOKE_DEFAULT_MS, 300),
     minMs: int(env.SMOKE_MIN_MS, 50),
     maxMs: int(env.SMOKE_MAX_MS, 1500),
   },
   hue: {
     // Intégration Hue NATIVE : le compagnon parle directement au bridge sur le LAN.
+    // bridgeIp/appKey viennent EXCLUSIVEMENT d'ici (jamais du cloud, cf. hue.js).
     enabled: bool(env.HUE_ENABLED, true),
     bridgeIp: env.HUE_BRIDGE_IP || '',
+    bridgePort: int(env.HUE_BRIDGE_PORT, 443),
     appKey: env.HUE_APP_KEY || '',
-    allowPayloadCredentials: bool(env.HUE_ALLOW_PAYLOAD_CREDENTIALS, false),
     maxLights: int(env.HUE_MAX_LIGHTS, 50),
     concurrency: int(env.HUE_CONCURRENCY, 5),
   },
