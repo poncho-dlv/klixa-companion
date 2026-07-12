@@ -1,4 +1,4 @@
-# Protocole — Compagnon ↔ Cloud Klixa
+# Protocole — Compagnon et Cloud Klixa
 
 Connexion **WebSocket sortante** initiée par le compagnon. Le cloud ne se
 connecte jamais au compagnon. Tous les messages sont du JSON (un objet par trame).

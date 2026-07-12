@@ -12,10 +12,19 @@ function ts() {
   return new Date().toISOString();
 }
 
+function withoutEmoji(value) {
+  return String(value)
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/[\uFE0E\uFE0F]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function format(level, scope, msg, extra) {
-  const base = `[${ts()}] ${level} [${scope}] ${msg}`;
+  const base = `[${ts()}] ${level} [${scope}] ${withoutEmoji(msg)}`;
   if (extra === undefined) return base;
-  return `${base} ${typeof extra === 'string' ? extra : JSON.stringify(extra)}`;
+  const details = typeof extra === 'string' ? extra : JSON.stringify(extra);
+  return `${base} ${withoutEmoji(details)}`;
 }
 
 function write(consoleMethod, line) {

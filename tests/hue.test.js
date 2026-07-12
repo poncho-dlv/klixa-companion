@@ -24,7 +24,7 @@ test('hexToXy: rouge pur', () => {
   assert.equal(y, 0.2993);
 });
 
-test('hexToXy: noir → point blanc par défaut (évite division par zéro)', () => {
+test('hexToXy: noir vers point blanc par défaut (évite division par zéro)', () => {
   assert.deepEqual(hexToXy('#000000'), { x: 0.3127, y: 0.3290 });
 });
 

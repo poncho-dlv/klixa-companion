@@ -11,7 +11,7 @@ const DEFAULTS = {
   durationMs: 1200
 };
 
-// ── Conversion couleur (pure + testée) ───────────────────────────────────────
+// Conversion couleur (pure + testée)
 function gammaCorrect(value) {
   return value > 0.04045 ? Math.pow((value + 0.055) / 1.055, 2.4) : value / 12.92;
 }
@@ -24,7 +24,7 @@ export function isHexColor(value) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
 }
 
-// Hex #RRGGBB → coordonnées CIE xy (gamma sRGB), identique à HueAlert.cs.
+// Conversion Hex #RRGGBB vers coordonnées CIE xy (gamma sRGB), identique à HueAlert.cs.
 export function hexToXy(hex) {
   const r = gammaCorrect(parseInt(hex.slice(1, 3), 16) / 255);
   const g = gammaCorrect(parseInt(hex.slice(3, 5), 16) / 255);
@@ -85,7 +85,7 @@ export function normalizeLightIds(raw) {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed)) values = parsed;
     } catch {
-      // pas du JSON → liste séparée par virgules/retours ligne
+      // pas du JSON, donc liste séparée par virgules/retours ligne
     }
     if (!values) values = text.split(/[,\n\r]/);
   }
@@ -110,7 +110,7 @@ export async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
-// ── Client HTTP du bridge (API CLIP v2, HTTPS auto-signé) ────────────────────
+// Client HTTP du bridge (API CLIP v2, HTTPS auto-signé)
 function hueRequest(bridgeIp, bridgePort, appKey, method, path, body) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
@@ -120,7 +120,7 @@ function hueRequest(bridgeIp, bridgePort, appKey, method, path, body) {
         port: bridgePort || 443,
         path,
         method,
-        // Le bridge Hue présente un certificat auto-signé → on ne valide pas la chaîne
+        // Le bridge Hue présente un certificat auto-signé, donc on ne valide pas la chaîne
         // (équivalent du ServerCertificateValidationCallback => true du C#).
         rejectUnauthorized: false,
         headers: {

@@ -47,13 +47,13 @@ Le menu tray « À propos » affiche la version courante et propose « Vérifier
 le prochain tick de `UPDATE_CHECK_INTERVAL_MS`, avec retour via dialogues natifs (a jour
 / telechargement en cours / erreur).
 
-⚠️ **Une release `draft` (creee par `Publish release`) est invisible pour
+**Attention : une release `draft` (creee par `Publish release`) est invisible pour
 l'auto-updater** : il faut explicitement la publier sur GitHub (bouton "Publish
 release") pour que les clients installes la detectent — c'est le garde-fou de
 rollout avant diffusion large.
 
 Publier une nouvelle version : incrementer `version` dans `package.json`, pousser un
-tag `vX.Y.Z` → le workflow `Publish release` construit et attache l'EXE, le blockmap
+tag `vX.Y.Z` : le workflow `Publish release` construit et attache l'EXE, le blockmap
 et `latest.yml` a une release (brouillon si elle n'existe pas). Verifier le build puis
 publier la release. Si l'upload echoue, relancer le workflow depuis l'onglet Actions
 avec le tag concerne.

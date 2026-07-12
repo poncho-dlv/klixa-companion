@@ -26,7 +26,7 @@ commandes dans ce tuyau.
   écran de configuration et pairing. Voir [desktop/README.md](desktop/README.md).
 - **Service GPIO** (`rpi/`) — micro-service Python sur Raspberry Pi qui pilote
   le relais de la machine à fumée. Voir [rpi/README.md](rpi/README.md).
-- **Protocole** (`protocol/messages.md`) — contrat des messages compagnon ↔ cloud.
+- **Protocole** (`protocol/messages.md`) — contrat des messages entre le compagnon et le cloud.
 
 ## Développement
 

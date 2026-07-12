@@ -6,7 +6,7 @@ const log = createLogger('obs');
 // Paramètres d'URL où peut vivre le token overlay (ordre de préférence).
 const TOKEN_PARAMS = ['wsToken', 'overlayToken', 'token'];
 
-// ── Manipulation d'URL (pures + testées) ─────────────────────────────────────
+// Manipulation d'URL (pures + testées)
 export function extractToken(rawUrl) {
   try {
     const u = new URL(rawUrl);
@@ -44,8 +44,8 @@ export function urlMatchesBase(rawUrl, base) {
 }
 
 // Décide quoi faire de l'URL d'une source navigateur (pur + testé) :
-//  - 'skip'   : URL hors origine overlay → ne pas toucher
-//  - 'ok'     : déjà le bon token → rien à faire
+//  - 'skip'   : URL hors origine overlay, ne pas toucher
+//  - 'ok'     : déjà le bon token, rien à faire
 //  - 'update' : réécrire avec l'URL renvoyée
 export function resolveOverlayUrlUpdate(currentUrl, base, token) {
   if (!currentUrl || !urlMatchesBase(currentUrl, base)) return { action: 'skip', url: currentUrl };
@@ -57,9 +57,9 @@ export function resolveOverlayUrlUpdate(currentUrl, base, token) {
  * Intégration OBS NATIVE (obs-websocket) : le compagnon parle directement à OBS sur
  * le LAN. Remplace l'action Streamer.bot ObsSyncOverlayToken.cs ET la souscription SB
  * aux events de scène/stream. Deux sens :
- *  - commande `obs.sync-overlay-token` (cloud → compagnon) : réécrit le token overlay
+ *  - commande `obs.sync-overlay-token` (cloud vers compagnon) : réécrit le token overlay
  *    dans les URLs des sources navigateur OBS.
- *  - events `Obs.SceneChanged` / `Obs.StreamingStarted|Stopped` (compagnon → cloud).
+ *  - events `Obs.SceneChanged` / `Obs.StreamingStarted|Stopped` (compagnon vers cloud).
  */
 export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   const obs = new OBSWebSocket();
@@ -67,7 +67,7 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   let connected = false;
   let stopped = false;
   let reconnectTimer = null;
-  // Anti-spam : OBS hors ligne → on tente toutes les 5 s. On logge la perte UNE fois,
+  // Anti-spam : si OBS est hors ligne, on tente toutes les 5 s. On logge la perte UNE fois,
   // puis silence jusqu'au retour (connect() réussi remet le flag à zéro).
   let loggedOffline = false;
 
@@ -76,7 +76,7 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 5000);
   }
 
-  // OBS hors ligne avec pare-feu qui « drop » les paquets → obs.connect() peut rester
+  // Si OBS est hors ligne avec un pare-feu qui « drop » les paquets, obs.connect() peut rester
   // bloqué ~2 min (timeout TCP de l'OS) avant d'échouer, ce qui fige la reconnexion et
   // empêche de détecter le lancement d'OBS. On borne donc l'attente à 10 s puis on coupe.
   function connectWithTimeout() {
@@ -175,9 +175,9 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   }
 
   // obs.get-scenes — liste les scènes du canevas programme (GetSceneList), ordonnées
-  // comme dans l'UI OBS (haut → bas : GetSceneList renvoie les sceneIndex croissants,
+  // comme dans l'UI OBS (de haut en bas : GetSceneList renvoie les sceneIndex croissants,
   // 0 = bas de liste), + la scène courante. Consommé par la page admin « Écran
-  // dynamique » (mapping scène → titre/étapes).
+  // dynamique » (mapping entre scène et titre/étapes).
   async function getScenes() {
     if (!connected) throw new Error('OBS non connecté');
 
