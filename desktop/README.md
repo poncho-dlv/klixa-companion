@@ -3,8 +3,14 @@
 ## Parcours utilisateur
 
 1. Installer `Klixa-Companion-Setup-<version>.exe`.
-2. Renseigner l'URL WebSocket Klixa et le token genere dans le dashboard.
-3. Verifier les reglages OBS et Streamer.bot, puis enregistrer.
+2. Cliquer « Lier ce compagnon » : un code a 6 chiffres s'affiche. Le saisir dans la
+   console Klixa, Parametres puis Compagnon, pendant qu'il est valide (10 minutes).
+   L'URL WebSocket et le token sont recuperes automatiquement, sans copier-coller
+   (device-code flow, cf. `server/companion-pairing-service.js` cote Klixa). L'URL de
+   l'instance ciblee par ce pairing est `https://klixa.live` par defaut, modifiable dans
+   « Configuration manuelle / autre instance » pour un self-host.
+3. Verifier les reglages OBS et Streamer.bot, puis enregistrer. Le lien manuel (URL
+   WebSocket + token colles a la main) reste disponible dans ce meme panneau si besoin.
 4. Fermer la fenetre : le compagnon continue dans la zone de notification.
 
 Le menu de l'icone permet de rouvrir ou quitter l'application. L'option de

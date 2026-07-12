@@ -12,8 +12,21 @@
     <header><div class="logo">K</div><div><h1>Klixa Companion</h1><p id="status">Demarrage...</p></div></header>
     <form id="config">
       <section><h2>Connexion Klixa</h2>
-        <label>Adresse du cloud<input name="CLOUD_WS_URL" type="url" placeholder="wss://app.klixa.live/companion/ws"></label>
-        <label>Token du compagnon<input name="COMPANION_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver le token"></label>
+        <div class="pairing">
+          <button type="button" id="pairBtn">Lier ce compagnon</button>
+          <div id="pairCode" class="pair-code" hidden>
+            <p class="pair-code-value" id="pairCodeValue"></p>
+            <p>Va sur ta console Klixa, Parametres puis Compagnon, et entre ce code.</p>
+            <p id="pairCodeTimer"></p>
+          </div>
+          <p id="pairMessage" role="status"></p>
+        </div>
+        <details>
+          <summary>Configuration manuelle / autre instance</summary>
+          <label>Adresse du cloud<input name="CLOUD_WS_URL" type="url" placeholder="wss://app.klixa.live/companion/ws"></label>
+          <label>Token du compagnon<input name="COMPANION_TOKEN" type="password" autocomplete="new-password" placeholder="Laisser vide pour conserver le token"></label>
+          <label>URL de l'instance (pour le pairing)<input name="CLOUD_PAIR_URL" type="url" placeholder="https://klixa.live"></label>
+        </details>
       </section>
       <section><h2>OBS</h2>
         <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>

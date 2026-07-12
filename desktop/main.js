@@ -94,6 +94,65 @@ async function restartRuntime(values) {
 
 const LOGIN_ITEM_ARGS = ['--hidden'];
 
+// Pairing device-code (cf. server/companion-pairing-service.js cote Klixa) : le
+// compagnon demande un code a l'instance cloud (URL par defaut, surchargeable pour
+// le self-host), affiche le userCode 6 chiffres et poll jusqu'a ce que le streamer
+// l'ait saisi dans la console admin. Etat garde en memoire du process main uniquement
+// (jamais persiste : un redemarrage pendant un pairing en cours force juste a relancer).
+const DEFAULT_CLOUD_PAIR_URL = 'https://klixa.live';
+let pairingPoll = null;
+
+function stopPairingPoll() {
+  if (pairingPoll?.timer) clearInterval(pairingPoll.timer);
+  pairingPoll = null;
+}
+
+function sendPairingStatus(payload) {
+  window?.webContents.send('pairing:status', payload);
+}
+
+async function pollPairingOnce() {
+  if (!pairingPoll) return;
+  const { deviceCode, baseUrl } = pairingPoll;
+
+  let data;
+  try {
+    const response = await fetch(`${baseUrl}/api/companion-pair/poll`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceCode })
+    });
+    data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  } catch (error) {
+    // Erreur reseau ponctuelle : on ne coupe pas la boucle, le prochain tick reessaiera
+    // jusqu'a expiration cote serveur (le pairing lui-meme a un TTL).
+    log.warn('Echec du poll de pairing', error.message);
+    return;
+  }
+
+  if (data.status === 'pending') return;
+
+  stopPairingPoll();
+
+  if (data.status === 'expired') {
+    sendPairingStatus({ phase: 'expired' });
+    return;
+  }
+
+  if (data.status === 'claimed') {
+    const current = store.load();
+    const next = { ...current, CLOUD_WS_URL: data.wsUrl, COMPANION_TOKEN: data.token };
+    store.save(next);
+    try {
+      await restartRuntime(next);
+      sendPairingStatus({ phase: 'claimed' });
+    } catch (error) {
+      sendPairingStatus({ phase: 'error', message: error.message });
+    }
+  }
+}
+
 function publicConfig(values) {
   const result = { ...values };
   for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN']) {
@@ -121,6 +180,28 @@ function registerIpc() {
     store.save(next);
     await restartRuntime(next);
     return publicConfig(next);
+  });
+  ipcMain.handle('pairing:start', async (_event, { baseUrl } = {}) => {
+    stopPairingPoll();
+    const resolvedBaseUrl = String(baseUrl || store.load().CLOUD_PAIR_URL || DEFAULT_CLOUD_PAIR_URL)
+      .trim()
+      .replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(resolvedBaseUrl)) throw new Error('URL d\'instance invalide (http:// ou https:// attendu)');
+
+    const response = await fetch(`${resolvedBaseUrl}/api/companion-pair/start`, { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+    pairingPoll = {
+      deviceCode: data.deviceCode,
+      baseUrl: resolvedBaseUrl,
+      timer: setInterval(pollPairingOnce, Math.max(1000, Number(data.intervalMs) || 3000))
+    };
+
+    return { userCode: data.userCode, expiresInMs: data.expiresInMs };
+  });
+  ipcMain.handle('pairing:cancel', () => {
+    stopPairingPoll();
   });
 }
 
@@ -162,4 +243,4 @@ app.whenReady().then(async () => {
 app.on('second-instance', showWindow);
 app.on('window-all-closed', () => {});
 app.on('before-quit', () => { quitting = true; });
-app.on('will-quit', () => runtime?.stop());
+app.on('will-quit', () => { stopPairingPoll(); runtime?.stop(); });

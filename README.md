@@ -57,6 +57,10 @@ docker compose up -d --build
 
 ## Variables d'environnement
 
+> Ce tableau concerne le mode Docker/NAS headless (`.env` manuel). L'app desktop
+> (`desktop/`) peut obtenir `CLOUD_WS_URL`/`COMPANION_TOKEN` automatiquement via un
+> pairing par code a 6 chiffres — voir [desktop/README.md](desktop/README.md).
+
 | Variable | Description |
 |----------|-------------|
 | `CLOUD_WS_URL` | URL WS du serveur Klixa (`wss://<host>/companion/ws`). Vide = mode local seul. |
