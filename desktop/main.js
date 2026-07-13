@@ -190,6 +190,11 @@ async function pollPairingOnce() {
   }
 }
 
+// Secrets : jamais renvoyes en clair au renderer (remplaces par un booleen *_CONFIGURED)
+// et jamais ecrases par une valeur vide a la sauvegarde. Doit rester aligne avec
+// `secretKeys` de config-store.js (qui les chiffre au repos via safeStorage).
+const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN'];
+
 function publicConfig(values) {
   const result = { ...values };
   try {
@@ -211,7 +216,7 @@ function publicConfig(values) {
   }
   delete result.SMOKE_SERVICE_URL;
   result.HUE_BRIDGE_PORT = String(result.HUE_BRIDGE_PORT || 443);
-  for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY']) {
+  for (const key of SECRET_KEYS) {
     result[`${key}_CONFIGURED`] = Boolean(result[key]);
     delete result[key];
   }
@@ -250,7 +255,7 @@ function registerIpc() {
     if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error('Port Hue invalide');
     normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
     const next = { ...current, ...normalizedSubmitted };
-    for (const key of ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY']) {
+    for (const key of SECRET_KEYS) {
       if (!normalizedSubmitted[key]) next[key] = current[key] || '';
     }
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');

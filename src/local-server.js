@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createLogger } from './logger.js';
 
@@ -60,6 +61,39 @@ export function isLoopbackHost(host) {
   return ['127.0.0.1', '::1', 'localhost'].includes(String(host).toLowerCase());
 }
 
+// Extrait le nom d'hôte (sans port, crochets IPv6 retirés) d'un header Host ou d'une
+// valeur Origin. Renvoie '' si non analysable.
+function hostnameOf(value) {
+  try {
+    const url = value.includes('://') ? new URL(value) : new URL(`http://${value}`);
+    return url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+// Anti-CSRF : un navigateur envoie TOUJOURS un header Origin sur une requête
+// cross-origin (et sur les POST). Un client légitime hors navigateur (curl, script,
+// healthcheck Docker) n'en envoie pas. On refuse donc tout Origin présent qui ne
+// pointe pas vers la loopback — ce qui neutralise une page malveillante visitée par
+// le streamer, quel que soit le Content-Type.
+export function isAllowedOrigin(originHeader) {
+  if (originHeader === undefined || originHeader === null || originHeader === '') return true;
+  return isLoopbackHost(hostnameOf(String(originHeader)));
+}
+
+// Anti-DNS-rebinding : une attaque par rebinding fait résoudre un NOM de domaine
+// (attacker.example) vers 127.0.0.1 pour parler au serveur en « same-origin ». Le
+// header Host porte alors ce domaine. On n'autorise donc que la loopback, une IP
+// littérale (impossible à rebinder), ou l'hôte explicitement configuré.
+export function isAllowedRequestHost(hostHeader, configHost) {
+  const hostname = hostnameOf(String(hostHeader ?? ''));
+  if (!hostname) return false;
+  if (isLoopbackHost(hostname)) return true;
+  if (net.isIP(hostname)) return true;
+  return Boolean(configHost) && hostname === String(configHost).toLowerCase();
+}
+
 export function tokenMatches(actual, expected) {
   if (!expected || typeof actual !== 'string') return false;
   const digest = (value) => createHash('sha256').update(value).digest();
@@ -77,6 +111,16 @@ export function createLocalServer(config, registry) {
   }
   const server = http.createServer(async (req, res) => {
     try {
+      // Le serveur n'a AUCUN client navigateur légitime (le renderer desktop passe par
+      // IPC, jamais par HTTP). On rejette donc toute requête cross-origin ou dont le Host
+      // est un domaine non autorisé : sans ça, une page web visitée par le streamer
+      // pourrait piloter les commandes locales (fumée, actions Streamer.bot, Hue, OBS)
+      // via une « simple request » non soumise au préflight CORS.
+      if (!isAllowedOrigin(req.headers.origin) || !isAllowedRequestHost(req.headers.host, host)) {
+        json(res, 403, { ok: false, error: 'Origine non autorisée' });
+        return;
+      }
+
       const url = new URL(req.url, 'http://localhost');
 
       if (req.method === 'GET' && url.pathname === '/live') {
@@ -141,5 +185,5 @@ export function createLocalServer(config, registry) {
     });
   }
 
-  return { start, stop };
+  return { start, stop, address: () => server.address() };
 }

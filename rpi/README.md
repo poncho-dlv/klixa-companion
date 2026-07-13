@@ -17,11 +17,21 @@ mkdir -p /home/rpi_user/klixa-smoke && cd /home/rpi_user/klixa-smoke
 pip3 install -r requirements.txt --break-system-packages
 ```
 
+Générer le secret partagé :
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
 Créer `/home/rpi_user/klixa-smoke/.env` :
 
 ```bash
 SMOKE_GPIO_PIN=17
 SMOKE_PORT=8787
+SMOKE_BIND=0.0.0.0
+# Le même secret doit être saisi côté compagnon (app Klixa Companion → Machine à
+# fumée → Token du service, ou SMOKE_SERVICE_TOKEN dans le .env du hub).
+SMOKE_TOKEN=le-secret-genere-ci-dessus
 SMOKE_MIN_MS=50
 SMOKE_MAX_MS=1500
 SMOKE_DEFAULT_MS=300
@@ -38,15 +48,25 @@ journalctl -u klixa-smoke -f
 
 ## Tester
 
+Le token se présente dans le header `X-Smoke-Token` :
+
 ```bash
-curl http://localhost:8787/health
+curl -H "x-smoke-token: $SMOKE_TOKEN" http://localhost:8787/health
 curl -X POST http://localhost:8787/smoke/trigger \
+  -H "x-smoke-token: $SMOKE_TOKEN" \
   -H "content-type: application/json" \
   -d '{"durationMs":300}'
 ```
 
+Sans token (ou avec un token erroné) : `401`.
+
 ## Garde-fous
 
+- **Authentification par secret partagé** (`SMOKE_TOKEN`, header `X-Smoke-Token`,
+  comparaison à temps constant) : sans elle, tout appareil du LAN pourrait
+  déclencher la machine.
+- **Fail-closed** : le service refuse de démarrer si `SMOKE_BIND` n'est pas une
+  adresse loopback alors que `SMOKE_TOKEN` est vide.
 - Durée bornée à `[SMOKE_MIN_MS, SMOKE_MAX_MS]` (défaut 50–1500 ms) — le relais
   ne peut pas rester bloqué « on » via une commande.
 - Impulsion unique : une requête pendant une impulsion en cours reçoit `409`.

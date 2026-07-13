@@ -56,7 +56,8 @@ const INTEGRATION_ENABLED_KEYS = {
 const SECRET_MASK = '••••••••';
 const secretFields = [
   { input: document.querySelector('#obsWsPassword'), configuredKey: 'OBS_WS_PASSWORD_CONFIGURED', statusId: 'obs' },
-  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED', statusId: 'streamerbot' }
+  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED', statusId: 'streamerbot' },
+  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED', statusId: 'smoke' }
 ];
 
 // Chemins FontAwesome (circle-check / triangle-exclamation) inlines en SVG : la CSP

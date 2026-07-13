@@ -18,6 +18,10 @@ export function createSmokeIntegration(smokeConfig) {
     throw new Error('SMOKE_SERVICE_URL manquant (URL du service GPIO sur le Raspberry Pi)');
   }
   const base = smokeConfig.serviceUrl.replace(/\/+$/, '');
+  // Secret partagé attendu par le service GPIO (cf. SMOKE_TOKEN sur le RPi). Absent =
+  // service supposé en loopback sur le RPi, qui n'exige alors aucun token.
+  const token = String(smokeConfig.token || '').trim();
+  const authHeaders = token ? { 'x-smoke-token': token } : {};
 
   async function trigger(payload) {
     const durationMs = clampDuration(payload?.durationMs, smokeConfig);
@@ -26,6 +30,7 @@ export function createSmokeIntegration(smokeConfig) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        ...authHeaders,
       },
       body: JSON.stringify({ durationMs }),
       signal: AbortSignal.timeout(5000),
@@ -38,7 +43,12 @@ export function createSmokeIntegration(smokeConfig) {
   }
 
   async function healthcheck() {
-    const res = await fetch(`${base}/health`, { method: 'GET', signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${base}/health`, {
+      method: 'GET',
+      headers: authHeaders,
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.status === 401) throw new Error('Token du service fumée invalide (SMOKE_SERVICE_TOKEN)');
     if (!res.ok) throw new Error(`Service fumée injoignable (HTTP ${res.status})`);
     return { serviceUrl: base };
   }
