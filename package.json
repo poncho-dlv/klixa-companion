@@ -1,6 +1,6 @@
 {
   "name": "klixa-companion",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, Streamer.bot) au serveur Klixa cloud via une connexion sortante.",
   "author": "Klixa",
   "license": "Apache-2.0",
