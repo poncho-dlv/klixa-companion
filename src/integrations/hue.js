@@ -268,19 +268,12 @@ export function createHueIntegration(hueConfig = {}) {
     }
   }
 
-  // hue.color — couleur/scène. Payload : { lightIds, color, brightness, transitionMs,
-  // durationMs, mode ('simple' = clignotement), sceneId }.
+  // hue.color — couleur sur les lampes ciblées. Payload : { lightIds, color, brightness,
+  // transitionMs, durationMs, mode ('simple' = clignotement + restauration) }.
+  // (La gestion des scènes Hue a été retirée : recall permanent, incompatible avec des
+  // alertes ponctuelles qui doivent restaurer l'état initial.)
   async function color(payload = {}) {
     const creds = resolveCredentials();
-
-    const sceneId = String(payload.sceneId || payload.hueSceneId || '').trim();
-    if (sceneId) {
-      await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/scene/${encodeURIComponent(sceneId)}`, {
-        recall: { action: 'active' }
-      });
-      log.info('Scène activée', { sceneId });
-      return { sceneId };
-    }
 
     const lightIds = normalizeLightIds(payload.lightIds ?? payload.hueLightIds);
     if (lightIds.length === 0) throw new Error('Aucune lampe cible (lightIds vide)');
@@ -305,36 +298,19 @@ export function createHueIntegration(hueConfig = {}) {
     return { lights: lightIds.length, color: hex };
   }
 
-  // hue.discover — liste lampes + scènes (résultat renvoyé dans l'ack au cloud).
+  // hue.discover — liste des lampes (résultat renvoyé dans l'ack au cloud).
   async function discover() {
     const creds = resolveCredentials();
 
-    const [lightsRes, scenesRes, roomsRes] = await Promise.all([
-      hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/light', null),
-      hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/scene', null),
-      hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/room', null)
-    ]);
-
-    const roomNames = new Map();
-    for (const room of roomsRes?.data || []) {
-      if (room?.id) roomNames.set(room.id, room.metadata?.name || room.id);
-    }
+    const lightsRes = await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/light', null);
 
     const lights = (lightsRes?.data || [])
       .filter((l) => l?.id)
       .map((l) => ({ id: l.id, name: l.metadata?.name || l.id }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    const scenes = (scenesRes?.data || [])
-      .filter((s) => s?.id)
-      .map((s) => {
-        const groupId = s.group?.rid || '';
-        return { id: s.id, name: s.metadata?.name || s.id, groupId, groupName: roomNames.get(groupId) || '' };
-      })
-      .sort((a, b) => (a.groupName + a.name).localeCompare(b.groupName + b.name));
-
-    log.info('Découverte terminée', { lights: lights.length, scenes: scenes.length });
-    return { lights, scenes };
+    log.info('Découverte terminée', { lights: lights.length });
+    return { lights };
   }
 
   // hue.register — conservée dans le registre de commandes pour local-server.js
