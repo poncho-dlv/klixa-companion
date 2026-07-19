@@ -70,7 +70,12 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   const client = createMeshClient({
     getState: () => state,
     persistState,
-    scanForLampAdvertisements: async (...args) => (await loadBleTransport()).scanForLampAdvertisements(...args),
+    // In-process : provision()/reconnexion Proxy ont besoin d'un handle `device`
+    // réel pour se connecter ensuite, non sérialisable entre processus.
+    scanForLampAdvertisements: async (...args) => (await loadBleTransport()).scanForLampAdvertisementsInProcess(...args),
+    // Isolé dans un processus dédié avec timeout dur (cf. ble-transport.js) : c'est
+    // celui-ci qui sert le bouton "Scanner" de l'UI (smallrig.discover).
+    scanForDisplay: async (...args) => (await loadBleTransport()).scanForLampAdvertisements(...args),
     openProvisioningConnection: async (...args) => (await loadBleTransport()).openProvisioningConnection(...args),
     openProxyConnection: async (...args) => (await loadBleTransport()).openProxyConnection(...args),
     waitForProxyAdvertisement: async (...args) => (await loadBleTransport()).waitForProxyAdvertisement(...args),

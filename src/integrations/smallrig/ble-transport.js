@@ -14,9 +14,16 @@
 // confirmer — cf. RM75_SPEC_DEV.md §12 pour le point bloquant sur l'opcode vendor.
 
 import { Bluetooth } from 'webbluetooth';
+import { fork } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createLogger } from '../../logger.js';
 
 const log = createLogger('smallrig-ble');
+const SCAN_WORKER_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ble-scan-worker.js');
+// Marge laissée au processus enfant au-delà du timeout de scan demandé, avant de
+// considérer qu'il est bloqué et de le tuer de force (cf. scanForLampAdvertisements).
+const SCAN_WORKER_KILL_GRACE_MS = 5000;
 
 export const GATT = {
   PROVISIONING_SERVICE: 0x1827,
@@ -46,7 +53,15 @@ function toBuffer(dataView) {
 // sélectionne jamais un device (retourne toujours false) : on laisse le scan courir
 // `timeoutMs` et on récupère la liste complète à la fin (requestDevice rejette alors
 // avec "no devices found", ce qui est le comportement normal ici, pas une erreur).
-export async function scanForLampAdvertisements({ timeoutMs = 6000, adapterIndex } = {}) {
+//
+// Implémentation IN-PROCESS : sur certaines machines, l'appel natif sous-jacent
+// (SimpleBLE -> WinRT) peut se bloquer durablement sans jamais relâcher la main
+// (observé en production : CPU bas, aucune réponse). Cette fonction reste utilisée
+// telle quelle par provision()/reconnexion (qui ont besoin d'un handle `device` réel,
+// non sérialisable entre processus) ; l'écran "Scanner" de l'UI passe par
+// `scanForLampAdvertisements` ci-dessous, qui isole cet appel dans un processus
+// séparé avec un timeout dur — voir ble-scan-worker.js pour le pourquoi.
+export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, adapterIndex } = {}) {
   const found = new Map();
 
   const bt = new Bluetooth({
@@ -102,6 +117,77 @@ export async function scanForLampAdvertisements({ timeoutMs = 6000, adapterIndex
   }
 
   return [...found.values()];
+}
+
+// Scan d'affichage (bouton "Scanner" de l'UI / commande `smallrig.discover`), isolé
+// dans un processus enfant dédié avec un timeout DUR (kill forcé). Un timeout côté JS
+// dans CE process (Promise.race, setTimeout) ne suffirait pas : si l'appel natif
+// bloque la boucle d'événements du process principal, plus rien ne s'y exécute — y
+// compris les timers — et tout le compagnon (Hue/OBS/Streamer.bot inclus) resterait
+// figé avec lui. En isolant l'appel, seul ce processus enfant peut se bloquer ; le
+// process principal reste réactif et peut le tuer de force s'il ne répond pas à temps.
+// Retourne des champs simples (deviceUuid/networkId en hex string) : le handle
+// `device` natif ne survit pas au changement de processus, donc pas exploitable ici —
+// provision()/reconnexion utilisent `scanForLampAdvertisementsInProcess` à la place.
+//
+// En pratique (testé sur cette machine avec un dongle Bluetooth réel), l'appel natif
+// sous-jacent (SimpleBLE/WinRT) reste parfois bloqué de façon intermittente — pas à
+// chaque scan, mais assez souvent pour être gênant. Comme un nouvel essai réussit
+// généralement, on retente une fois automatiquement avant de remonter une erreur à
+// l'utilisateur (double la latence dans le pire cas, mais évite un aller-retour manuel
+// pour la plupart des échecs).
+export async function scanForLampAdvertisements({ timeoutMs = 6000 } = {}) {
+  try {
+    return await scanOnceIsolated({ timeoutMs });
+  } catch (err) {
+    log.warn('Premier essai de scan BLE échoué, nouvelle tentative', err.message);
+    // Un SIGKILL en plein appel natif ne laisse pas au processus la chance de
+    // libérer proprement le radio Bluetooth côté OS ; un court délai avant de
+    // retenter réduit le risque d'enchaîner sur un second échec pour la même raison.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return scanOnceIsolated({ timeoutMs });
+  }
+}
+
+async function scanOnceIsolated({ timeoutMs = 6000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let hardTimeout;
+
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimeout);
+      child.removeAllListeners();
+      try { child.kill(); } catch { /* déjà arrêté */ }
+      fn(value);
+    };
+
+    const child = fork(SCAN_WORKER_PATH, [], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    });
+
+    hardTimeout = setTimeout(() => {
+      log.warn('Scan BLE : le processus de scan ne répond pas, arrêt forcé', { timeoutMs });
+      try { child.kill('SIGKILL'); } catch { /* déjà arrêté */ }
+      finish(reject, new Error(
+        'Le scan Bluetooth ne répond pas (adaptateur bloqué ou indisponible). '
+        + 'Vérifie que le Bluetooth est bien activé, puis réessaie ; si ça persiste, redémarre le compagnon.'
+      ));
+    }, timeoutMs + SCAN_WORKER_KILL_GRACE_MS);
+
+    child.on('message', (msg) => {
+      if (!msg || msg.type !== 'result') return;
+      if (msg.ok) finish(resolve, msg.lamps);
+      else finish(reject, new Error(msg.error));
+    });
+    child.on('error', (err) => finish(reject, err));
+    child.on('exit', (code) => {
+      if (!settled) finish(reject, new Error(`Le processus de scan Bluetooth s'est arrêté de manière inattendue (code ${code})`));
+    });
+
+    child.send({ type: 'scan', timeoutMs });
+  });
 }
 
 // Ouvre une connexion GATT vers un device déjà repéré par scanForLampAdvertisements
@@ -166,7 +252,7 @@ export async function waitForProxyAdvertisement({ timeoutMs = 5000, retryDelayMs
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const found = await scanForLampAdvertisements({ timeoutMs: Math.min(2000, deadline - Date.now()) });
+      const found = await scanForLampAdvertisementsInProcess({ timeoutMs: Math.min(2000, deadline - Date.now()) });
       const proxy = found.filter((f) => f.kind === 'provisioned');
       if (proxy.length > 0) return proxy;
     } catch (err) {

@@ -211,6 +211,13 @@ export function createMeshClient({
   getState,
   persistState,
   scanForLampAdvertisements,
+  // Scan utilisé UNIQUEMENT par discover() (bouton "Scanner" de l'UI, affichage pur —
+  // pas de connexion GATT derrière). Peut être isolé dans un processus séparé
+  // (cf. ble-transport.js#scanForLampAdvertisements côté isolé) sans casser
+  // provision()/ensureProxySession(), qui ont besoin d'un handle `device` réel pour se
+  // connecter et continuent donc à utiliser `scanForLampAdvertisements` (in-process).
+  // Retombe sur `scanForLampAdvertisements` si non fourni (rétrocompatible).
+  scanForDisplay,
   openProvisioningConnection,
   openProxyConnection,
   waitForProxyAdvertisement,
@@ -218,6 +225,7 @@ export function createMeshClient({
   seqBlockSize = 100,
   provisionerAddress: forcedProvisionerAddress
 }) {
+  const scanForDisplayFn = scanForDisplay || scanForLampAdvertisements;
   let proxySession = null;
   let proxyConn = null;
 
@@ -274,17 +282,25 @@ export function createMeshClient({
 
   // --- Découverte -----------------------------------------------------------------
 
+  // deviceUuid/networkId arrivent en Buffer (scan in-process) ou en hex string (scan
+  // isolé dans un processus séparé, cf. ble-transport.js) — on normalise en string.
+  function toHex(value) {
+    if (!value) return null;
+    return Buffer.isBuffer(value) ? value.toString('hex') : String(value);
+  }
+
   async function discover({ timeoutMs = 6000 } = {}) {
     const state = getState();
     const netKeys = state.netKey ? netKeysFor(state) : null;
-    const found = await scanForLampAdvertisements({ timeoutMs });
+    const ourNetworkIdHex = netKeys ? toHex(netKeys.networkId) : null;
+    const found = await scanForDisplayFn({ timeoutMs });
 
     return found.map((f) => {
       if (f.kind === 'unprovisioned') {
-        return { bleDeviceId: f.bleDeviceId, kind: 'unprovisioned', deviceUuid: f.deviceUuid.toString('hex'), rssi: f.rssi, name: f.name };
+        return { bleDeviceId: f.bleDeviceId, kind: 'unprovisioned', deviceUuid: toHex(f.deviceUuid), rssi: f.rssi, name: f.name };
       }
-      const isOurs = netKeys && f.networkId && f.networkId.equals(netKeys.networkId);
-      return { bleDeviceId: f.bleDeviceId, kind: 'provisioned', ours: Boolean(isOurs), rssi: f.rssi, name: f.name };
+      const isOurs = Boolean(ourNetworkIdHex && f.networkId && toHex(f.networkId) === ourNetworkIdHex);
+      return { bleDeviceId: f.bleDeviceId, kind: 'provisioned', ours: isOurs, rssi: f.rssi, name: f.name };
     });
   }
 
