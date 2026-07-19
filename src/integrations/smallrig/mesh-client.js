@@ -252,7 +252,10 @@ export function createMeshClient({
     if (state.nodes.length === 0) throw new Error('Aucune lampe provisionnée');
     const netKeys = netKeysFor(state);
 
-    const candidates = await scanForLampAdvertisements({ timeoutMs: 5000 });
+    // Fenêtre >= 6s : en dessous, le scan manque souvent les annonces exploitables
+    // (les premiers paquets publicitaires d'un appareil sont parfois incomplets —
+    // vérifié sur matériel réel, cf. patch webbluetooth scanUpdated).
+    const candidates = await scanForLampAdvertisements({ timeoutMs: 8000 });
     const proxyCandidates = candidates.filter((c) => c.kind === 'provisioned'
       && (!c.networkId || c.networkId.equals(netKeys.networkId)));
     if (proxyCandidates.length === 0) throw new Error('Aucune lampe SmallRig joignable en Bluetooth à proximité');
@@ -311,7 +314,7 @@ export function createMeshClient({
     ensureNetworkKeys(state);
     if (persistState) await persistState(state);
 
-    const found = await scanForLampAdvertisements({ timeoutMs: 6000 });
+    const found = await scanForLampAdvertisements({ timeoutMs: 8000 });
     const target = found.find((f) => f.bleDeviceId === bleDeviceId && f.kind === 'unprovisioned');
     if (!target) throw new Error('Lampe introuvable (relancez une découverte, elle est peut-être hors de portée ou déjà provisionnée)');
 
@@ -365,12 +368,26 @@ export function createMeshClient({
 
     // La lampe bascule 0x1827 -> 0x1828 après le Complete (§4) : laisse-lui le temps
     // puis configure (AppKey Add + Model App Bind), condition nécessaire pour que les
-    // commandes de contrôle soient acceptées (§8).
-    try {
-      await configureNode(node);
-    } catch (err) {
-      log.warn('Configuration post-provisioning échouée (la lampe est provisionnée mais pas encore configurée)', err.message);
-      throw new Error(`Lampe provisionnée mais configuration échouée : ${err.message}`);
+    // commandes de contrôle soient acceptées (§8). En pratique sur matériel réel, cette
+    // bascule peut prendre plus de temps que prévu de façon irrégulière (observé) :
+    // quelques essais supplémentaires évitent d'échouer tout le provisioning pour un
+    // simple délai, alors que le nœud est déjà valide côté clés (juste pas encore
+    // configuré).
+    const CONFIGURE_ATTEMPTS = 3;
+    let lastConfigureError;
+    for (let attempt = 1; attempt <= CONFIGURE_ATTEMPTS; attempt++) {
+      try {
+        await configureNode(node);
+        lastConfigureError = null;
+        break;
+      } catch (err) {
+        lastConfigureError = err;
+        log.warn(`Configuration post-provisioning échouée (essai ${attempt}/${CONFIGURE_ATTEMPTS})`, err.message);
+        if (attempt < CONFIGURE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+    if (lastConfigureError) {
+      throw new Error(`Lampe provisionnée mais configuration échouée : ${lastConfigureError.message}`);
     }
 
     return { uuid: node.uuid, name: node.name, unicastAddress: node.unicastAddress, elementCount: node.elementCount };
@@ -391,8 +408,13 @@ export function createMeshClient({
     const netKeys = netKeysFor(state);
     const devKey = nodeDeviceKeyBuffer(node);
 
-    // Reconnexion en mode Proxy (0x1828), après le délai de bascule du firmware.
-    const proxyLampCandidates = await waitForProxyAdvertisement({ timeoutMs: 6000 });
+    // Reconnexion en mode Proxy (0x1828), après le délai de bascule du firmware —
+    // observé sur matériel réel : peut prendre plus que les "1 à 3 secondes" indiqués
+    // par la doc (§4). Un court délai de repos avant même de scanner (sans activité
+    // BLE) semble aider à la fiabilité de la détection juste après une déconnexion
+    // GATT (observé empiriquement), en plus d'une marge généreuse sur le scan lui-même.
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    const proxyLampCandidates = await waitForProxyAdvertisement({ timeoutMs: 15000 });
     const target = proxyLampCandidates[0];
     const sessionRef = { feed: () => {} };
     const conn = await openProxyConnection(target.device, { onData: (bytes) => sessionRef.feed(bytes) });

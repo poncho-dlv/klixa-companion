@@ -113,6 +113,23 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     return node;
   }
 
+  // smallrig.reconfigure — relance UNIQUEMENT la configuration (AppKey Add + Model App
+  // Bind) d'une lampe déjà provisionnée (clés déjà échangées). Utile en secours : la
+  // bascule 0x1827 -> 0x1828 après provisioning est parfois plus lente que prévu sur
+  // certains matériels/environnements (observé), auquel cas `provision` peut réussir le
+  // handshake mais échouer sur cette dernière étape — la lampe reste alors provisionnée
+  // (clés valides) mais pas configurée (ignore les commandes en silence). Ce recours
+  // évite de devoir tout recommencer (et donc réinitialiser physiquement la lampe).
+  async function reconfigure(payload = {}) {
+    const uuid = String(payload.uuid || '').trim();
+    if (!uuid) throw new Error('uuid manquant');
+    const node = state.nodes.find((n) => n.uuid === uuid);
+    if (!node) throw new Error('Lampe inconnue (uuid non trouvé parmi les lampes provisionnées)');
+    await client.configureNode(node);
+    log.info('Lampe reconfigurée', { uuid });
+    return { uuid, name: node.name, unicastAddress: node.unicastAddress };
+  }
+
   // smallrig.forget — désappaire une lampe (la clé réseau reste valide pour les autres).
   async function forget(payload = {}) {
     const uuid = String(payload.uuid || '').trim();
@@ -204,6 +221,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     commands: {
       'smallrig.discover': discover,
       'smallrig.provision': provision,
+      'smallrig.reconfigure': reconfigure,
       'smallrig.forget': forget,
       'smallrig.list': list,
       'smallrig.color': color,

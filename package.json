@@ -16,7 +16,8 @@
     "start": "node src/index.js",
     "desktop": "electron desktop/main.js",
     "dist:win": "electron-builder --win nsis --publish never",
-    "test": "node --test"
+    "test": "node --test",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@streamerbot/client": "^1.12.2",
@@ -28,7 +29,8 @@
   },
   "devDependencies": {
     "electron": "^39.8.5",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "patch-package": "^8.0.1"
   },
   "build": {
     "appId": "live.klixa.companion",

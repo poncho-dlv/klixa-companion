@@ -321,6 +321,13 @@ function registerIpc() {
   ipcMain.handle('smallrig:forget', async (_event, { uuid } = {}) => {
     return requireRuntime().dispatch('smallrig.forget', { uuid });
   });
+  // Recours si la bascule 0x1827 -> 0x1828 après provisioning a été plus lente que le
+  // délai imparti (observé sur certains matériels) : la lampe est provisionnée
+  // (clés valides) mais pas configurée (ignore les commandes en silence). Relance
+  // uniquement l'étape de configuration, sans tout recommencer.
+  ipcMain.handle('smallrig:reconfigure', async (_event, { uuid } = {}) => {
+    return requireRuntime().dispatch('smallrig.reconfigure', { uuid });
+  });
   ipcMain.handle('smallrig:list', async () => {
     if (!runtime) return { lamps: [] };
     return runtime.dispatch('smallrig.list', {});

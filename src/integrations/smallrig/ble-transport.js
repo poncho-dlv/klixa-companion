@@ -50,22 +50,35 @@ function toBuffer(dataView) {
 
 // Scanne les lampes RM75 à proximité (provisionnées ou non) en lisant les Service Data
 // publicitaires — sans jamais se connecter (§2 "Découverte"). `deviceFound` ne
-// sélectionne jamais un device (retourne toujours false) : on laisse le scan courir
-// `timeoutMs` et on récupère la liste complète à la fin (requestDevice rejette alors
-// avec "no devices found", ce qui est le comportement normal ici, pas une erreur).
+// sélectionne jamais un device (retourne toujours false) : on veut TOUS les résultats,
+// pas le premier device trouvé.
+//
+// ATTENTION — piège de l'API `webbluetooth` : `requestDevice()` a son propre timeout
+// interne, mais celui-ci ne rejette QUE si aucun device n'a jamais été vu
+// (`if (!found) reject(...)`- cf. node_modules/webbluetooth/src/bluetooth.ts). Dès
+// qu'un seul device correspond (même sans qu'on le "sélectionne" via `selectFn`),
+// `found` passe à `true` et cette clause de rejet devient un no-op — et comme on ne
+// sélectionne jamais rien, la promesse ne se résout JAMAIS non plus. Résultat :
+// `await bt.requestDevice(...)` reste bloqué indéfiniment dès qu'AU MOINS UN appareil
+// Bluetooth quelconque est à proximité (donc presque toujours en pratique). Vérifié
+// empiriquement : gérer nous-mêmes la durée du scan (timer + `cancelRequest()`) sans
+// jamais attendre la résolution de `requestDevice()` résout complètement le problème.
 //
 // Implémentation IN-PROCESS : sur certaines machines, l'appel natif sous-jacent
-// (SimpleBLE -> WinRT) peut se bloquer durablement sans jamais relâcher la main
-// (observé en production : CPU bas, aucune réponse). Cette fonction reste utilisée
-// telle quelle par provision()/reconnexion (qui ont besoin d'un handle `device` réel,
-// non sérialisable entre processus) ; l'écran "Scanner" de l'UI passe par
-// `scanForLampAdvertisements` ci-dessous, qui isole cet appel dans un processus
-// séparé avec un timeout dur — voir ble-scan-worker.js pour le pourquoi.
+// (SimpleBLE -> WinRT) peut aussi se bloquer durablement côté natif (observé en
+// production : CPU bas, aucune réponse) — distinct du piège ci-dessus, mais avec le
+// même symptôme. Cette fonction reste utilisée telle quelle par provision()/
+// reconnexion (qui ont besoin d'un handle `device` réel, non sérialisable entre
+// processus) ; l'écran "Scanner" de l'UI passe par `scanForLampAdvertisements`
+// ci-dessous, qui isole cet appel dans un processus séparé avec un timeout dur — voir
+// ble-scan-worker.js pour le pourquoi.
 export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, adapterIndex } = {}) {
   const found = new Map();
 
   const bt = new Bluetooth({
-    scanTime: Math.max(1, timeoutMs / 1000),
+    // Large marge côté lib : on n'attend jamais son propre timeout (cf. ci-dessus),
+    // c'est notre `setTimeout` + `cancelRequest()` plus bas qui pilote la durée réelle.
+    scanTime: Math.max(1, timeoutMs / 1000) + 30,
     adapterIndex,
     deviceFound: (device) => {
       const adData = device._adData;
@@ -102,19 +115,26 @@ export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, ada
     }
   });
 
-  try {
-    await bt.requestDevice({
-      filters: [{ services: [GATT.PROVISIONING_SERVICE] }, { services: [GATT.PROXY_SERVICE] }]
-    });
-  } catch (err) {
-    // "no devices found" après expiration du scan : attendu (deviceFound ne
-    // sélectionne jamais). Toute autre erreur (ex. adaptateur Bluetooth absent/
-    // désactivé) doit remonter.
-    if (!/no devices found/i.test(String(err))) {
-      log.warn('Scan BLE interrompu', String(err));
-      throw err instanceof Error ? err : new Error(String(err));
-    }
-  }
+  // acceptAllDevices, PAS filters : un filtre multi-services sur Windows (WinRT
+  // BluetoothLEAdvertisementWatcher) exige que TOUTES les UUID listées soient
+  // présentes SIMULTANÉMENT dans une même annonce (ET, pas OU) — vérifié
+  // empiriquement sur matériel réel. Une lampe n'annonce jamais 0x1827 et 0x1828 en
+  // même temps (provisionnée OU non), donc `filters: [{services:[0x1827]},
+  // {services:[0x1828]}]` ne matchait jamais rien, silencieusement. Le tri
+  // unprovisionné/provisionné se fait déjà nous-mêmes dans `deviceFound` ci-dessus via
+  // les Service Data, donc `acceptAllDevices` + filtrage manuel est correct et sans
+  // perte.
+  //
+  // Fire-and-forget délibéré : on n'attend JAMAIS cette promesse (cf. commentaire de
+  // fonction ci-dessus — elle ne se résout jamais dès qu'un device est vu). On stoppe
+  // nous-mêmes le scan après `timeoutMs` via `cancelRequest()`, sans lien avec le
+  // timeout interne de la lib.
+  bt.requestDevice({ acceptAllDevices: true }).catch((err) => {
+    if (!/no devices found/i.test(String(err))) log.warn('Scan BLE (arrière-plan) terminé en erreur', String(err));
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  try { bt.cancelRequest(); } catch (err) { log.warn('Erreur à l\'arrêt du scan BLE', err.message); }
 
   return [...found.values()];
 }
@@ -211,7 +231,17 @@ export async function openGattConnection(device, { serviceUuid, dataInUuid, data
     maxAttributeValueLength,
     async write(buffer) {
       if (closed) throw new Error('Connexion GATT fermée');
-      await dataIn.writeValueWithoutResponse(buffer);
+      // webbluetooth construit un DataView sur `buffer.buffer` SANS tenir compte de
+      // byteOffset/byteLength (cf. characteristic.js#writeValue : `new
+      // DataView(arrayBuffer)` sans les 2e/3e arguments). Un Buffer Node partage
+      // souvent un ArrayBuffer sous-jacent plus grand (pool interne, Buffer.concat,
+      // subarray…) : envoyer `buffer` tel quel peut donc écrire un payload gonflé
+      // d'octets parasites, bien au-delà de la trame voulue — provoque un échec natif
+      // ("Write failed"), vérifié empiriquement sur matériel réel. On copie donc vers
+      // un Uint8Array/ArrayBuffer neuf, de taille exacte, avant chaque écriture.
+      const exact = new Uint8Array(buffer.byteLength);
+      exact.set(buffer);
+      await dataIn.writeValueWithoutResponse(exact);
     },
     close() {
       if (closed) return;
@@ -249,10 +279,31 @@ export async function openProxyConnection(device, { onData } = {}) {
 // premier device Proxy vu — le mesh-client validera via le NID au déchiffrement).
 export async function waitForProxyAdvertisement({ timeoutMs = 5000, retryDelayMs = 500 } = {}) {
   const deadline = Date.now() + timeoutMs;
+  // Fenêtres de sous-scan volontairement larges (pas ~2s) : chaque appel à
+  // scanForLampAdvertisementsInProcess repart d'un cache de peripherals vierge, et
+  // vérifié sur matériel réel qu'il faut plusieurs paquets publicitaires successifs
+  // (souvent les 2-3 premiers sont incomplets, sans Service Data) avant d'obtenir une
+  // annonce exploitable pour un même appareil — cf. patch webbluetooth
+  // (scanUpdated). Une fenêtre trop courte repart de zéro à chaque fois et rate
+  // systématiquement les paquets utiles.
+  const minSubScanMs = 6000;
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const found = await scanForLampAdvertisementsInProcess({ timeoutMs: Math.min(2000, deadline - Date.now()) });
+      const remaining = deadline - Date.now();
+      // Étape 1 — confirmation de présence via le scan ISOLÉ (processus enfant frais,
+      // cf. scanForLampAdvertisements ci-dessus) : vérifié empiriquement bien plus
+      // fiable qu'un scan répété dans CE process, qui réutilise le même adaptateur
+      // natif tout juste sorti d'une connexion GATT (provisioning) — un état résiduel
+      // semble gêner les scans suivants dans le même process, alors qu'un process
+      // fraîchement forké n'a pas ce problème.
+      const confirmed = await scanForLampAdvertisements({ timeoutMs: Math.max(minSubScanMs, Math.min(8000, remaining)) });
+      if (!confirmed.some((f) => f.kind === 'provisioned')) continue;
+
+      // Étape 2 — scan in-process bref pour récupérer un handle `device` exploitable
+      // (non sérialisable depuis le process enfant) maintenant qu'on sait la lampe
+      // présente.
+      const found = await scanForLampAdvertisementsInProcess({ timeoutMs: Math.max(minSubScanMs, deadline - Date.now()) });
       const proxy = found.filter((f) => f.kind === 'provisioned');
       if (proxy.length > 0) return proxy;
     } catch (err) {

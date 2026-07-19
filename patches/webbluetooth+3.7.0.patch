@@ -1,0 +1,56 @@
+diff --git a/node_modules/webbluetooth/dist/adapters/simpleble-adapter.js b/node_modules/webbluetooth/dist/adapters/simpleble-adapter.js
+index 2d8b247..71e29b6 100644
+--- a/node_modules/webbluetooth/dist/adapters/simpleble-adapter.js
++++ b/node_modules/webbluetooth/dist/adapters/simpleble-adapter.js
+@@ -291,18 +291,25 @@ class SimplebleAdapter extends EventTarget {
+             if (!this.adapter) {
+                 this.adapter = (0, simpleble_1.getAdapters)()[0];
+             }
+-            const foundPeripherals = [];
+-            this.adapter.setCallbackOnScanFound(peripheral => {
++            // PATCH (Klixa) : la lib n'écoutait QUE setCallbackOnScanFound (1er paquet
++            // publicitaire par peripheral), avec un garde-fou qui empêchait tout
++            // second traitement. Vérifié sur matériel réel (mesh Realtek RM75) : le
++            // tout premier paquet capté pour un peripheral peut ne contenir ni
++            // Service Data ni le bon flag "connectable" (annonce fractionnée sur
++            // plusieurs PDU) — figeant ce peripheral en "invalide"/"non connectable"
++            // pour toute la durée du scan, même quand des paquets ultérieurs, plus
++            // complets, arrivent. On écoute donc aussi setCallbackOnScanUpdated avec
++            // la même logique, et on retire le garde-fou anti-répétition : `foundFn`
++            // est déjà idempotent côté appelant (Map par device.id côté Klixa).
++            const handlePeripheral = peripheral => {
+                 const device = this.buildBluetoothDevice(peripheral);
+                 if (this.validDevice(device, serviceUUIDs)) {
+-                    if (!foundPeripherals.includes(device.id)) {
+-                        foundPeripherals.push(device.id);
+-                        this.peripherals.set(device.id, peripheral);
+-                        // Only call the found function the first time we find a valid device
+-                        foundFn(device);
+-                    }
++                    this.peripherals.set(device.id, peripheral);
++                    foundFn(device);
+                 }
+-            });
++            };
++            this.adapter.setCallbackOnScanFound(handlePeripheral);
++            this.adapter.setCallbackOnScanUpdated(handlePeripheral);
+             const success = this.adapter.scanStart();
+             if (!success) {
+                 throw new Error('scan start failed');
+@@ -323,9 +330,13 @@ class SimplebleAdapter extends EventTarget {
+             if (!peripheral) {
+                 throw new Error('Peripheral not found');
+             }
+-            if (!peripheral.connectable) {
+-                throw new Error('Connection not possible');
+-            }
++            // PATCH (Klixa) : ne pas bloquer sur `peripheral.connectable` — vérifié
++            // faux-négatif sur du matériel réel (mesh Realtek RM75 vu comme non
++            // connectable par SimpleBLE/WinRT sur TOUTES les annonces reçues, alors
++            // que le device se connecte sans souci via nRF Connect). La tentative de
++            // connexion native ci-dessous échoue proprement ("Connect failed") si le
++            // device n'est vraiment pas connectable, donc retirer ce pré-check ne
++            // supprime aucune protection réelle.
+             const success = peripheral.connect();
+             if (!success) {
+                 throw new Error('Connect failed');

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('klixa', {
   smallrigDiscover: (timeoutMs) => ipcRenderer.invoke('smallrig:discover', { timeoutMs }),
   smallrigProvision: (bleDeviceId, name) => ipcRenderer.invoke('smallrig:provision', { bleDeviceId, name }),
   smallrigForget: (uuid) => ipcRenderer.invoke('smallrig:forget', { uuid }),
+  smallrigReconfigure: (uuid) => ipcRenderer.invoke('smallrig:reconfigure', { uuid }),
   smallrigList: () => ipcRenderer.invoke('smallrig:list'),
   getStatus: () => ipcRenderer.invoke('runtime:status'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('auto-launch:set', enabled),
