@@ -1,7 +1,7 @@
 {
   "name": "klixa-companion",
-  "version": "0.3.3",
-  "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, Streamer.bot) au serveur Klixa cloud via une connexion sortante.",
+  "version": "0.4.0",
+  "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, lampes SmallRig, Streamer.bot) au serveur Klixa cloud via une connexion sortante.",
   "author": "Klixa",
   "license": "Apache-2.0",
   "repository": {
@@ -23,6 +23,7 @@
     "dotenv": "^16.4.5",
     "electron-updater": "^6.6.2",
     "obs-websocket-js": "^5.0.8",
+    "webbluetooth": "^3.7.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -32,11 +33,29 @@
   "build": {
     "appId": "live.klixa.companion",
     "productName": "Klixa Companion",
-    "directories": { "output": "release" },
-    "files": ["desktop/**/*", "src/**/*", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "src/**/*",
+      "package.json"
+    ],
     "asar": true,
-    "publish": { "provider": "github", "owner": "poncho-dlv", "repo": "klixa-companion" },
-    "win": { "target": ["nsis"], "artifactName": "Klixa-Companion-Setup-${version}.${ext}" },
+    "asarUnpack": [
+      "node_modules/webbluetooth/**/*"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "poncho-dlv",
+      "repo": "klixa-companion"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Klixa-Companion-Setup-${version}.${ext}"
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": false,
