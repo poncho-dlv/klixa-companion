@@ -109,14 +109,63 @@ function createAsyncQueue() {
 // Une session Proxy GATT ouverte vers N'IMPORTE QUEL nœud du mesh suffit à atteindre
 // TOUS les nœuds (relayage mesh standard, cf. RM75_SPEC_DEV.md §10) : on ne maintient
 // qu'une seule connexion active à la fois, réutilisée pour toutes les commandes.
-function createProxySession({ conn, netKeys, ivIndex, provisionerAddress }) {
+function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAllocatorFactory }) {
   const reassembler = createProxyPduReassembler();
-  const segmentBuffers = new Map(); // srcAddr -> { segO0Seq, segments: [] }
-  const inbox = new Map(); // srcAddr -> asyncQueue of decoded { seq, akf, aid, accessPayload }
+  const segmentBuffers = new Map(); // srcAddr:seqZero -> { segments: Map<segO, header>, seqAuth, createdAt }
+  const completedSegmented = new Map(); // srcAddr:seqZero -> { segN } — pour ré-acquitter les retransmissions
+  const inbox = new Map(); // srcAddr -> asyncQueue of decoded { seq, akf, aid, szmic, upperTransportPdu }
+  // Les fragments SAR d'un même Proxy PDU ne doivent jamais être entrelacés avec ceux
+  // d'un autre message (§2). Or index.js pilote plusieurs lampes en concurrence sur
+  // CETTE session partagée, et avec le MTU par défaut chaque Network PDU part en
+  // plusieurs fragments : sans sérialisation, deux send() simultanés s'entrelacent aux
+  // points d'await et la lampe jette les deux messages. Toutes les écritures d'un
+  // Network PDU passent donc par cette chaîne pour rester atomiques.
+  let writeChain = Promise.resolve();
 
   function inboxFor(src) {
     if (!inbox.has(src)) inbox.set(src, createAsyncQueue());
     return inbox.get(src);
+  }
+
+  // SeqAuth (le SEQ entrant dans le nonce des messages segmentés) se dérive de SeqZero
+  // et du SEQ d'un segment reçu — PAS le SEQ brut du segment segO=0, qui peut être une
+  // retransmission portant un SEQ plus récent que l'original.
+  function seqAuthFrom(seq, seqZero) {
+    let auth = (seq & ~0x1fff) | seqZero;
+    if (auth > seq) auth -= 0x2000;
+    return auth;
+  }
+
+  function rememberCompleted(key, segN) {
+    completedSegmented.set(key, { segN });
+    if (completedSegmented.size > 16) completedSegmented.delete(completedSegmented.keys().next().value);
+  }
+
+  // Segment Acknowledgement (message de contrôle, opcode 0x00) — exigé par la spec
+  // pour tout message segmenté reçu (§6) : sans lui, l'émetteur retransmet en boucle
+  // puis finit par considérer l'envoi comme échoué.
+  function buildSegmentAck({ seqZero, segN }) {
+    const blockAck = (segN >= 31 ? 0xffffffff : (1 << (segN + 1)) - 1) >>> 0;
+    return Buffer.from([
+      0x00, // SEG=0 | opcode de contrôle 0x00 (Segment Acknowledgement)
+      (seqZero >> 6) & 0x7f, // OBO=0 | SeqZero[12:6]
+      (seqZero & 0x3f) << 2, // SeqZero[5:0] | RFU
+      (blockAck >>> 24) & 0xff, (blockAck >>> 16) & 0xff, (blockAck >>> 8) & 0xff, blockAck & 0xff
+    ]);
+  }
+
+  async function sendSegmentAck({ dst, seqZero, segN }) {
+    if (!seqAllocatorFactory) return;
+    try {
+      const allocator = seqAllocatorFactory();
+      const { seq, crossedBoundary } = nextSeq(allocator.state, allocator.blockSize);
+      if (crossedBoundary && allocator.onPersistNeeded) await allocator.onPersistNeeded();
+      const transportPdu = buildSegmentAck({ seqZero, segN });
+      const networkPdu = encryptNetworkPdu({ ...netKeys, ivi: ivIndex & 1, ivIndex, ctl: true, ttl: DEFAULT_TTL, seq, src: provisionerAddress, dst, transportPdu });
+      await sendNetworkPdu(networkPdu);
+    } catch (err) {
+      log.warn('Envoi du Segment Ack échoué (non bloquant)', err.message);
+    }
   }
 
   function handleNetworkPdu(pdu) {
@@ -129,28 +178,52 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress }) {
     }
     if (decoded.dst !== provisionerAddress) return; // pas pour nous (autre unicast/groupe)
 
+    // Messages de contrôle (CTL=1) : Segment Ack de nos propres envois segmentés
+    // (App Key Add dépasse 11 octets, la lampe l'acquitte donc systématiquement),
+    // heartbeat, etc. Ne JAMAIS les pousser dans l'inbox : ils ne sont pas chiffrés
+    // AppKey/DevKey, et les traiter comme des messages d'accès ferait échouer le
+    // déchiffrement de l'attente en cours (donc toute la configuration). Pas de
+    // retransmission implémentée côté émission : leur contenu n'a pas d'usage ici.
+    if (decoded.ctl) return;
+
     const seg = (decoded.transportPdu[0] >> 7) & 1;
     if (seg === 0) {
       const { akf, aid, upperTransportPdu } = decodeLowerTransportUnsegmented(decoded.transportPdu);
-      inboxFor(decoded.src).push({ seq: decoded.seq, akf, aid, upperTransportPdu });
+      inboxFor(decoded.src).push({ seq: decoded.seq, akf, aid, szmic: false, upperTransportPdu });
       return;
     }
 
     const header = decodeSegmentHeader(decoded.transportPdu);
     const key = `${decoded.src}:${header.seqZero}`;
+
+    // Message déjà réassemblé : une retransmission signifie que la lampe n'a pas reçu
+    // notre ack — ré-acquitter sans re-bufferiser (sinon le message serait retraité).
+    const completed = completedSegmented.get(key);
+    if (completed) {
+      void sendSegmentAck({ dst: decoded.src, seqZero: header.seqZero, segN: completed.segN });
+      return;
+    }
+
     let buf = segmentBuffers.get(key);
     if (!buf) {
-      buf = { segments: [] };
+      for (const [staleKey, stale] of segmentBuffers) {
+        if (Date.now() - stale.createdAt > 15000) segmentBuffers.delete(staleKey);
+      }
+      buf = { segments: new Map(), seqAuth: seqAuthFrom(decoded.seq, header.seqZero), createdAt: Date.now() };
       segmentBuffers.set(key, buf);
     }
-    if (header.segO === 0) buf.segO0Seq = decoded.seq;
-    buf.segments.push(header);
+    // Map par segO : un segment retransmis ne doit compter qu'une fois — un simple
+    // tableau ferait croire à un réassemblage complet avec des doublons, et le vrai
+    // message serait perdu (MISSING_SEGMENT).
+    buf.segments.set(header.segO, header);
 
-    if (buf.segments.length === header.segN + 1) {
+    if (buf.segments.size === header.segN + 1) {
       segmentBuffers.delete(key);
+      rememberCompleted(key, header.segN);
+      void sendSegmentAck({ dst: decoded.src, seqZero: header.seqZero, segN: header.segN });
       try {
-        const { akf, aid, upperTransportPdu } = reassembleSegments(buf.segments);
-        inboxFor(decoded.src).push({ seq: buf.segO0Seq, akf, aid, upperTransportPdu });
+        const { akf, aid, szmic, upperTransportPdu } = reassembleSegments([...buf.segments.values()]);
+        inboxFor(decoded.src).push({ seq: buf.seqAuth, akf, aid, szmic, upperTransportPdu });
       } catch (err) {
         log.warn('Réassemblage de segments échoué', err.message);
       }
@@ -163,8 +236,12 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress }) {
   }
 
   async function sendNetworkPdu(networkPdu) {
-    const fragments = encodeProxyPdus(PROXY_PDU_TYPE.NETWORK, networkPdu, { maxAttributeValueLength: conn.maxAttributeValueLength });
-    for (const fragment of fragments) await conn.write(fragment);
+    const task = writeChain.then(async () => {
+      const fragments = encodeProxyPdus(PROXY_PDU_TYPE.NETWORK, networkPdu, { maxAttributeValueLength: conn.maxAttributeValueLength });
+      for (const fragment of fragments) await conn.write(fragment);
+    });
+    writeChain = task.catch(() => { /* l'erreur est propagée à l'appelant via task */ });
+    return task;
   }
 
   // Envoie un Access Payload en clair, chiffré ici (AppKey ou DevKey), segmenté si
@@ -197,11 +274,14 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress }) {
   }
 
   async function receiveFrom(src, { timeoutMs = COMMAND_RESPONSE_TIMEOUT_MS } = {}) {
-    const { seq, upperTransportPdu, keyType } = await (async () => {
-      const msg = await inboxFor(src).shift(timeoutMs);
-      return { ...msg, keyType: msg.akf ? 'app' : 'device' };
-    })();
-    return { seq, upperTransportPdu, keyType, aid: undefined };
+    const msg = await inboxFor(src).shift(timeoutMs);
+    return {
+      seq: msg.seq,
+      upperTransportPdu: msg.upperTransportPdu,
+      szmic: Boolean(msg.szmic),
+      keyType: msg.akf ? 'app' : 'device',
+      aid: msg.aid
+    };
   }
 
   return { feed, send, receiveFrom, get connected() { return conn.connected; }, close: () => conn.close() };
@@ -244,7 +324,21 @@ export function createMeshClient({
     proxySession = null;
   }
 
+  let ensureProxyPromise = null;
+
   async function ensureProxySession() {
+    if (proxySession?.connected) return proxySession;
+    // Mutex : deux commandes simultanées (index.js pilote les lampes en concurrence)
+    // ne doivent pas ouvrir deux connexions GATT en parallèle vers la même lampe — la
+    // seconde échouerait (un périphérique BLE n'accepte qu'un central à la fois) et la
+    // première resterait ouverte sans être référencée.
+    if (!ensureProxyPromise) {
+      ensureProxyPromise = establishProxySession().finally(() => { ensureProxyPromise = null; });
+    }
+    return ensureProxyPromise;
+  }
+
+  async function establishProxySession() {
     const state = getState();
     if (proxySession?.connected) return proxySession;
     await closeProxy();
@@ -269,7 +363,8 @@ export function createMeshClient({
           conn,
           netKeys,
           ivIndex: state.ivIndex,
-          provisionerAddress: forcedProvisionerAddress ?? state.provisionerAddress
+          provisionerAddress: forcedProvisionerAddress ?? state.provisionerAddress,
+          seqAllocatorFactory: seqAllocator
         });
         sessionRef.feed = session.feed;
         proxyConn = conn;
@@ -415,11 +510,18 @@ export function createMeshClient({
     // GATT (observé empiriquement), en plus d'une marge généreuse sur le scan lui-même.
     await new Promise((resolve) => setTimeout(resolve, 4000));
     const proxyLampCandidates = await waitForProxyAdvertisement({ timeoutMs: 15000 });
-    const target = proxyLampCandidates[0];
+    // Préférer une lampe qui annonce NOTRE Network ID (type 0x00) : un candidat
+    // étranger ne possède pas notre NetKey et ne relayera jamais nos messages de
+    // configuration (symptôme : timeouts silencieux sans erreur). Les annonces Node
+    // Identity (type 0x01, sans Network ID lisible) restent acceptées en dernier
+    // recours — le NID au déchiffrement fera le tri.
+    const ourCandidates = proxyLampCandidates.filter((c) => !c.networkId || c.networkId.equals(netKeys.networkId));
+    const target = ourCandidates[0] || proxyLampCandidates[0];
     const sessionRef = { feed: () => {} };
     const conn = await openProxyConnection(target.device, { onData: (bytes) => sessionRef.feed(bytes) });
     const session = createProxySession({
-      conn, netKeys, ivIndex: state.ivIndex, provisionerAddress: state.provisionerAddress
+      conn, netKeys, ivIndex: state.ivIndex, provisionerAddress: state.provisionerAddress,
+      seqAllocatorFactory: seqAllocator
     });
     sessionRef.feed = session.feed;
 
@@ -432,8 +534,8 @@ export function createMeshClient({
         await session.send({ seqAllocator: allocator, src, dst, key: devKey, keyType: 'device', aid: 0, accessPayload });
       }
       async function receiveConfig() {
-        const { upperTransportPdu, keyType, seq } = await session.receiveFrom(dst, { timeoutMs: CONFIG_RESPONSE_TIMEOUT_MS });
-        const accessPayload = decryptUpperTransportAccess({ key: devKey, keyType, seq, src: dst, dst: src, ivIndex: state.ivIndex, encAccessPayload: upperTransportPdu });
+        const { upperTransportPdu, keyType, seq, szmic } = await session.receiveFrom(dst, { timeoutMs: CONFIG_RESPONSE_TIMEOUT_MS });
+        const accessPayload = decryptUpperTransportAccess({ key: devKey, keyType, aszmic: szmic, seq, src: dst, dst: src, ivIndex: state.ivIndex, encAccessPayload: upperTransportPdu });
         return decodeAccessOpcode(accessPayload);
       }
 
@@ -494,8 +596,8 @@ export function createMeshClient({
     const accessPayload = buildVendorAccessPayload(readFrame, { vendorOpcodeMode, cid: VENDOR_CID });
 
     await session.send({ seqAllocator: seqAllocator(), src, dst: node.unicastAddress, key: appKey, keyType: 'app', aid, accessPayload });
-    const { upperTransportPdu, keyType, seq } = await session.receiveFrom(node.unicastAddress, { timeoutMs: COMMAND_RESPONSE_TIMEOUT_MS });
-    const decrypted = decryptUpperTransportAccess({ key: appKey, keyType, seq, src: node.unicastAddress, dst: src, ivIndex: state.ivIndex, encAccessPayload: upperTransportPdu });
+    const { upperTransportPdu, keyType, seq, szmic } = await session.receiveFrom(node.unicastAddress, { timeoutMs: COMMAND_RESPONSE_TIMEOUT_MS });
+    const decrypted = decryptUpperTransportAccess({ key: appKey, keyType, aszmic: szmic, seq, src: node.unicastAddress, dst: src, ivIndex: state.ivIndex, encAccessPayload: upperTransportPdu });
     const { params } = decodeAccessOpcode(decrypted);
     return params;
   }

@@ -126,6 +126,10 @@ function createFakeLamp({ deviceUuid, capabilities = { numElements: 1, algorithm
             const seqZero = replySeq & 0x1fff;
             const segments = segmentUpperTransportPdu({ akf: false, aid: 0, seqZero, szmic: false, upperTransportPdu: enc });
             for (const seg of segments) { sendNetworkPdu(seg, { seq: replySeq }); replySeq += 1; }
+            // Retransmission simulée du premier segment (comme un vrai firmware qui n'a
+            // pas encore vu l'ack) : le mesh-client doit la ré-acquitter sans retraiter
+            // le message (déduplication par segO + mémoire des messages complétés).
+            sendNetworkPdu(segments[0], { seq: replySeq }); replySeq += 1;
           }
           return;
         }
@@ -155,6 +159,10 @@ function createFakeLamp({ deviceUuid, capabilities = { numElements: 1, algorithm
           const netKeys = deriveNetworkKeys(state.netKey);
           const decoded = decryptNetworkPdu({ ...netKeys, ivIndex: 0, pdu: msg.data });
           if (decoded.dst !== state.unicastAddress) return;
+          // Messages de contrôle (CTL=1) : Segment Ack envoyé par le mesh-client après
+          // réassemblage de notre Composition Data Status — un vrai firmware arrêterait
+          // ses retransmissions ici ; rien à faire côté simulé.
+          if (decoded.ctl) { state.receivedSegmentAcks = (state.receivedSegmentAcks || 0) + 1; return; }
 
           const seg = (decoded.transportPdu[0] >> 7) & 1;
           if (seg === 0) {
@@ -221,6 +229,7 @@ test('mesh-client : découverte, provisioning, configuration et commande HSI de 
   assert.equal(lamp._state.provisioned, true);
   assert.equal(lamp._state.boundModel, true);
   assert.ok(lamp._state.appKey, 'AppKey doit avoir été transmise pendant la configuration');
+  assert.ok(lamp._state.receivedSegmentAcks >= 2, 'la lampe doit avoir reçu un Segment Ack pour sa Composition Data Status ET pour sa retransmission');
   assert.ok(persisted.length >= 2, 'l\'état doit avoir été persisté (clés générées + nœud ajouté)');
 
   const results = await client.setHsi([provisioned.uuid], { hue: 0, sat: 100, intensity: 100 });

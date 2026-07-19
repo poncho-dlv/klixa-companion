@@ -25,9 +25,14 @@ export function deriveAppKeyAid(appKey) {
 }
 
 function upperTransportNonce({ keyType, aszmic, seq, src, dst, ivIndex }) {
+  // Le bit ASZMIC s'applique aux DEUX types de nonce (Application ET Device) d'après
+  // la spec Mesh Profile 1.0.1 (§3.8.5.3/3.8.5.4) — RM75_SPEC_DEV.md §6 montre le
+  // Device nonce avec un octet fixe 0x00 car il n'illustre que le cas non segmenté.
+  // Sans ce bit, une réponse de configuration segmentée avec SZMIC=1 (ex. Composition
+  // Data Status selon le firmware) serait indéchiffrable.
   return Buffer.concat([
     Buffer.from([keyType === 'device' ? 0x02 : 0x01]),
-    Buffer.from([keyType === 'device' ? 0x00 : ((aszmic ? 1 : 0) << 7)]),
+    Buffer.from([(aszmic ? 1 : 0) << 7]),
     u24(seq),
     u16(src),
     u16(dst),
