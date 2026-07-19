@@ -1,6 +1,7 @@
 import https from 'node:https';
 import net from 'node:net';
 import { createLogger } from '../logger.js';
+import { clamp, isHexColor, mapWithConcurrency, normalizeLightIds } from './light-utils.js';
 
 const log = createLogger('hue');
 
@@ -20,9 +21,10 @@ function round4(value) {
   return Math.round(value * 10000) / 10000;
 }
 
-export function isHexColor(value) {
-  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
-}
+// Réexportés pour compatibilité (utilisés par tests/hue.test.js et par du code qui
+// importait ces utilitaires génériques depuis hue.js) — la définition canonique vit
+// désormais dans light-utils.js, partagée avec les autres intégrations de lumières.
+export { clamp, isHexColor, mapWithConcurrency, normalizeLightIds };
 
 // Conversion Hex #RRGGBB vers coordonnées CIE xy (gamma sRGB), identique à HueAlert.cs.
 export function hexToXy(hex) {
@@ -37,12 +39,6 @@ export function hexToXy(hex) {
 
   if (total <= 0) return { x: 0.3127, y: 0.3290 };
   return { x: round4(x / total), y: round4(y / total) };
-}
-
-export function clamp(value, min, max, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
 }
 
 export function isPrivateBridgeIp(value) {
@@ -74,40 +70,6 @@ function assertPrivateBridgeIp(bridgeIp) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function normalizeLightIds(raw) {
-  let values;
-  if (Array.isArray(raw)) values = raw;
-  if (typeof raw === 'string') {
-    const text = raw.trim();
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) values = parsed;
-    } catch {
-      // pas du JSON, donc liste séparée par virgules/retours ligne
-    }
-    if (!values) values = text.split(/[,\n\r]/);
-  }
-  if (!values) return [];
-  return [...new Set(values
-    .filter((id) => ['string', 'number'].includes(typeof id))
-    .map((id) => String(id).trim())
-    .filter((id) => id && id.length <= 128))];
-}
-
-export async function mapWithConcurrency(items, limit, mapper) {
-  const concurrency = Math.max(1, Math.min(items.length || 1, Math.trunc(limit) || 1));
-  const results = new Array(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await mapper(items[index], index);
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  return results;
 }
 
 // Client HTTP du bridge (API CLIP v2, HTTPS auto-signé)

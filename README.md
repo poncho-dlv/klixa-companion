@@ -8,13 +8,13 @@ n'est pas inclus dans ce dépôt. La licence du compagnon n'accorde aucun droit
 sur les marques, services cloud ou autres produits Klixa.
 
 Agent local (hub) du projet [Klixa Live](../Overlays). Il fait le pont entre les
-intégrations **locales** (Hue, OBS, Streamer.bot, machine à fumée…) et le
-serveur Klixa, **sans jamais ouvrir de port entrant** : c'est le compagnon qui
-initie une connexion WebSocket **sortante** vers le cloud, qui pousse ses
-commandes dans ce tuyau.
+intégrations **locales** (Hue, lampes SmallRig, OBS, Streamer.bot, machine à
+fumée…) et le serveur Klixa, **sans jamais ouvrir de port entrant** : c'est le
+compagnon qui initie une connexion WebSocket **sortante** vers le cloud, qui
+pousse ses commandes dans ce tuyau.
 
 ```
-[Klixa cloud]  ◄── WS sortante ───  [Klixa Compagnon] ── [Hue, OBS, Streamer.bot, RPi]
+[Klixa cloud]  ◄── WS sortante ───  [Klixa Compagnon] ── [Hue, SmallRig, OBS, Streamer.bot, RPi]
 ```
 
 ## Composants
@@ -89,6 +89,10 @@ docker compose up -d --build
 | `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). En usage desktop, se configure et s'appaire depuis l'app Klixa Companion — jamais fourni par le cloud. |
 | `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`), obtenue par appairage. Jamais fournie par le cloud. |
 | `HUE_MAX_LIGHTS` / `HUE_CONCURRENCY` | Limite de lampes par commande (50) et de requêtes Hue simultanées (5). |
+| `SMALLRIG_ENABLED` | Active l'intégration lampes SmallRig RM75 (Bluetooth Mesh, défaut true). Nécessite un adaptateur Bluetooth actif sur la machine. En usage desktop, l'appairage (scan + provisioning) se fait depuis l'app Klixa Companion — voir [RM75_SPEC_DEV.md](RM75_SPEC_DEV.md). |
+| `SMALLRIG_MESH_STATE` | Clés réseau + lampes appairées (JSON), générées et gérées localement. Jamais fourni par le cloud ; sans intérêt à remplir à la main en usage desktop (persisté automatiquement). |
+| `SMALLRIG_MAX_LAMPS` / `SMALLRIG_CONCURRENCY` | Limite de lampes appairées (50) et de commandes Bluetooth simultanées (3). |
+| `SMALLRIG_VENDOR_OPCODE_MODE` | Encodage de l'opcode vendor du protocole Lq (`A` par défaut ou `B`) — point non vérifié sur matériel réel, voir RM75_SPEC_DEV.md §12. |
 | `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
 | `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |
 | `OBS_WS_PASSWORD` | Mot de passe obs-websocket (si activé dans OBS). |

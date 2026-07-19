@@ -37,6 +37,12 @@ export function startCompanion(config, { onCloudStatus, onIntegrationStatus } = 
   let stopping;
   return {
     commands: registry.listCommands(),
+    // Dispatch direct d'une commande enregistrée (ex. `smallrig.discover`), pour les
+    // actions déclenchées depuis l'IHM desktop (cf. desktop/main.js IPC `smallrig:*`)
+    // sans passer par le serveur HTTP local ni recréer l'intégration.
+    dispatch(name, payload) {
+      return registry.dispatch(name, payload);
+    },
     async reconfigureIntegration(id, nextConfig) {
       await registry.unregister(id);
       registerIntegration(registry, id, nextConfig, { emitEvent: (event) => cloudLink.sendEvent(event) });

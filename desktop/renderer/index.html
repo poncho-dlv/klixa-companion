@@ -89,6 +89,21 @@
           <button type="button" id="hueUnpairBtn" class="disconnect-btn" hidden>Déconnecter</button>
           <p id="hueMessage" role="status"></p>
         </section>
+        <section>
+          <div class="section-head"><h2>Lampes SmallRig RM75</h2>
+            <p id="smallrigStatus" class="integration-status status-line">
+              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+              <span></span>
+            </p>
+          </div>
+          <label class="toggle"><input name="SMALLRIG_ENABLED" type="checkbox"> Activer les lampes SmallRig</label>
+          <p class="hint">Le Bluetooth doit être activé sur cette machine. Rapproche les lampes et mets-les sous tension avant de scanner.</p>
+          <button type="button" id="smallrigScanBtn">Scanner les lampes à proximité</button>
+          <ul id="smallrigFound" class="lamp-list"></ul>
+          <h3>Lampes appairées</h3>
+          <ul id="smallrigPaired" class="lamp-list"></ul>
+          <p id="smallrigMessage" role="status"></p>
+        </section>
       </div>
       <section>
         <label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label>

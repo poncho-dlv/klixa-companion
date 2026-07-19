@@ -21,3 +21,13 @@ details summary{cursor:pointer;color:#aeb3cf;padding:4px 0}
 .update-banner[hidden]{display:none}
 .update-banner button{width:auto;flex-shrink:0;padding:8px 14px;font-size:13px}
 
+.hint{color:#8a8fb0;font-size:12px;margin:6px 0 14px}
+h3{font-size:13px;color:#aeb3cf;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.04em}
+.lamp-list{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
+.lamp-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:#11131d;border:1px solid #2c2f42;border-radius:9px}
+.lamp-name-row{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.lamp-name-row input{margin:0}
+.lamp-meta{color:#8a8fb0;font-size:12px}
+.lamp-list button{width:auto;flex-shrink:0;padding:8px 13px;font-size:12px}
+.lamp-empty{color:#8a8fb0;font-size:13px;margin:8px 0}
+

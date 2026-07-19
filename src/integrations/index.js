@@ -1,5 +1,6 @@
 import { createSmokeIntegration } from './smoke.js';
 import { createHueIntegration } from './hue.js';
+import { createSmallrigIntegration } from './smallrig/index.js';
 import { createObsIntegration } from './obs.js';
 import { createStreamerbotIntegration } from './streamerbot.js';
 import { createLogger } from '../logger.js';
@@ -12,7 +13,7 @@ const log = createLogger('integrations');
  * ajouter ici les futures intégrations locales (Streamer.bot, etc.).
  */
 export function registerIntegrations(registry, config, { emitEvent } = {}) {
-  for (const id of ['smoke', 'hue', 'obs', 'streamerbot']) registerIntegration(registry, id, config, { emitEvent });
+  for (const id of ['smoke', 'hue', 'smallrig', 'obs', 'streamerbot']) registerIntegration(registry, id, config, { emitEvent });
 }
 
 export function registerIntegration(registry, id, config, { emitEvent } = {}) {
@@ -29,6 +30,14 @@ export function registerIntegration(registry, id, config, { emitEvent } = {}) {
       registry.register(createHueIntegration(config.hue));
     } catch (err) {
       log.error('Intégration Hue non chargée', err.message);
+    }
+  }
+
+  if (id === 'smallrig' && config.smallrig.enabled) {
+    try {
+      registry.register(createSmallrigIntegration(config.smallrig));
+    } catch (err) {
+      log.error('Intégration SmallRig non chargée', err.message);
     }
   }
 

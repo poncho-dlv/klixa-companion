@@ -23,6 +23,11 @@ const hueMessage = document.querySelector('#hueMessage');
 const hueStatus = document.querySelector('#hueStatus');
 const hueUnpairBtn = document.querySelector('#hueUnpairBtn');
 const smokeServiceHost = document.querySelector('#smokeServiceHost');
+const smallrigStatus = document.querySelector('#smallrigStatus');
+const smallrigScanBtn = document.querySelector('#smallrigScanBtn');
+const smallrigFound = document.querySelector('#smallrigFound');
+const smallrigPaired = document.querySelector('#smallrigPaired');
+const smallrigMessage = document.querySelector('#smallrigMessage');
 const obsEnabled = document.querySelector('input[name="OBS_ENABLED"]');
 const obsConnectionBtn = document.querySelector('#obsConnectionBtn');
 const streamerbotEnabled = document.querySelector('input[name="SB_ENABLED"]');
@@ -120,6 +125,171 @@ function renderHueUi() {
     span.textContent = connected ? 'Connecté' : 'Non connecté';
   }
 }
+
+let lastFoundLamps = [];
+let lastPairedLamps = [];
+let smallrigScanning = false;
+
+// Statut de l'intégration SmallRig : contrairement à Hue (une seule ressource
+// bridge), le "connecté" ici veut dire "au moins une lampe appairée et joignable via
+// une connexion Proxy" (cf. mesh-client.js#healthcheck côté main).
+function renderSmallrigStatus() {
+  const enabled = lastConfig.SMALLRIG_ENABLED !== false && lastConfig.SMALLRIG_ENABLED !== 'false';
+  const entry = lastIntegrationStatus?.smallrig;
+  const icon = smallrigStatus.querySelector('path');
+  const span = smallrigStatus.querySelector('span');
+  if (!enabled) {
+    smallrigStatus.className = 'integration-status status-line';
+    icon.setAttribute('d', '');
+    span.textContent = 'Désactivé';
+  } else if (!entry) {
+    smallrigStatus.className = 'integration-status status-line';
+    icon.setAttribute('d', '');
+    span.textContent = 'Vérification...';
+  } else {
+    const paired = Boolean(entry.paired ?? entry.lamps > 0);
+    smallrigStatus.className = `integration-status status-line ${paired ? 'ok' : 'error'}`;
+    icon.setAttribute('d', paired ? ICON_CHECK : ICON_WARNING);
+    span.textContent = paired ? `${entry.lamps} lampe(s) appairée(s)` : 'Aucune lampe appairée';
+  }
+}
+
+function lampRow({ title, meta, buttonLabel, onClick, extraNode }) {
+  const li = document.createElement('li');
+  const nameRow = document.createElement('div');
+  nameRow.className = 'lamp-name-row';
+  const titleEl = document.createElement('span');
+  titleEl.textContent = title;
+  nameRow.appendChild(titleEl);
+  if (extraNode) nameRow.appendChild(extraNode);
+  if (meta) {
+    const metaEl = document.createElement('span');
+    metaEl.className = 'lamp-meta';
+    metaEl.textContent = meta;
+    nameRow.appendChild(metaEl);
+  }
+  li.appendChild(nameRow);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = buttonLabel;
+  button.addEventListener('click', onClick);
+  li.appendChild(button);
+  return li;
+}
+
+function renderSmallrigFound() {
+  smallrigFound.innerHTML = '';
+  const unprovisioned = lastFoundLamps.filter((l) => l.kind === 'unprovisioned');
+  if (unprovisioned.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'lamp-empty';
+    li.textContent = smallrigScanning ? 'Scan en cours...' : 'Aucune nouvelle lampe détectée. Lance un scan.';
+    smallrigFound.appendChild(li);
+    return;
+  }
+  for (const lamp of unprovisioned) {
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = 'Nom (optionnel)';
+    nameInput.value = lamp.name || '';
+    const row = lampRow({
+      title: `Lampe détectée (${lamp.bleDeviceId.slice(0, 8)}…)`,
+      meta: Number.isFinite(lamp.rssi) ? `Signal ${lamp.rssi} dBm` : '',
+      buttonLabel: 'Appairer',
+      extraNode: nameInput,
+      onClick: async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = 'Appairage en cours…';
+        smallrigMessage.className = '';
+        smallrigMessage.textContent = 'Appairage en cours (peut prendre quelques secondes)...';
+        try {
+          await window.klixa.smallrigProvision(lamp.bleDeviceId, nameInput.value.trim() || null);
+          lastFoundLamps = lastFoundLamps.filter((l) => l.bleDeviceId !== lamp.bleDeviceId);
+          smallrigMessage.className = 'ok';
+          smallrigMessage.textContent = 'Lampe appairée.';
+          await refreshSmallrigPaired();
+          renderSmallrigFound();
+        } catch (error) {
+          smallrigMessage.className = 'error';
+          smallrigMessage.textContent = error.message;
+          button.disabled = false;
+          button.textContent = 'Appairer';
+        }
+      }
+    });
+    smallrigFound.appendChild(row);
+  }
+}
+
+function renderSmallrigPaired() {
+  smallrigPaired.innerHTML = '';
+  if (lastPairedLamps.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'lamp-empty';
+    li.textContent = 'Aucune lampe appairée pour le moment.';
+    smallrigPaired.appendChild(li);
+    return;
+  }
+  for (const lamp of lastPairedLamps) {
+    const row = lampRow({
+      title: lamp.name || `Lampe ${lamp.uuid.slice(0, 8)}…`,
+      meta: `Adresse mesh 0x${lamp.unicastAddress.toString(16).padStart(4, '0')}`,
+      buttonLabel: 'Oublier',
+      onClick: async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = 'Suppression…';
+        try {
+          await window.klixa.smallrigForget(lamp.uuid);
+          await refreshSmallrigPaired();
+        } catch (error) {
+          smallrigMessage.className = 'error';
+          smallrigMessage.textContent = error.message;
+          button.disabled = false;
+          button.textContent = 'Oublier';
+        }
+      }
+    });
+    smallrigPaired.appendChild(row);
+  }
+}
+
+async function refreshSmallrigPaired() {
+  try {
+    const { lamps } = await window.klixa.smallrigList();
+    lastPairedLamps = lamps || [];
+  } catch {
+    lastPairedLamps = [];
+  }
+  renderSmallrigPaired();
+  renderSmallrigStatus();
+}
+
+smallrigScanBtn.addEventListener('click', async () => {
+  smallrigScanning = true;
+  smallrigScanBtn.disabled = true;
+  smallrigScanBtn.textContent = 'Scan en cours…';
+  smallrigMessage.className = '';
+  smallrigMessage.textContent = '';
+  renderSmallrigFound();
+  try {
+    const { lamps } = await window.klixa.smallrigDiscover(6000);
+    lastFoundLamps = lamps || [];
+  } catch (error) {
+    smallrigMessage.className = 'error';
+    smallrigMessage.textContent = error.message;
+    lastFoundLamps = [];
+  } finally {
+    smallrigScanning = false;
+    smallrigScanBtn.disabled = false;
+    smallrigScanBtn.textContent = 'Scanner les lampes à proximité';
+    renderSmallrigFound();
+  }
+});
+
+renderSmallrigFound();
+refreshSmallrigPaired();
 
 // Statut connecte/deconnecte en direct par integration (OBS, Streamer.bot, fumee),
 // pousse par polling depuis le process main (cf. onIntegrationStatus). Absence de
@@ -224,6 +394,7 @@ function renderIntegrationStatusUpdate(status) {
   }
   renderIntegrationStatus();
   renderHueUi();
+  renderSmallrigStatus();
 }
 
 // Seuls `downloading`/`ready` meritent une banniere visible : `checking`/`idle` sont
@@ -266,6 +437,7 @@ function setForm(config) {
   autoLaunch.checked = Boolean(config.AUTO_LAUNCH);
   renderPairingUi();
   renderHueUi();
+  renderSmallrigStatus();
   renderSecretFields(config);
 }
 

@@ -48,6 +48,24 @@ return {
     maxLights: int(env.HUE_MAX_LIGHTS, 50),
     concurrency: int(env.HUE_CONCURRENCY, 5),
   },
+  smallrig: {
+    // Intégration lampes SmallRig RM75 (Bluetooth Mesh) : nécessite un adaptateur
+    // Bluetooth actif sur la machine. L'appairage (scan/provisioning) se fait
+    // entièrement depuis l'IHM du compagnon (jamais via le cloud). L'état mesh
+    // (clés réseau générées localement + nœuds appairés) est sérialisé en JSON ;
+    // `onStateChange` est injecté par desktop/main.js pour la persistance chiffrée
+    // (ConfigStore/safeStorage, même principe que HUE_APP_KEY) — en mode headless
+    // (sans l'app desktop), l'état mesh ne vit qu'en mémoire pour la durée du process.
+    enabled: bool(env.SMALLRIG_ENABLED, true),
+    meshStateJson: env.SMALLRIG_MESH_STATE || '',
+    maxLamps: int(env.SMALLRIG_MAX_LAMPS, 50),
+    concurrency: int(env.SMALLRIG_CONCURRENCY, 3),
+    // Encodage de l'opcode vendor (hypothèse A/B, cf. RM75_SPEC_DEV.md §9/§12 point
+    // 1) : point bloquant non vérifié sur matériel réel, à ajuster ici si besoin.
+    vendorOpcodeMode: env.SMALLRIG_VENDOR_OPCODE_MODE === 'B' ? 'B' : 'A',
+    seqBlockSize: int(env.SMALLRIG_SEQ_BLOCK_SIZE, 100),
+    onStateChange: undefined,
+  },
   obs: {
     // Intégration OBS NATIVE (obs-websocket) : le compagnon parle directement à OBS sur le LAN.
     // `overlayBase` n'est PAS configuré ici : il est toujours fourni par le serveur dans la commande.

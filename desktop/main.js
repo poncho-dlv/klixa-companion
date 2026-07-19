@@ -108,6 +108,19 @@ function pushUpdateState(next) {
   window?.webContents.send('update:status', updateState);
 }
 
+// Construit la config runtime et y branche la persistance de l'etat mesh SmallRig
+// (cle NetKey/AppKey/noeuds appaires generee et geree localement, jamais par le
+// cloud - meme principe que HUE_APP_KEY). Le state complet est re-serialise et
+// chiffre via le ConfigStore existant (safeStorage) a chaque provisioning/oubli.
+function buildRuntimeConfig(values) {
+  const runtimeConfig = createConfig({ ...process.env, ...values, NODE_ENV: 'production' });
+  runtimeConfig.smallrig.onStateChange = async (meshStateJson) => {
+    const current = store.load();
+    store.save({ ...current, SMALLRIG_MESH_STATE: meshStateJson });
+  };
+  return runtimeConfig;
+}
+
 async function restartRuntime(values) {
   updateStatus({ running: false, message: 'Redemarrage...' });
   updateCloudStatus({ connected: false, features: {} });
@@ -118,7 +131,7 @@ async function restartRuntime(values) {
   await runtime?.stop();
   try {
     runtime = startCompanion(
-      createConfig({ ...process.env, ...values, NODE_ENV: 'production' }),
+      buildRuntimeConfig(values),
       { onCloudStatus: updateCloudStatus, onIntegrationStatus: updateIntegrationStatus }
     );
     updateStatus({ running: true, message: values.CLOUD_WS_URL ? 'Compagnon actif' : 'Actif en mode local' });
@@ -193,7 +206,7 @@ async function pollPairingOnce() {
 // Secrets : jamais renvoyes en clair au renderer (remplaces par un booleen *_CONFIGURED)
 // et jamais ecrases par une valeur vide a la sauvegarde. Doit rester aligne avec
 // `secretKeys` de config-store.js (qui les chiffre au repos via safeStorage).
-const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN'];
+const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN', 'SMALLRIG_MESH_STATE'];
 
 function publicConfig(values) {
   const result = { ...values };
@@ -289,6 +302,28 @@ function registerIpc() {
     store.save(next);
     await runtime.reconfigureIntegration('hue', createConfig({ ...process.env, ...next, NODE_ENV: 'production' }));
     return publicConfig(next);
+  });
+  // Appairage SmallRig (lampes Bluetooth Mesh) : contrairement a Hue, l'integration
+  // reste vivante entre les appels (pas de reconfigureIntegration a chaque action) -
+  // le scan/provisioning/oubli passe directement par les commandes du registre, et
+  // la persistance de l'etat mesh se fait via smallrig.onStateChange (branche dans
+  // buildRuntimeConfig), jamais via ces handlers directement.
+  function requireRuntime() {
+    if (!runtime) throw new Error('Compagnon en cours de démarrage, réessaie dans un instant');
+    return runtime;
+  }
+  ipcMain.handle('smallrig:discover', async (_event, { timeoutMs } = {}) => {
+    return requireRuntime().dispatch('smallrig.discover', { timeoutMs });
+  });
+  ipcMain.handle('smallrig:provision', async (_event, { bleDeviceId, name } = {}) => {
+    return requireRuntime().dispatch('smallrig.provision', { bleDeviceId, name });
+  });
+  ipcMain.handle('smallrig:forget', async (_event, { uuid } = {}) => {
+    return requireRuntime().dispatch('smallrig.forget', { uuid });
+  });
+  ipcMain.handle('smallrig:list', async () => {
+    if (!runtime) return { lamps: [] };
+    return runtime.dispatch('smallrig.list', {});
   });
   ipcMain.handle('pairing:start', async (_event, { baseUrl } = {}) => {
     stopPairingPoll();
