@@ -70,15 +70,27 @@ export function encodeRgbw({ r, g, b, w = 0 }) {
   return encodeControlFrame(LQ_OPCODE.RGBW, [clampInt(r, 0, 255), clampInt(g, 0, 255), clampInt(b, 0, 255), clampInt(w, 0, 255)]);
 }
 
-// FX : payload = [mode, 5, p1, (p2)] — longueur 3 ou 4 octets utiles selon le mode
-// (RM75_SPEC_DEV.md §9.4 : 5 octets de trame pour les modes 1,3,6,8,11,12 soit p1+p2,
-// 4 octets pour les autres soit p1 seul).
-const FX_TWO_PARAM_MODES = new Set([FX_MODE.PAPARAZZI, FX_MODE.LIGHTNING, FX_MODE.WELDING, FX_MODE.FIREWORKS, FX_MODE.TV, FX_MODE.FAULT_BULB]);
+// Format confirmé dans SmallGoGo/LqFx :
+// - mode 1 : [mode, 5, p1, p2_hi, p2_lo]
+// - modes 3/6/8/11/12 : [mode, 5, p1]
+// - autres modes : [mode, 5, p1, p2]
+const FX_ONE_PARAMETER_MODES = new Set([
+  FX_MODE.LIGHTNING,
+  FX_MODE.WELDING,
+  FX_MODE.FIREWORKS,
+  FX_MODE.TV,
+  FX_MODE.FAULT_BULB
+]);
 
 export function encodeFx({ mode, param1 = 0, param2 = 0 }) {
   const m = clampInt(mode, 1, 12);
   const payload = [m, 5, clampInt(param1, 0, 255)];
-  if (FX_TWO_PARAM_MODES.has(m)) payload.push(clampInt(param2, 0, 255));
+  if (m === FX_MODE.PAPARAZZI) {
+    const p2 = clampInt(param2, 0, 0xffff);
+    payload.push((p2 >> 8) & 0xff, p2 & 0xff);
+  } else if (!FX_ONE_PARAMETER_MODES.has(m)) {
+    payload.push(clampInt(param2, 0, 255));
+  }
   return encodeControlFrame(LQ_OPCODE.FX, payload);
 }
 
@@ -125,9 +137,14 @@ export function decodeStatus(rawBytes) {
   if (bytes.length < 3) throw new Error('Trame de statut trop courte');
   const [mode, len] = bytes;
   const xor = bytes[2];
+  if (bytes.length !== 3 + len) throw new Error('Trame de statut : longueur incohérente');
   const values = bytes.subarray(3, 3 + len);
-  if (values.length !== len) throw new Error('Trame de statut tronquée');
   if (xorAll(values) !== xor) throw new Error('Trame de statut : XOR invalide');
+
+  const requiredLengths = new Map([[3, 4], [4, 4], [5, 3], [6, 4]]);
+  if (requiredLengths.has(mode) && len !== requiredLengths.get(mode)) {
+    throw new Error(`Trame de statut : longueur invalide pour le mode ${mode}`);
+  }
 
   switch (mode) {
     case 3: return { type: 'hsi', hue: (values[0] << 8) + values[1], sat: values[2], intensity: values[3] };
@@ -144,11 +161,14 @@ export function decodeStatus(rawBytes) {
 // LqCapacity (0x31) : 8 octets ASCII (chiffres), cf. RM75_SPEC_DEV.md §9.5.
 export function decodeCapacity(rawBytes) {
   const bytes = stripAtPrefix(rawBytes);
-  if (bytes.length < 8) throw new Error('Trame de capacité trop courte');
+  if (bytes.length !== 8 || !/^[0-9]{8}$/.test(bytes.toString('ascii'))) {
+    throw new Error('Trame de capacité invalide');
+  }
   const digit = (i) => bytes[i] - 0x30;
   const battery = digit(0) * 100 + digit(1) * 10 + digit(2);
   const autonomyHours = digit(3) * 10 + digit(4) + digit(5) / 10;
-  const chargeState = ['discharged', 'charging', 'full'][bytes[6] - 0x30] || 'unknown';
+  if (battery > 100 || digit(6) > 2 || digit(7) > 1) throw new Error('Trame de capacité hors plage');
+  const chargeState = ['discharged', 'charging', 'full'][digit(6)];
   const poweredOn = bytes[7] === 0x31;
   return { battery, autonomyHours, chargeState, poweredOn };
 }
@@ -162,23 +182,9 @@ export function decodeVersion(rawBytes) {
   return { type: text.slice(0, sep).trim(), firmwareVersion: text.slice(sep + 2).trim() };
 }
 
-// Encodage de l'opcode vendor 3 octets : Company ID Realtek + sous-opcode.
-// [POINT À VÉRIFIER — cf. RM75_SPEC_DEV.md §9 / §12 point 1, bloquant tant que non
-// confirmé sur matériel réel avec nRF Connect] : deux hypothèses sur la manière dont
-// l'app dérive l'opcode vendor 3 octets à partir du sous-opcode 0x24 passé à
-// `meshSendVendorModelData`.
-//   - Hypothèse A (par défaut ici, la plus probable d'après le code décompilé) :
-//     l'octet est complété en opcode vendor via `0xC0 | subOpcode`, suivi du CID en
-//     little-endian. C'est le format utilisé par `setLightColor` dans la même classe
-//     (0xC5 = 0xC0|0x05).
-//   - Hypothèse B : le sous-opcode est un octet applicatif à l'intérieur du payload,
-//     l'opcode vendor 3 octets étant dérivé indépendamment par la couche native.
-// À changer via `vendorOpcodeMode: 'B'` si l'hypothèse A ne fonctionne pas en pratique.
-export function buildVendorAccessPayload(lqFrame, { vendorOpcodeMode = 'A', subOpcode = VENDOR_SUBOPCODE_DATA, cid = VENDOR_CID } = {}) {
-  if (vendorOpcodeMode === 'B') {
-    return Buffer.concat([Buffer.from([subOpcode]), lqFrame]);
-  }
-  const opcodeByte = 0xc0 | (subOpcode & 0x3f);
-  const vendorOpcode = Buffer.from([opcodeByte, cid & 0xff, (cid >> 8) & 0xff]);
-  return Buffer.concat([vendorOpcode, lqFrame]);
+// Format confirmé par la chaîne SmallGoGo LqVendorClient -> VendorClient ->
+// CoreMeshAdapter : le byte[] opcode `{0x24}` est concaténé littéralement à la trame
+// Lq avant l'appel natif. Il n'y a pas de variante E4 5D 00 au niveau Access Payload.
+export function buildVendorAccessPayload(lqFrame) {
+  return Buffer.concat([Buffer.from([VENDOR_SUBOPCODE_DATA]), lqFrame]);
 }

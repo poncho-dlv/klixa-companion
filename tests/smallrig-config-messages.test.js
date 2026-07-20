@@ -44,9 +44,15 @@ test('decodeAccessOpcode: distingue opcode 1/2/3 octets', () => {
 });
 
 test('decodeAppKeyStatus / decodeModelAppStatus: status 0x00 = succès', () => {
-  assert.deepEqual(decodeAppKeyStatus(Buffer.from([0x00, 0, 0, 0])), { status: 0, ok: true });
-  assert.deepEqual(decodeAppKeyStatus(Buffer.from([0x01, 0, 0, 0])), { status: 1, ok: false });
-  assert.equal(decodeModelAppStatus(Buffer.from([0x00, 0, 0, 0, 0, 0, 0, 0])).ok, true);
+  assert.deepEqual(decodeAppKeyStatus(Buffer.from([0x00, 0, 0, 0])), { status: 0, ok: true, netKeyIndex: 0, appKeyIndex: 0 });
+  assert.deepEqual(decodeAppKeyStatus(Buffer.from([0x01, 0, 0, 0])), { status: 1, ok: false, netKeyIndex: 0, appKeyIndex: 0 });
+  const model = decodeModelAppStatus(Buffer.from([0x00, 0x03, 0x00, 0, 0, 0x5d, 0, 4, 0]));
+  assert.equal(model.ok, true);
+  assert.equal(model.elementAddress, 3);
+  assert.equal(model.modelId, 0x0004005d);
+  assert.equal(model.isVendorModel, true);
+  assert.throws(() => decodeAppKeyStatus(Buffer.from([0x00])), /mal formé/);
+  assert.throws(() => decodeModelAppStatus(Buffer.alloc(8)), /mal formé/);
 });
 
 test('parseCompositionDataPage0: détecte le vendor model DATATRANS_SERVER sur le 1er élément', () => {
@@ -57,4 +63,8 @@ test('parseCompositionDataPage0: détecte le vendor model DATATRANS_SERVER sur l
   const parsed = parseCompositionDataPage0(Buffer.concat([header, element]));
   assert.equal(parsed.elements.length, 1);
   assert.deepEqual(parsed.elements[0].vendorModels, [0x0004005d]);
+  assert.throws(() => parseCompositionDataPage0(Buffer.concat([header, element.subarray(0, 7)])), /tronquée/);
+  const wrongPage = Buffer.from(header);
+  wrongPage[0] = 1;
+  assert.throws(() => parseCompositionDataPage0(Buffer.concat([wrongPage, element])), /page inattendue/);
 });

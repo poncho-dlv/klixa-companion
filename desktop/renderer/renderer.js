@@ -130,9 +130,9 @@ let lastFoundLamps = [];
 let lastPairedLamps = [];
 let smallrigScanning = false;
 
-// Statut de l'intégration SmallRig : contrairement à Hue (une seule ressource
-// bridge), le "connecté" ici veut dire "au moins une lampe appairée et joignable via
-// une connexion Proxy" (cf. mesh-client.js#healthcheck côté main).
+// Distingue l'état local (lampes appairées) d'une vraie session Proxy active. Une
+// lampe enregistrée n'est pas présentée comme joignable tant qu'aucun lien BLE ne le
+// confirme.
 function renderSmallrigStatus() {
   const enabled = lastConfig.SMALLRIG_ENABLED !== false && lastConfig.SMALLRIG_ENABLED !== 'false';
   const entry = lastIntegrationStatus?.smallrig;
@@ -146,11 +146,20 @@ function renderSmallrigStatus() {
     smallrigStatus.className = 'integration-status status-line';
     icon.setAttribute('d', '');
     span.textContent = 'Vérification...';
+  } else if (entry.ok === false) {
+    smallrigStatus.className = 'integration-status status-line error';
+    icon.setAttribute('d', ICON_WARNING);
+    span.textContent = entry.error || 'Bluetooth indisponible';
   } else {
     const paired = Boolean(entry.paired ?? entry.lamps > 0);
-    smallrigStatus.className = `integration-status status-line ${paired ? 'ok' : 'error'}`;
-    icon.setAttribute('d', paired ? ICON_CHECK : ICON_WARNING);
-    span.textContent = paired ? `${entry.lamps} lampe(s) appairée(s)` : 'Aucune lampe appairée';
+    const proxyConnected = entry.proxyConnected === true;
+    smallrigStatus.className = `integration-status status-line${proxyConnected ? ' ok' : ''}`;
+    icon.setAttribute('d', proxyConnected ? ICON_CHECK : '');
+    span.textContent = !paired
+      ? 'Aucune lampe appairée'
+      : proxyConnected
+        ? `${entry.lamps} lampe(s) appairée(s) · proxy connecté`
+        : `${entry.lamps} lampe(s) appairée(s) · connexion à la demande`;
   }
 }
 
@@ -173,7 +182,10 @@ function lampRow({ title, meta, buttonLabel, onClick, extraNode }) {
   button.type = 'button';
   button.textContent = buttonLabel;
   button.addEventListener('click', onClick);
-  li.appendChild(button);
+  const actions = document.createElement('div');
+  actions.className = 'lamp-actions';
+  actions.appendChild(button);
+  li.appendChild(actions);
   return li;
 }
 
@@ -193,7 +205,7 @@ function renderSmallrigFound() {
     nameInput.placeholder = 'Nom (optionnel)';
     nameInput.value = lamp.name || '';
     const row = lampRow({
-      title: `Lampe détectée (${lamp.bleDeviceId.slice(0, 8)}…)`,
+      title: `Lampe détectée (${lamp.bleDeviceId})`,
       meta: Number.isFinite(lamp.rssi) ? `Signal ${lamp.rssi} dBm` : '',
       buttonLabel: 'Appairer',
       extraNode: nameInput,
@@ -204,13 +216,26 @@ function renderSmallrigFound() {
         smallrigMessage.className = '';
         smallrigMessage.textContent = 'Appairage en cours (peut prendre quelques secondes)...';
         try {
-          await window.klixa.smallrigProvision(lamp.bleDeviceId, nameInput.value.trim() || null);
+          const result = await window.klixa.smallrigProvision(
+            lamp.bleDeviceId,
+            lamp.deviceUuid || null,
+            nameInput.value.trim() || null
+          );
           lastFoundLamps = lastFoundLamps.filter((l) => l.bleDeviceId !== lamp.bleDeviceId);
-          smallrigMessage.className = 'ok';
-          smallrigMessage.textContent = 'Lampe appairée.';
           await refreshSmallrigPaired();
           renderSmallrigFound();
+          if (result?.configured === false) {
+            smallrigMessage.className = 'error';
+            smallrigMessage.textContent = 'Lampe appairée, mais configuration incomplète. Utilise « Reconfigurer ».';
+          } else {
+            smallrigMessage.className = 'ok';
+            smallrigMessage.textContent = 'Lampe appairée et configurée.';
+          }
         } catch (error) {
+          // Le provisioning peut avoir réussi côté lampe avant une erreur de
+          // configuration. Toujours rafraîchir la liste pour rendre la récupération
+          // visible au lieu de laisser croire que rien ne s'est passé.
+          await refreshSmallrigPaired();
           smallrigMessage.className = 'error';
           smallrigMessage.textContent = error.message;
           button.disabled = false;
@@ -232,25 +257,61 @@ function renderSmallrigPaired() {
     return;
   }
   for (const lamp of lastPairedLamps) {
+    const configurationPending = lamp.configurationPending === true
+      || lamp.configurationStatus === 'pending'
+      || lamp.configured === false;
     const row = lampRow({
       title: lamp.name || `Lampe ${lamp.uuid.slice(0, 8)}…`,
-      meta: `Adresse mesh 0x${lamp.unicastAddress.toString(16).padStart(4, '0')}`,
+      meta: `Adresse mesh 0x${lamp.unicastAddress.toString(16).padStart(4, '0')}${configurationPending ? ' · configuration en attente' : ''}`,
       buttonLabel: 'Oublier',
       onClick: async (event) => {
+        if (!window.confirm('La lampe va recevoir un Node Reset avant la suppression locale. Continuer ?')) return;
         const button = event.currentTarget;
         button.disabled = true;
-        button.textContent = 'Suppression…';
+        button.textContent = 'Réinitialisation…';
         try {
-          await window.klixa.smallrigForget(lamp.uuid);
+          await window.klixa.smallrigForget(lamp.uuid, false);
+          smallrigMessage.className = 'ok';
+          smallrigMessage.textContent = 'Lampe réinitialisée et oubliée.';
           await refreshSmallrigPaired();
         } catch (error) {
           smallrigMessage.className = 'error';
           smallrigMessage.textContent = error.message;
           button.disabled = false;
           button.textContent = 'Oublier';
+          if (window.confirm('L’oubli avec Node Reset a échoué. Oublier uniquement la clé locale ? Fais-le seulement si la lampe a déjà été réinitialisée en usine ou est définitivement perdue.')) {
+            try {
+              await window.klixa.smallrigForget(lamp.uuid, true);
+              smallrigMessage.className = 'ok';
+              smallrigMessage.textContent = 'Clé locale supprimée. Un reset usine est requis avant tout nouvel appairage.';
+              await refreshSmallrigPaired();
+            } catch (forceError) {
+              smallrigMessage.textContent = forceError.message;
+            }
+          }
         }
       }
     });
+    const actions = row.querySelector('.lamp-actions');
+    const reconfigureButton = document.createElement('button');
+    reconfigureButton.type = 'button';
+    reconfigureButton.textContent = configurationPending ? 'Terminer la configuration' : 'Reconfigurer';
+    reconfigureButton.addEventListener('click', async () => {
+      reconfigureButton.disabled = true;
+      smallrigMessage.className = '';
+      smallrigMessage.textContent = 'Configuration Mesh en cours…';
+      try {
+        await window.klixa.smallrigReconfigure(lamp.uuid);
+        smallrigMessage.className = 'ok';
+        smallrigMessage.textContent = 'Configuration Mesh terminée.';
+        await refreshSmallrigPaired();
+      } catch (error) {
+        smallrigMessage.className = 'error';
+        smallrigMessage.textContent = error.message;
+        reconfigureButton.disabled = false;
+      }
+    });
+    actions.prepend(reconfigureButton);
     smallrigPaired.appendChild(row);
   }
 }
@@ -259,8 +320,11 @@ async function refreshSmallrigPaired() {
   try {
     const { lamps } = await window.klixa.smallrigList();
     lastPairedLamps = lamps || [];
-  } catch {
-    lastPairedLamps = [];
+  } catch (error) {
+    // Ne pas transformer une panne du store/Bluetooth en liste vide : cela ferait
+    // croire que les clés Mesh ont disparu. Garder la dernière vue et exposer la cause.
+    smallrigMessage.className = 'error';
+    smallrigMessage.textContent = error.message || 'Impossible de charger les lampes SmallRig.';
   }
   renderSmallrigPaired();
   renderSmallrigStatus();

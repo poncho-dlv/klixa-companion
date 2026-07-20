@@ -25,7 +25,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run dist:win
+      - run: npm run smoke:webbluetooth
+      - run: npm run smoke:webbluetooth:packaged
       - name: Attacher les binaires a la release
         shell: pwsh
         env:

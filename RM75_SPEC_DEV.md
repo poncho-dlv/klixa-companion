@@ -8,7 +8,7 @@ Sources : décompilation de `com.zzcyi.bluetoothled` 2.2.5 (jadx 1.5.1), spécif
 Bluetooth Mesh Profile 1.0.1, observations nRF Connect sur matériel réel.
 
 Les points marqués **[À VÉRIFIER]** sont des inférences non confirmées
-empiriquement. Ils sont peu nombreux mais l'un d'eux est bloquant — voir §9.
+empiriquement. Le format Lq décrit au §9 a depuis été confirmé dans SmallGoGo 2.2.5.
 
 > Implémentation compagnon : `src/integrations/smallrig/`. Voir §12 pour l'état des
 > vérifications matérielles au moment de l'implémentation initiale.
@@ -18,15 +18,17 @@ empiriquement. Ils sont peu nombreux mais l'un d'eux est bloquant — voir §9.
 ## 1. Vue d'ensemble
 
 La RM75 est un nœud Bluetooth Mesh. Le fabricant réel est Shenzhen Leqi Network
-Technology (SmallRig est le distributeur), la stack radio est Realtek, d'où le
-Company ID `0x005D`.
+Technology (SmallRig est le distributeur), la stack radio est Realtek. L'hypothèse
+initiale plaçait tout sous le Company ID Realtek `0x005D` ; la Composition Data
+capturée sur une RM75 réelle (§12 point 4) montre que ce n'est vrai que pour deux
+modèles génériques de la stack — le modèle de contrôle Lq est déclaré sous le CID
+propre au fabricant.
 
 | Élément | Valeur |
-|---|---|
-| Company ID (CID) | `0x005D` (Realtek Semiconductor) |
-| Vendor model serveur (sur la lampe) | `0x0004005D` |
-| Vendor model client (à déclarer) | `0x0005005D` |
-| Modèle CWRGB serveur | `0x0001005D` (non utilisé par l'app pour la RM75) |
+| --- | --- |
+| Company ID (CID) du nœud (en-tête Composition Data) | `0x03F6` |
+| Vendor model de contrôle (DATATRANS_SERVER, sur la lampe) | `0x100003F6` (ModelID `0x1000`, CID `0x03F6`) |
+| Modèles génériques Realtek présents mais non utilisés | `0x0000005D`, `0x0001005D` (CID `0x005D`, stack Realtek) |
 | Transport | PB-GATT (provisioning) puis GATT Proxy (contrôle) |
 | Rôle à implémenter | Provisioner + Configuration Client + Vendor Client |
 
@@ -38,7 +40,7 @@ la lampe accepte n'importe quel message correctement chiffré.
 
 ```
 Commande applicative          →  33 04 00 00 00 64 64
-+ opcode vendor               →  E4 5D 00 | 33 04 00 00 00 64 64
++ opcode data SmallGoGo       →  24 | 33 04 00 00 00 64 64
 = Access Payload
   → chiffrement AppKey (AES-CCM, TransMIC 4o)
 Upper Transport PDU
@@ -166,6 +168,13 @@ Dérivations à faire une fois par clé et à mettre en cache :
 
 ⚠️ Attention aux implémentations d'AES-CMAC : c'est CMAC (RFC 4493), pas HMAC.
 En Node, `node-aes-cmac` ou une implémentation maison au-dessus de `crypto`.
+
+⚠️ Le runtime Electron Windows est lié à BoringSSL et peut ne pas exposer
+`aes-128-ccm` dans `node:crypto`, même si le Node/OpenSSL installé sur la machine le
+propose. Le compagnon implémente donc le CCM Bluetooth Mesh sans AAD au-dessus du
+bloc `aes-128-ecb` (nonce 13 octets, MIC 4/8), avec des vecteurs fixes exécutés aussi
+sous Electron et dans le paquet final. Un test uniquement lancé avec `node` ne suffit
+pas à valider cette partie du provisioning.
 
 ---
 
@@ -349,9 +358,9 @@ message de contrôle opcode `0x00`) et une logique de retransmission.
 d'Access Payload** et tu évites entièrement la segmentation. Vérifions :
 
 ```
-E4 5D 00 | 33 04 00 00 00 64 64   → 3 + 7 = 10 octets  ✓
-E4 5D 00 | 34 04 87 15 E0 50 32   → 3 + 7 = 10 octets  ✓
-E4 5D 00 | 42 02 FC FC 00         → 3 + 5 =  8 octets  ✓
+24 | 33 04 00 00 00 64 64   → 1 + 7 = 8 octets  ✓
+24 | 34 04 87 15 E0 50 32   → 1 + 7 = 8 octets  ✓
+24 | 42 02 FC FC 00         → 1 + 5 = 6 octets  ✓
 ```
 
 Toutes les commandes de contrôle courantes passent en non segmenté. Seuls les
@@ -442,12 +451,12 @@ unicast du nœud.
 
 ```
 1. Composition Data Get(page 0)
-   → vérifier la présence du vendor model 0x0004005D et noter son élément
+   → vérifier la présence du vendor model 0x100003F6 et noter son élément
 
 2. App Key Add(NetKeyIndex=0, AppKeyIndex=0, AppKey)
    → attendre App Key Status, status 0x00
 
-3. Model App Bind(ElementAddress, AppKeyIndex=0, ModelId=0x0004005D)
+3. Model App Bind(ElementAddress, AppKeyIndex=0, ModelId=0x100003F6)
    → attendre Model App Status, status 0x00
 ```
 
@@ -456,7 +465,7 @@ faute de modèle lié à cette AppKey. Symptôme typique : aucune erreur, aucune
 réaction.
 
 Le `ModelId` d'un vendor model s'encode sur 4 octets, **CID en premier**, le tout
-en little-endian : `0x0004005D` → `5D 00 04 00`.
+en little-endian : `0x100003F6` → `F6 03 00 10`.
 
 Pour un groupe : `Model Subscription Add(ElementAddress, GroupAddress,
 ModelId)` sur chaque lampe, puis émission vers l'adresse de groupe — un seul
@@ -464,7 +473,7 @@ message pilote toutes les lampes simultanément, sans dérive visible.
 
 ---
 
-## 9. Protocole applicatif Lq — **le point bloquant**
+## 9. Protocole applicatif Lq
 
 ### Format de la trame
 
@@ -481,54 +490,29 @@ len = longueur du payload
 xor = XOR de tous les octets du payload
 ```
 
-### Opcode vendor — deux hypothèses **[À VÉRIFIER]**
+### Préfixe data confirmé
 
 L'app appelle :
 
 ```java
 CoreMeshAdapter.meshSendVendorModelData(
     trame,                 // [opcode][len][xor][payload]
-    new byte[]{0x24},      // → ambigu
+    new byte[]{0x24},
     dstAddr, appKeyIndex,
     MESH_MODEL_DATATRANS_CLIENT
 );
 ```
 
-et `meshSendVendorModelData` se contente de concaténer les deux buffers avant de
-passer au natif.
-
-**Hypothèse A (la plus probable)** — le natif complète l'octet en opcode vendor
-3 octets. L'argument décisif : dans la même classe, `setLightColor` utilise
-`this.b = {0xC5, 0x5D, 0x00}`, qui est un opcode vendor 3 octets parfaitement
-formé (`0xC0 | 0x05`, puis CID `0x005D` en little-endian). Par analogie, `0x24`
-deviendrait :
+et `meshSendVendorModelData` concatène littéralement l'opcode byte[] puis la trame
+avant l'appel natif. L'Access Payload utilisé par SmallGoGo est donc :
 
 ```
-0xC0 | 0x24 = 0xE4,  puis CID  → E4 5D 00
+24 | 33 04 00 00 00 64 64
 ```
 
-Access Payload complet :
-
-```
-E4 5D 00 | 33 04 00 00 00 64 64
-```
-
-**Hypothèse B** — `0x24` est un sous-opcode applicatif, et l'opcode vendor 3
-octets est généré indépendamment par la couche native à partir du model ID.
-L'Access Payload serait alors `[opcode 3 octets] 24 33 04 …`.
-
-### Comment trancher — à faire en premier
-
-Avec l'app **nRF Mesh** (Nordic) sur une lampe déjà provisionnée par tes soins,
-envoie un message vendor manuel avec CID `0x005D`, opcode `0x24`, et pour
-paramètres `33 04 00 00 00 64 64`.
-
-- La lampe passe au rouge plein pot → **hypothèse A validée**
-- Aucune réaction → essaie en préfixant les paramètres par `24`, ce qui valide B
-
-Vingt minutes de test qui évitent des jours de débogage à l'aveugle sur du
-chiffrement, où l'absence de réaction ne distingue pas une erreur de crypto d'une
-erreur d'opcode.
+La variante historique `E4 5D 00` était une inférence erronée et ne doit plus être
+émise. Le fonctionnement radio reste à confirmer sur RM75 réel, mais le format de
+l'application Android n'est plus ambigu.
 
 ### Table des commandes
 
@@ -691,12 +675,11 @@ sont les plus coûteux à diagnostiquer plus tard. Prends le temps.
 
 | # | Point | Impact | Comment vérifier | État côté implémentation compagnon |
 |---|---|---|---|---|
-| 1 | Encodage de l'opcode vendor (§9) | **Bloquant** | Message vendor manuel via nRF Mesh | Hypothèse A implémentée par défaut, configurable (`SMALLRIG_VENDOR_OPCODE_MODE=B`) — non vérifié sur matériel réel |
-| 2 | Méthode d'authentification OOB | Moyen | Lire les Capabilities lors du provisioning | No OOB implémenté (cas attendu) — non vérifié sur matériel réel |
+| 1 | Préfixe data Lq (§9) | Moyen | Capture radio RM75 | `[0x24][trame Lq]` confirmé dans SmallGoGo 2.2.5 ; validation radio encore requise |
+| 2 | Méthode d'authentification OOB | Moyen | Lire les Capabilities lors du provisioning | Capabilities validées puis No OOB explicite ; aucune protection MITM revendiquée |
 | 3 | Nombre d'éléments du nœud | Faible | Capabilities + Composition Data | Alloué dynamiquement depuis les Capabilities reçues |
-| 4 | Présence du vendor model `0x0004005D` | Moyen | Composition Data Get page 0 | Vérifié automatiquement après provisioning (log d'avertissement si absent) |
-| 5 | Longueurs exactes des payloads FX | Faible | Test empirique par mode | Implémenté selon la table §9.4 — non vérifié sur matériel réel |
+| 4 | Présence du vendor model `0x100003F6` | Moyen | Composition Data Get page 0 | Corrigé après capture radio réelle (hypothèse initiale `0x0004005D` erronée) ; vérifiée strictement, bind et commandes ciblent l'élément qui le porte |
+| 5 | Longueurs exactes des payloads FX | Faible | Test empirique par mode | Formats confirmés dans `LqFx` de SmallGoGo ; validation radio encore requise |
 
-Le point 1 est le seul qui puisse faire perdre des jours. Traite-le avant tout
-développement supplémentaire (nouvelles commandes, groupes, etc.) — cf.
-`src/integrations/smallrig/lq-protocol.js#buildVendorAccessPayload`.
+Les échanges GATT, le filtre Proxy et les temporisations doivent encore être validés
+sur lampe réelle malgré les tests déterministes du compagnon.

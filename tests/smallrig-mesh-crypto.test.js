@@ -64,27 +64,66 @@ test('k1: dérive une clé de session déterministe de 16 octets', () => {
   assert.deepEqual(derived, k1(secret, salt, Buffer.from('prsk')));
 });
 
-test('AES-CCM: round-trip chiffrement/déchiffrement, MIC 4 et 8 octets', () => {
+test('AES-CCM: vecteurs fixes sans AAD, MIC 4 et 8 octets', () => {
   const key = Buffer.from('0102030405060708090a0b0c0d0e0f10', 'hex');
   const nonce = Buffer.from('00112233445566778899aabbcc', 'hex'); // 13 octets
-  const plaintext = Buffer.from('e45d0033040000006464', 'hex');
+  const vectors = [
+    { plaintext: '', micLength: 4, ciphertext: '', mic: '179dc5fd' },
+    { plaintext: '2433040000006464', micLength: 4, ciphertext: '08f799300f3fae2d', mic: '1c0c6073' },
+    { plaintext: '2433040000006464', micLength: 8, ciphertext: '08f799300f3fae2d', mic: '0a8a4266bf76afbd' },
+    {
+      // Longueur exacte du Provisioning Data Bluetooth Mesh.
+      plaintext: '000102030405060708090a0b0c0d0e0f101112131415161718',
+      micLength: 8,
+      ciphertext: '2cc59f330b3acc4e0c1d5d5fae7eff493f984d3a767f96b5d9',
+      mic: 'd08105772aa3e6a4'
+    }
+  ];
 
-  for (const micLength of [4, 8]) {
+  for (const vector of vectors) {
+    const plaintext = Buffer.from(vector.plaintext, 'hex');
+    const micLength = vector.micLength;
     const { ciphertext, mic } = aesCcmEncrypt(key, nonce, plaintext, micLength);
-    assert.equal(mic.length, micLength);
-    assert.notDeepEqual(ciphertext, plaintext);
-    const decrypted = aesCcmDecrypt(key, nonce, ciphertext, mic, micLength);
-    assert.deepEqual(decrypted, plaintext);
+    assert.equal(ciphertext.toString('hex'), vector.ciphertext);
+    assert.equal(mic.toString('hex'), vector.mic);
+    assert.deepEqual(aesCcmDecrypt(key, nonce, ciphertext, mic, micLength), plaintext);
   }
 });
 
-test('AES-CCM: un MIC altéré fait échouer le déchiffrement (authentification)', () => {
+test('AES-CCM: une MIC ou un ciphertext altéré fait échouer l\'authentification', () => {
   const key = Buffer.from('0102030405060708090a0b0c0d0e0f10', 'hex');
   const nonce = Buffer.from('00112233445566778899aabbcc', 'hex');
   const { ciphertext, mic } = aesCcmEncrypt(key, nonce, Buffer.from('hello mesh'), 4);
-  const tampered = Buffer.from(mic);
-  tampered[0] ^= 0xff;
-  assert.throws(() => aesCcmDecrypt(key, nonce, ciphertext, tampered, 4));
+  const tamperedMic = Buffer.from(mic);
+  tamperedMic[0] ^= 0xff;
+  assert.throws(
+    () => aesCcmDecrypt(key, nonce, ciphertext, tamperedMic, 4),
+    (error) => error.code === 'ERR_CRYPTO_INVALID_AUTH_TAG'
+  );
+
+  const tamperedCiphertext = Buffer.from(ciphertext);
+  tamperedCiphertext[0] ^= 0xff;
+  assert.throws(
+    () => aesCcmDecrypt(key, nonce, tamperedCiphertext, mic, 4),
+    (error) => error.code === 'ERR_CRYPTO_INVALID_AUTH_TAG'
+  );
+});
+
+test('AES-CCM: valide strictement clé, nonce, payload et longueur de MIC Bluetooth Mesh', () => {
+  const key = Buffer.alloc(16);
+  const nonce = Buffer.alloc(13);
+  const payload = Buffer.alloc(0);
+
+  assert.throws(() => aesCcmEncrypt(new Uint8Array(16), nonce, payload), /clé AES-CCM.*Buffer/);
+  assert.throws(() => aesCcmEncrypt(Buffer.alloc(15), nonce, payload), /exactement 16 octets/);
+  assert.throws(() => aesCcmEncrypt(key, Buffer.alloc(12), payload), /exactement 13 octets/);
+  assert.throws(() => aesCcmEncrypt(key, nonce, new Uint8Array(0)), /payload AES-CCM.*Buffer/);
+  assert.throws(() => aesCcmEncrypt(key, nonce, payload, 6), /4 ou 8 octets/);
+  assert.throws(() => aesCcmEncrypt(key, nonce, Buffer.alloc(65536), 8), /dépasse 65535 octets/);
+
+  const { ciphertext, mic } = aesCcmEncrypt(key, nonce, payload, 8);
+  assert.throws(() => aesCcmDecrypt(key, nonce, ciphertext, new Uint8Array(mic), 8), /MIC AES-CCM.*Buffer/);
+  assert.throws(() => aesCcmDecrypt(key, nonce, ciphertext, Buffer.alloc(4), 8), /exactement 8 octets/);
 });
 
 test('ECDH P-256: les deux parties dérivent le même secret partagé', () => {

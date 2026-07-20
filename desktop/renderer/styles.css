@@ -29,5 +29,6 @@ h3{font-size:13px;color:#aeb3cf;margin:18px 0 8px;text-transform:uppercase;lette
 .lamp-name-row input{margin:0}
 .lamp-meta{color:#8a8fb0;font-size:12px}
 .lamp-list button{width:auto;flex-shrink:0;padding:8px 13px;font-size:12px}
+.lamp-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
 .lamp-empty{color:#8a8fb0;font-size:13px;margin:8px 0}
 

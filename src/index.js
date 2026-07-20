@@ -2,8 +2,10 @@ import process from 'node:process';
 import { config } from './config.js';
 import { createLogger } from './logger.js';
 import { startCompanion } from './runtime.js';
+import { configureHeadlessSmallrigState } from './smallrig-state-file.js';
 
 const log = createLogger('main');
+configureHeadlessSmallrigState(config.smallrig);
 const runtime = startCompanion(config);
 let shuttingDown = false;
 

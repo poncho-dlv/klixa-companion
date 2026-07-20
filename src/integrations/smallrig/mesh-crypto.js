@@ -116,19 +116,111 @@ export function k4(n) {
   return full[full.length - 1] & 0x3f;
 }
 
-// AES-CCM générique (network/upper-transport, sans AAD). `nonce` = 13 octets,
-// `micLength` = 4 ou 8 selon la couche (network: 4/8 selon CTL, access: 4, device: 4).
+// Electron est lié à BoringSSL et n'expose pas `aes-128-ccm` via node:crypto,
+// contrairement au runtime Node/OpenSSL utilisé par les tests et les scripts. CCM
+// est donc construit ici au-dessus du seul bloc AES-128-ECB, disponible dans les deux
+// runtimes. Le profil Bluetooth Mesh n'utilise pas d'AAD, impose un nonce de 13 octets
+// (L=2) et des MIC de 4 ou 8 octets selon la couche.
+const CCM_NONCE_LENGTH = 13;
+const CCM_LENGTH_FIELD_BYTES = 15 - CCM_NONCE_LENGTH;
+const CCM_MAX_PAYLOAD_LENGTH = (2 ** (8 * CCM_LENGTH_FIELD_BYTES)) - 1;
+const CCM_MIC_LENGTHS = new Set([4, 8]);
+
+function assertBuffer(value, label) {
+  if (!Buffer.isBuffer(value)) throw new TypeError(`${label} doit être un Buffer`);
+}
+
+function validateCcmParameters(key, nonce, payload, micLength) {
+  assertBuffer(key, 'La clé AES-CCM');
+  assertBuffer(nonce, 'Le nonce AES-CCM');
+  assertBuffer(payload, 'Le payload AES-CCM');
+  if (key.length !== 16) throw new RangeError('La clé AES-CCM doit contenir exactement 16 octets');
+  if (nonce.length !== CCM_NONCE_LENGTH) {
+    throw new RangeError(`Le nonce AES-CCM Bluetooth Mesh doit contenir exactement ${CCM_NONCE_LENGTH} octets`);
+  }
+  if (!Number.isInteger(micLength) || !CCM_MIC_LENGTHS.has(micLength)) {
+    throw new RangeError('La MIC AES-CCM Bluetooth Mesh doit contenir 4 ou 8 octets');
+  }
+  if (payload.length > CCM_MAX_PAYLOAD_LENGTH) {
+    throw new RangeError(`Le payload AES-CCM dépasse ${CCM_MAX_PAYLOAD_LENGTH} octets pour un nonce de ${CCM_NONCE_LENGTH} octets`);
+  }
+}
+
+function encodeCcmInteger(value, byteLength) {
+  const encoded = Buffer.alloc(byteLength);
+  let remaining = value;
+  for (let index = byteLength - 1; index >= 0; index--) {
+    encoded[index] = remaining & 0xff;
+    remaining = Math.floor(remaining / 0x100);
+  }
+  if (remaining !== 0) throw new RangeError(`Entier CCM trop grand pour ${byteLength} octets`);
+  return encoded;
+}
+
+function createCcmControlBlock(nonce, counter, micLength = null) {
+  const block = Buffer.alloc(16);
+  const lengthField = CCM_LENGTH_FIELD_BYTES - 1;
+  block[0] = micLength == null
+    ? lengthField
+    : ((((micLength - 2) / 2) << 3) | lengthField);
+  nonce.copy(block, 1);
+  encodeCcmInteger(counter, CCM_LENGTH_FIELD_BYTES).copy(block, 1 + nonce.length);
+  return block;
+}
+
+function computeCcmMac(key, nonce, plaintext, micLength) {
+  const b0 = createCcmControlBlock(nonce, plaintext.length, micLength);
+  let state = aesEcbEncryptBlock(key, b0);
+  for (let offset = 0; offset < plaintext.length; offset += 16) {
+    const block = Buffer.alloc(16);
+    plaintext.copy(block, 0, offset, Math.min(offset + 16, plaintext.length));
+    state = aesEcbEncryptBlock(key, xorBuffers(state, block));
+  }
+  return state.subarray(0, micLength);
+}
+
+function applyCcmCounterMode(key, nonce, input) {
+  const output = Buffer.alloc(input.length);
+  for (let offset = 0, counter = 1; offset < input.length; offset += 16, counter++) {
+    const stream = aesEcbEncryptBlock(key, createCcmControlBlock(nonce, counter));
+    const blockLength = Math.min(16, input.length - offset);
+    for (let index = 0; index < blockLength; index++) {
+      output[offset + index] = input[offset + index] ^ stream[index];
+    }
+  }
+  return output;
+}
+
+function encryptCcmMic(key, nonce, plaintext, micLength) {
+  const clearMic = computeCcmMac(key, nonce, plaintext, micLength);
+  const s0 = aesEcbEncryptBlock(key, createCcmControlBlock(nonce, 0));
+  return xorBuffers(clearMic, s0.subarray(0, micLength));
+}
+
 export function aesCcmEncrypt(key, nonce, plaintext, micLength = 4) {
-  const cipher = crypto.createCipheriv('aes-128-ccm', key, nonce, { authTagLength: micLength });
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const mic = cipher.getAuthTag();
-  return { ciphertext, mic };
+  validateCcmParameters(key, nonce, plaintext, micLength);
+  return {
+    ciphertext: applyCcmCounterMode(key, nonce, plaintext),
+    mic: encryptCcmMic(key, nonce, plaintext, micLength)
+  };
 }
 
 export function aesCcmDecrypt(key, nonce, ciphertext, mic, micLength = 4) {
-  const decipher = crypto.createDecipheriv('aes-128-ccm', key, nonce, { authTagLength: micLength });
-  decipher.setAuthTag(mic);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  validateCcmParameters(key, nonce, ciphertext, micLength);
+  assertBuffer(mic, 'La MIC AES-CCM');
+  if (mic.length !== micLength) {
+    throw new RangeError(`La MIC AES-CCM doit contenir exactement ${micLength} octets`);
+  }
+  const plaintext = applyCcmCounterMode(key, nonce, ciphertext);
+  const expectedMic = encryptCcmMic(key, nonce, plaintext, micLength);
+  if (!crypto.timingSafeEqual(expectedMic, mic)) {
+    // Conserve la formulation `unable to authenticate data` de node:crypto afin que
+    // les appelants qui reconnaissaient déjà cette famille d'erreurs restent compatibles.
+    const error = new Error('Authentification AES-CCM invalide : unable to authenticate data (MIC incorrecte)');
+    error.code = 'ERR_CRYPTO_INVALID_AUTH_TAG';
+    throw error;
+  }
+  return plaintext;
 }
 
 // Échange ECDH P-256 du provisioning (FIPS P-256, cf. §4 RM75_SPEC_DEV.md).

@@ -3,12 +3,9 @@
 // offrir une API haut niveau — scan, provisioning, configuration, envoi de commandes,
 // lecture d'état — consommée par index.js (les commandes `smallrig.*`).
 //
-// [Couche la moins testable en CI] Contrairement aux couches en dessous (toutes pures
-// et couvertes par des tests), ce module orchestre de vraies connexions GATT et n'a pu
-// être exercé qu'avec 0 lampe à proximité (cf. tests/smallrig-mesh-client.test.js, qui
-// couvre uniquement la logique pure injectable — sélection de candidats, files
-// d'attente de réassemblage). La validation avec du matériel réel reste à faire par
-// l'utilisateur (RM75_SPEC_DEV.md §12, en particulier le point 1 sur l'opcode vendor).
+// [Couche la moins testable en CI] Un firmware RM75 simulé couvre le parcours complet
+// (provisioning, configuration, commandes et reprises), mais la validation radio du
+// correctif GATT reste nécessaire sur une lampe physique.
 
 import { createLogger } from '../../logger.js';
 import {
@@ -58,50 +55,74 @@ import {
   encodeRgbw,
   encodeStatusRead,
   encodeVersionRead,
-  VENDOR_CID
+  stripAtPrefix,
+  VENDOR_SUBOPCODE_DATA
 } from './lq-protocol.js';
 import {
   addNode,
   allocateUnicastAddress,
   appKeyBuffer,
+  clearPendingProvisioning,
   ensureNetworkKeys,
   findNode,
   netKeyBuffer,
   nextSeq,
   nodeDeviceKeyBuffer,
-  removeNode
+  removeNode,
+  setPendingProvisioning
 } from './mesh-store.js';
 
 const log = createLogger('smallrig-mesh');
 
-const VENDOR_MODEL_ID = 0x0004005d; // MESH_MODEL_DATATRANS_SERVER
+// MESH_MODEL_DATATRANS_SERVER : ModelID 0x1000, CID 0x03F6 — corrigé depuis la
+// Composition Data réelle d'une RM75 (§12 RM75_SPEC_DEV.md). L'hypothèse initiale
+// (CID 0x005D/Realtek, ModelID 0x0004) ne correspond à aucun modèle annoncé par le
+// matériel : le CID 0x005D n'y porte que des modèles génériques de la stack Realtek
+// (ModelID 0x0000/0x0001) ; le vrai modèle de contrôle Lq est déclaré sous le CID
+// propre au fabricant (0x03F6), identique au CID d'en-tête de la Composition Data.
+const VENDOR_MODEL_ID = 0x100003f6;
 const DEFAULT_TTL = 5;
 const CONFIG_RESPONSE_TIMEOUT_MS = 8000;
 const COMMAND_RESPONSE_TIMEOUT_MS = 5000;
+const SEGMENT_ACK_TIMEOUT_MS = 1200;
+const SEGMENT_SEND_ATTEMPTS = 3;
+const PROXY_FILTER_TIMEOUT_MS = 3000;
+const REPLAY_WINDOW = 8192;
+const PROXY_FILTER_TYPE_ACCEPTLIST = 0x00;
+const PROXY_CONFIG_OPCODE = { SET_FILTER_TYPE: 0x00, ADD_ADDRESSES: 0x01, FILTER_STATUS: 0x03 };
+const CONFIG_NODE_RESET_OPCODE = 0x8049;
+const CONFIG_NODE_RESET_STATUS_OPCODE = 0x804a;
 
 function createAsyncQueue() {
   const items = [];
   const waiters = [];
   return {
     push(value) {
-      if (waiters.length) waiters.shift().resolve(value);
-      else items.push(value);
+      if (waiters.length) {
+        const waiter = waiters.shift();
+        if (waiter.timer) clearTimeout(waiter.timer);
+        waiter.resolve(value);
+      } else items.push(value);
     },
     async shift(timeoutMs) {
       if (items.length) return items.shift();
       return new Promise((resolve, reject) => {
-        const waiter = { resolve };
+        const waiter = { resolve, reject, timer: null };
         waiters.push(waiter);
         if (timeoutMs) {
-          setTimeout(() => {
+          waiter.timer = setTimeout(() => {
             const idx = waiters.indexOf(waiter);
             if (idx !== -1) {
               waiters.splice(idx, 1);
               reject(new Error('Délai dépassé en attente de réponse'));
             }
           }, timeoutMs);
+          waiter.timer.unref?.();
         }
       });
+    },
+    clear() {
+      items.splice(0, items.length);
     }
   };
 }
@@ -111,25 +132,74 @@ function createAsyncQueue() {
 // qu'une seule connexion active à la fois, réutilisée pour toutes les commandes.
 function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAllocatorFactory }) {
   const reassembler = createProxyPduReassembler();
-  const segmentBuffers = new Map(); // srcAddr:seqZero -> { segments: Map<segO, header>, seqAuth, createdAt }
-  const completedSegmented = new Map(); // srcAddr:seqZero -> { segN } — pour ré-acquitter les retransmissions
-  const inbox = new Map(); // srcAddr -> asyncQueue of decoded { seq, akf, aid, szmic, upperTransportPdu }
-  // Les fragments SAR d'un même Proxy PDU ne doivent jamais être entrelacés avec ceux
-  // d'un autre message (§2). Or index.js pilote plusieurs lampes en concurrence sur
-  // CETTE session partagée, et avec le MTU par défaut chaque Network PDU part en
-  // plusieurs fragments : sans sérialisation, deux send() simultanés s'entrelacent aux
-  // points d'await et la lampe jette les deux messages. Toutes les écritures d'un
-  // Network PDU passent donc par cette chaîne pour rester atomiques.
-  let writeChain = Promise.resolve();
+  const segmentBuffers = new Map();
+  const completedSegmented = new Map();
+  const pendingSegmentAcks = new Map();
+  const replayBySource = new Map();
+  const inbox = new Map();
+  const proxyConfigInbox = createAsyncQueue();
+  // Une seule file couvre allocation SEQ -> persistance du high-water -> chiffrement ->
+  // tous les segments/fragments. Aucun await de persistance ne peut donc inverser deux
+  // numéros de séquence concurrents.
+  let sendChain = Promise.resolve();
+  let persistenceFailure = null;
+
+  function enqueueSend(task) {
+    const queued = sendChain.then(task);
+    sendChain = queued.catch(() => { /* l'erreur reste propagée via queued */ });
+    return queued;
+  }
 
   function inboxFor(src) {
     if (!inbox.has(src)) inbox.set(src, createAsyncQueue());
     return inbox.get(src);
   }
 
-  // SeqAuth (le SEQ entrant dans le nonce des messages segmentés) se dérive de SeqZero
-  // et du SEQ d'un segment reçu — PAS le SEQ brut du segment segO=0, qui peut être une
-  // retransmission portant un SEQ plus récent que l'original.
+  function clearInbox(src) {
+    inboxFor(src).clear();
+  }
+
+  async function allocateSequence(allocator) {
+    if (persistenceFailure) throw persistenceFailure;
+    const previousSeq = allocator.state.seq;
+    const previousHighWater = allocator.state.seqAllocatedUpTo;
+    const allocated = nextSeq(allocator.state, allocator.blockSize);
+    if (allocated.crossedBoundary && allocator.onPersistNeeded) {
+      try {
+        await allocator.onPersistNeeded();
+      } catch (err) {
+        // La file est exclusive : restaurer le compteur est sûr, puis condamner cette
+        // session afin qu'aucun envoi suivant n'utilise une réservation non durable.
+        allocator.state.seq = previousSeq;
+        allocator.state.seqAllocatedUpTo = previousHighWater;
+        persistenceFailure = err;
+        throw err;
+      }
+    }
+    return allocated.seq;
+  }
+
+  async function writeProxyPduNow(type, data) {
+    const fragments = encodeProxyPdus(type, data, { maxAttributeValueLength: conn.maxAttributeValueLength });
+    for (const fragment of fragments) await conn.write(fragment);
+  }
+
+  function acceptNetworkSequence({ src, seq }) {
+    let replay = replayBySource.get(src);
+    if (!replay) {
+      replay = { highest: -1, seen: new Set() };
+      replayBySource.set(src, replay);
+    }
+    if (replay.seen.has(seq) || seq < replay.highest - REPLAY_WINDOW) return false;
+    replay.seen.add(seq);
+    replay.highest = Math.max(replay.highest, seq);
+    if (replay.seen.size > 256) {
+      const floor = replay.highest - REPLAY_WINDOW;
+      for (const value of replay.seen) if (value < floor) replay.seen.delete(value);
+    }
+    return true;
+  }
+
   function seqAuthFrom(seq, seqZero) {
     let auth = (seq & ~0x1fff) | seqZero;
     if (auth > seq) auth -= 0x2000;
@@ -137,32 +207,75 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAll
   }
 
   function rememberCompleted(key, segN) {
-    completedSegmented.set(key, { segN });
-    if (completedSegmented.size > 16) completedSegmented.delete(completedSegmented.keys().next().value);
+    const now = Date.now();
+    for (const [oldKey, value] of completedSegmented) {
+      if (now - value.createdAt > 30000) completedSegmented.delete(oldKey);
+    }
+    completedSegmented.set(key, { segN, createdAt: now });
+    if (completedSegmented.size > 32) completedSegmented.delete(completedSegmented.keys().next().value);
   }
 
-  // Segment Acknowledgement (message de contrôle, opcode 0x00) — exigé par la spec
-  // pour tout message segmenté reçu (§6) : sans lui, l'émetteur retransmet en boucle
-  // puis finit par considérer l'envoi comme échoué.
   function buildSegmentAck({ seqZero, segN }) {
-    const blockAck = (segN >= 31 ? 0xffffffff : (1 << (segN + 1)) - 1) >>> 0;
+    const blockAck = (segN >= 31 ? 0xffffffff : (2 ** (segN + 1)) - 1) >>> 0;
     return Buffer.from([
-      0x00, // SEG=0 | opcode de contrôle 0x00 (Segment Acknowledgement)
-      (seqZero >> 6) & 0x7f, // OBO=0 | SeqZero[12:6]
-      (seqZero & 0x3f) << 2, // SeqZero[5:0] | RFU
-      (blockAck >>> 24) & 0xff, (blockAck >>> 16) & 0xff, (blockAck >>> 8) & 0xff, blockAck & 0xff
+      0x00,
+      (seqZero >> 6) & 0x7f,
+      (seqZero & 0x3f) << 2,
+      (blockAck >>> 24) & 0xff,
+      (blockAck >>> 16) & 0xff,
+      (blockAck >>> 8) & 0xff,
+      blockAck & 0xff
     ]);
+  }
+
+  function notifySegmentAck(decoded) {
+    const bytes = decoded.transportPdu;
+    if (bytes.length < 7 || (bytes[0] & 0x7f) !== 0x00) return;
+    const seqZero = ((bytes[1] & 0x7f) << 6) | (bytes[2] >> 2);
+    const tracker = pendingSegmentAcks.get(`${decoded.src}:${seqZero}`);
+    if (!tracker) return;
+    tracker.receivedAck = true;
+    tracker.blockAck = (tracker.blockAck | bytes.readUInt32BE(3)) >>> 0;
+    for (const resolve of tracker.waiters.splice(0)) resolve();
+  }
+
+  function waitForSegmentAck(tracker, timeoutMs) {
+    if ((tracker.blockAck & tracker.fullMask) === tracker.fullMask) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        const index = tracker.waiters.indexOf(onAck);
+        if (index !== -1) tracker.waiters.splice(index, 1);
+        if (error) reject(error); else resolve();
+      };
+      const onAck = () => finish();
+      const timer = setTimeout(() => finish(new Error('Segment Ack non reçu')), timeoutMs);
+      tracker.waiters.push(onAck);
+    });
   }
 
   async function sendSegmentAck({ dst, seqZero, segN }) {
     if (!seqAllocatorFactory) return;
     try {
-      const allocator = seqAllocatorFactory();
-      const { seq, crossedBoundary } = nextSeq(allocator.state, allocator.blockSize);
-      if (crossedBoundary && allocator.onPersistNeeded) await allocator.onPersistNeeded();
-      const transportPdu = buildSegmentAck({ seqZero, segN });
-      const networkPdu = encryptNetworkPdu({ ...netKeys, ivi: ivIndex & 1, ivIndex, ctl: true, ttl: DEFAULT_TTL, seq, src: provisionerAddress, dst, transportPdu });
-      await sendNetworkPdu(networkPdu);
+      await enqueueSend(async () => {
+        const allocator = seqAllocatorFactory();
+        const seq = await allocateSequence(allocator);
+        const networkPdu = encryptNetworkPdu({
+          ...netKeys,
+          ivi: ivIndex & 1,
+          ivIndex,
+          ctl: true,
+          ttl: DEFAULT_TTL,
+          seq,
+          src: provisionerAddress,
+          dst,
+          transportPdu: buildSegmentAck({ seqZero, segN })
+        });
+        await writeProxyPduNow(PROXY_PDU_TYPE.NETWORK, networkPdu);
+      });
     } catch (err) {
       log.warn('Envoi du Segment Ack échoué (non bloquant)', err.message);
     }
@@ -176,18 +289,16 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAll
       if (err.code !== 'UNKNOWN_NID') log.warn('Network PDU ignoré (déchiffrement)', err.message);
       return;
     }
-    if (decoded.dst !== provisionerAddress) return; // pas pour nous (autre unicast/groupe)
-
-    // Messages de contrôle (CTL=1) : Segment Ack de nos propres envois segmentés
-    // (App Key Add dépasse 11 octets, la lampe l'acquitte donc systématiquement),
-    // heartbeat, etc. Ne JAMAIS les pousser dans l'inbox : ils ne sont pas chiffrés
-    // AppKey/DevKey, et les traiter comme des messages d'accès ferait échouer le
-    // déchiffrement de l'attente en cours (donc toute la configuration). Pas de
-    // retransmission implémentée côté émission : leur contenu n'a pas d'usage ici.
-    if (decoded.ctl) return;
+    if (decoded.dst !== provisionerAddress) return;
+    if (decoded.ctl) {
+      if (!acceptNetworkSequence(decoded)) return;
+      notifySegmentAck(decoded);
+      return;
+    }
 
     const seg = (decoded.transportPdu[0] >> 7) & 1;
     if (seg === 0) {
+      if (!acceptNetworkSequence(decoded)) return;
       const { akf, aid, upperTransportPdu } = decodeLowerTransportUnsegmented(decoded.transportPdu);
       inboxFor(decoded.src).push({ seq: decoded.seq, akf, aid, szmic: false, upperTransportPdu });
       return;
@@ -195,82 +306,159 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAll
 
     const header = decodeSegmentHeader(decoded.transportPdu);
     const key = `${decoded.src}:${header.seqZero}`;
-
-    // Message déjà réassemblé : une retransmission signifie que la lampe n'a pas reçu
-    // notre ack — ré-acquitter sans re-bufferiser (sinon le message serait retraité).
     const completed = completedSegmented.get(key);
-    if (completed) {
+    if (completed && Date.now() - completed.createdAt <= 30000) {
+      // Ré-acquitter même une retransmission bit-à-bit (même Network SEQ) : elle ne
+      // sera jamais remise dans l'inbox, mais indique que notre ACK précédent est perdu.
       void sendSegmentAck({ dst: decoded.src, seqZero: header.seqZero, segN: completed.segN });
       return;
     }
+    if (!acceptNetworkSequence(decoded)) return;
 
-    let buf = segmentBuffers.get(key);
-    if (!buf) {
+    let buffer = segmentBuffers.get(key);
+    if (!buffer) {
       for (const [staleKey, stale] of segmentBuffers) {
         if (Date.now() - stale.createdAt > 15000) segmentBuffers.delete(staleKey);
       }
-      buf = { segments: new Map(), seqAuth: seqAuthFrom(decoded.seq, header.seqZero), createdAt: Date.now() };
-      segmentBuffers.set(key, buf);
+      buffer = { segments: new Map(), seqAuth: seqAuthFrom(decoded.seq, header.seqZero), createdAt: Date.now() };
+      segmentBuffers.set(key, buffer);
     }
-    // Map par segO : un segment retransmis ne doit compter qu'une fois — un simple
-    // tableau ferait croire à un réassemblage complet avec des doublons, et le vrai
-    // message serait perdu (MISSING_SEGMENT).
-    buf.segments.set(header.segO, header);
+    buffer.segments.set(header.segO, header);
+    if (buffer.segments.size !== header.segN + 1) return;
 
-    if (buf.segments.size === header.segN + 1) {
+    try {
+      const { akf, aid, szmic, upperTransportPdu } = reassembleSegments([...buffer.segments.values()]);
       segmentBuffers.delete(key);
       rememberCompleted(key, header.segN);
       void sendSegmentAck({ dst: decoded.src, seqZero: header.seqZero, segN: header.segN });
-      try {
-        const { akf, aid, szmic, upperTransportPdu } = reassembleSegments([...buf.segments.values()]);
-        inboxFor(decoded.src).push({ seq: buf.seqAuth, akf, aid, szmic, upperTransportPdu });
-      } catch (err) {
-        log.warn('Réassemblage de segments échoué', err.message);
-      }
+      inboxFor(decoded.src).push({ seq: buffer.seqAuth, akf, aid, szmic, upperTransportPdu });
+    } catch (err) {
+      segmentBuffers.delete(key);
+      log.warn('Réassemblage de segments échoué', err.message);
+    }
+  }
+
+  function handleProxyConfigurationPdu(pdu) {
+    try {
+      const decoded = decryptNetworkPdu({ ...netKeys, ivIndex, pdu, nonceType: 'proxy' });
+      if (!decoded.ctl || decoded.ttl !== 0 || decoded.dst !== 0x0000 || !acceptNetworkSequence(decoded)) return;
+      proxyConfigInbox.push(decoded.transportPdu);
+    } catch (err) {
+      if (err.code !== 'UNKNOWN_NID') log.warn('Proxy Configuration PDU ignoré', err.message);
     }
   }
 
   function feed(bytes) {
-    const msg = reassembler.feed(bytes);
-    if (msg && msg.type === PROXY_PDU_TYPE.NETWORK) handleNetworkPdu(msg.data);
+    try {
+      const msg = reassembler.feed(bytes);
+      if (!msg) return;
+      if (msg.type === PROXY_PDU_TYPE.NETWORK) handleNetworkPdu(msg.data);
+      else if (msg.type === PROXY_PDU_TYPE.PROXY_CONFIGURATION) handleProxyConfigurationPdu(msg.data);
+    } catch (err) {
+      log.warn('Proxy PDU ignoré', err.message);
+    }
   }
 
-  async function sendNetworkPdu(networkPdu) {
-    const task = writeChain.then(async () => {
-      const fragments = encodeProxyPdus(PROXY_PDU_TYPE.NETWORK, networkPdu, { maxAttributeValueLength: conn.maxAttributeValueLength });
-      for (const fragment of fragments) await conn.write(fragment);
+  async function sendProxyConfigurationNow(transportPdu, allocator) {
+    const seq = await allocateSequence(allocator);
+    const pdu = encryptNetworkPdu({
+      ...netKeys,
+      ivi: ivIndex & 1,
+      ivIndex,
+      ctl: true,
+      ttl: 0,
+      seq,
+      src: provisionerAddress,
+      dst: 0x0000,
+      transportPdu,
+      nonceType: 'proxy'
     });
-    writeChain = task.catch(() => { /* l'erreur est propagée à l'appelant via task */ });
-    return task;
+    await writeProxyPduNow(PROXY_PDU_TYPE.PROXY_CONFIGURATION, pdu);
+    const status = await proxyConfigInbox.shift(PROXY_FILTER_TIMEOUT_MS);
+    if (status.length < 4 || status[0] !== PROXY_CONFIG_OPCODE.FILTER_STATUS) {
+      throw new Error('Proxy Filter Status invalide ou inattendu');
+    }
+    return { filterType: status[1], listSize: status.readUInt16BE(2) };
   }
 
-  // Envoie un Access Payload en clair, chiffré ici (AppKey ou DevKey), segmenté si
-  // nécessaire, et transmis comme un ou plusieurs Network PDU.
-  async function send({ seqAllocator, ttl = DEFAULT_TTL, src, dst, key, keyType, aid, accessPayload }) {
-    const { seq: firstSeq, crossedBoundary } = nextSeq(seqAllocator.state, seqAllocator.blockSize);
-    if (crossedBoundary && seqAllocator.onPersistNeeded) await seqAllocator.onPersistNeeded();
-
-    const upperTransportPdu = encryptUpperTransportAccess({ key, keyType, seq: firstSeq, src, dst, ivIndex, accessPayload });
-
-    if (accessPayload.length <= UNSEGMENTED_MAX_ACCESS_LENGTH) {
-      const transportPdu = encodeLowerTransportUnsegmented({ akf: keyType === 'app', aid, upperTransportPdu });
-      const networkPdu = encryptNetworkPdu({ ...netKeys, ivi: ivIndex & 1, ivIndex, ctl: false, ttl, seq: firstSeq, src, dst, transportPdu });
-      await sendNetworkPdu(networkPdu);
-      return;
-    }
-
-    const seqZero = firstSeq & 0x1fff;
-    const segments = segmentUpperTransportPdu({ akf: keyType === 'app', aid, seqZero, szmic: false, upperTransportPdu });
-    for (let i = 0; i < segments.length; i++) {
-      let seq = firstSeq;
-      if (i > 0) {
-        const allocated = nextSeq(seqAllocator.state, seqAllocator.blockSize);
-        seq = allocated.seq;
-        if (allocated.crossedBoundary && seqAllocator.onPersistNeeded) await seqAllocator.onPersistNeeded();
+  async function configureProxyFilter(addresses = [provisionerAddress]) {
+    if (!seqAllocatorFactory) throw new Error('Allocateur SEQ absent pour configurer le Proxy Filter');
+    return enqueueSend(async () => {
+      proxyConfigInbox.clear();
+      const allocator = seqAllocatorFactory();
+      let status = await sendProxyConfigurationNow(
+        Buffer.from([PROXY_CONFIG_OPCODE.SET_FILTER_TYPE, PROXY_FILTER_TYPE_ACCEPTLIST]),
+        allocator
+      );
+      if (status.filterType !== PROXY_FILTER_TYPE_ACCEPTLIST) throw new Error('Le Proxy a refusé le filtre acceptlist');
+      const uniqueAddresses = [...new Set(addresses)].filter((address) => Number.isInteger(address) && address > 0 && address <= 0x7fff);
+      if (uniqueAddresses.length) {
+        const params = Buffer.alloc(1 + uniqueAddresses.length * 2);
+        params[0] = PROXY_CONFIG_OPCODE.ADD_ADDRESSES;
+        uniqueAddresses.forEach((address, index) => params.writeUInt16BE(address, 1 + index * 2));
+        status = await sendProxyConfigurationNow(params, allocator);
+        if (status.filterType !== PROXY_FILTER_TYPE_ACCEPTLIST
+            || status.listSize !== uniqueAddresses.length) {
+          throw new Error('Le Proxy n\'a pas appliqué la liste d\'adresses demandée');
+        }
       }
-      const networkPdu = encryptNetworkPdu({ ...netKeys, ivi: ivIndex & 1, ivIndex, ctl: false, ttl, seq, src, dst, transportPdu: segments[i] });
-      await sendNetworkPdu(networkPdu);
-    }
+      return status;
+    });
+  }
+
+  async function send({ ttl = DEFAULT_TTL, src, dst, key, keyType, aid, accessPayload }) {
+    return enqueueSend(async () => {
+      if (!seqAllocatorFactory) throw new Error('Allocateur SEQ absent');
+      const seqAllocator = seqAllocatorFactory();
+      const firstSeq = await allocateSequence(seqAllocator);
+      const upperTransportPdu = encryptUpperTransportAccess({ key, keyType, seq: firstSeq, src, dst, ivIndex, accessPayload });
+
+      if (accessPayload.length <= UNSEGMENTED_MAX_ACCESS_LENGTH) {
+        const transportPdu = encodeLowerTransportUnsegmented({ akf: keyType === 'app', aid, upperTransportPdu });
+        const networkPdu = encryptNetworkPdu({ ...netKeys, ivi: ivIndex & 1, ivIndex, ctl: false, ttl, seq: firstSeq, src, dst, transportPdu });
+        await writeProxyPduNow(PROXY_PDU_TYPE.NETWORK, networkPdu);
+        return;
+      }
+
+      const seqZero = firstSeq & 0x1fff;
+      const segments = segmentUpperTransportPdu({ akf: keyType === 'app', aid, seqZero, szmic: false, upperTransportPdu });
+      const fullMask = (segments.length >= 32 ? 0xffffffff : (2 ** segments.length) - 1) >>> 0;
+      const tracker = { blockAck: 0, fullMask, receivedAck: false, waiters: [] };
+      const trackerKey = `${dst}:${seqZero}`;
+      pendingSegmentAcks.set(trackerKey, tracker);
+      try {
+        for (let attempt = 1; attempt <= SEGMENT_SEND_ATTEMPTS; attempt++) {
+          for (let index = 0; index < segments.length; index++) {
+            if ((tracker.blockAck & (2 ** index)) !== 0) continue;
+            const seq = attempt === 1 && index === 0 ? firstSeq : await allocateSequence(seqAllocator);
+            const networkPdu = encryptNetworkPdu({
+              ...netKeys,
+              ivi: ivIndex & 1,
+              ivIndex,
+              ctl: false,
+              ttl,
+              seq,
+              src,
+              dst,
+              transportPdu: segments[index]
+            });
+            await writeProxyPduNow(PROXY_PDU_TYPE.NETWORK, networkPdu);
+          }
+          if ((tracker.blockAck & fullMask) === fullMask) return;
+          try {
+            await waitForSegmentAck(tracker, SEGMENT_ACK_TIMEOUT_MS);
+          } catch (err) {
+            if (attempt === SEGMENT_SEND_ATTEMPTS) {
+              throw new Error(`Message mesh segmenté non acquitté après ${SEGMENT_SEND_ATTEMPTS} essais`);
+            }
+          }
+          if (tracker.receivedAck && tracker.blockAck === 0) throw new Error('Message mesh segmenté annulé par le nœud');
+          if ((tracker.blockAck & fullMask) === fullMask) return;
+        }
+      } finally {
+        pendingSegmentAcks.delete(trackerKey);
+      }
+    });
   }
 
   async function receiveFrom(src, { timeoutMs = COMMAND_RESPONSE_TIMEOUT_MS } = {}) {
@@ -284,7 +472,15 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAll
     };
   }
 
-  return { feed, send, receiveFrom, get connected() { return conn.connected; }, close: () => conn.close() };
+  return {
+    feed,
+    send,
+    receiveFrom,
+    clearInbox,
+    configureProxyFilter,
+    get connected() { return !persistenceFailure && conn.connected; },
+    close: () => conn.close()
+  };
 }
 
 export function createMeshClient({
@@ -301,13 +497,21 @@ export function createMeshClient({
   openProvisioningConnection,
   openProxyConnection,
   waitForProxyAdvertisement,
-  vendorOpcodeMode = 'A',
+  runProvisioningFn = runProvisioning,
   seqBlockSize = 100,
   provisionerAddress: forcedProvisionerAddress
 }) {
   const scanForDisplayFn = scanForDisplay || scanForLampAdvertisements;
   let proxySession = null;
   let proxyConn = null;
+  const nodeResponseChains = new Map();
+  let operationChain = Promise.resolve();
+
+  function enqueueOperation(task) {
+    const queued = operationChain.then(task);
+    operationChain = queued.catch(() => {});
+    return queued;
+  }
 
   function seqAllocator() {
     const state = getState();
@@ -318,8 +522,78 @@ export function createMeshClient({
     return deriveNetworkKeys(netKeyBuffer(state));
   }
 
+  function withNodeResponseLock(address, task) {
+    const previous = nodeResponseChains.get(address) || Promise.resolve();
+    const current = previous.catch(() => {}).then(task);
+    nodeResponseChains.set(address, current.catch(() => {}));
+    return current;
+  }
+
+  async function receiveAccessMatching(session, {
+    source,
+    destination,
+    key,
+    expectedKeyType,
+    expectedAid,
+    timeoutMs,
+    match
+  }) {
+    const deadline = Date.now() + timeoutMs;
+    let lastMismatch;
+    while (Date.now() < deadline) {
+      const remaining = Math.max(1, deadline - Date.now());
+      const message = await session.receiveFrom(source, { timeoutMs: remaining });
+      if (message.keyType !== expectedKeyType) {
+        lastMismatch = `type de clé ${message.keyType}`;
+        continue;
+      }
+      if (expectedKeyType === 'app' && message.aid !== expectedAid) {
+        lastMismatch = `AID ${message.aid}`;
+        continue;
+      }
+      try {
+        const accessPayload = decryptUpperTransportAccess({
+          key,
+          keyType: message.keyType,
+          aszmic: message.szmic,
+          seq: message.seq,
+          src: source,
+          dst: destination,
+          ivIndex: getState().ivIndex,
+          encAccessPayload: message.upperTransportPdu
+        });
+        const matched = match(accessPayload);
+        if (matched !== undefined && matched !== false) return matched;
+        lastMismatch = 'opcode ou format de réponse inattendu';
+      } catch (err) {
+        lastMismatch = err.message;
+      }
+    }
+    throw new Error(`Délai dépassé en attente de la réponse attendue${lastMismatch ? ` (${lastMismatch})` : ''}`);
+  }
+
+  async function exchangeConfigMessage(session, node, accessPayload, expectedOpcode, allocator = seqAllocator()) {
+    const state = getState();
+    const src = forcedProvisionerAddress ?? state.provisionerAddress;
+    const dst = node.unicastAddress;
+    const devKey = nodeDeviceKeyBuffer(node);
+    session.clearInbox(dst);
+    await session.send({ seqAllocator: allocator, src, dst, key: devKey, keyType: 'device', aid: 0, accessPayload });
+    return receiveAccessMatching(session, {
+      source: dst,
+      destination: src,
+      key: devKey,
+      expectedKeyType: 'device',
+      timeoutMs: CONFIG_RESPONSE_TIMEOUT_MS,
+      match: (decrypted) => {
+        const decoded = decodeAccessOpcode(decrypted);
+        return decoded.opcode === expectedOpcode ? decoded : undefined;
+      }
+    });
+  }
+
   async function closeProxy() {
-    if (proxyConn) { try { proxyConn.close(); } catch { /* déjà fermé */ } }
+    if (proxyConn) { try { await proxyConn.close(); } catch { /* déjà fermé */ } }
     proxyConn = null;
     proxySession = null;
   }
@@ -350,8 +624,15 @@ export function createMeshClient({
     // (les premiers paquets publicitaires d'un appareil sont parfois incomplets —
     // vérifié sur matériel réel, cf. patch webbluetooth scanUpdated).
     const candidates = await scanForLampAdvertisements({ timeoutMs: 8000 });
-    const proxyCandidates = candidates.filter((c) => c.kind === 'provisioned'
-      && (!c.networkId || c.networkId.equals(netKeys.networkId)));
+    const expectedNetworkId = toHex(netKeys.networkId);
+    // Une annonce Network ID authentifie le réseau avant même l'ouverture GATT.
+    // Les annonces Node Identity ne permettent pas ce tri et ne sont donc essayées
+    // qu'après tous les candidats dont le Network ID correspond exactement.
+    const exactCandidates = candidates.filter((candidate) => candidate.kind === 'provisioned'
+      && candidate.networkId && toHex(candidate.networkId) === expectedNetworkId);
+    const identityCandidates = candidates.filter((candidate) => candidate.kind === 'provisioned'
+      && !candidate.networkId);
+    const proxyCandidates = [...exactCandidates, ...identityCandidates];
     if (proxyCandidates.length === 0) throw new Error('Aucune lampe SmallRig joignable en Bluetooth à proximité');
 
     let lastError;
@@ -359,17 +640,24 @@ export function createMeshClient({
       try {
         const sessionRef = { feed: () => {} };
         const conn = await openProxyConnection(candidate.device, { onData: (bytes) => sessionRef.feed(bytes) });
-        const session = createProxySession({
-          conn,
-          netKeys,
-          ivIndex: state.ivIndex,
-          provisionerAddress: forcedProvisionerAddress ?? state.provisionerAddress,
-          seqAllocatorFactory: seqAllocator
-        });
-        sessionRef.feed = session.feed;
-        proxyConn = conn;
-        proxySession = session;
-        return session;
+        try {
+          const provisionerAddress = forcedProvisionerAddress ?? state.provisionerAddress;
+          const session = createProxySession({
+            conn,
+            netKeys,
+            ivIndex: state.ivIndex,
+            provisionerAddress,
+            seqAllocatorFactory: seqAllocator
+          });
+          sessionRef.feed = session.feed;
+          await session.configureProxyFilter([provisionerAddress]);
+          proxyConn = conn;
+          proxySession = session;
+          return session;
+        } catch (err) {
+          try { await conn.close(); } catch { /* connexion déjà fermée */ }
+          throw err;
+        }
       } catch (err) {
         lastError = err;
         log.warn('Connexion Proxy échouée sur un candidat, essai suivant', err.message);
@@ -380,8 +668,8 @@ export function createMeshClient({
 
   // --- Découverte -----------------------------------------------------------------
 
-  // deviceUuid/networkId arrivent en Buffer (scan in-process) ou en hex string (scan
-  // isolé dans un processus séparé, cf. ble-transport.js) — on normalise en string.
+  // Les tests peuvent fournir des Buffer, tandis que les workers de scan renvoient
+  // des chaînes hexadécimales : on normalise les deux formes.
   function toHex(value) {
     if (!value) return null;
     return Buffer.isBuffer(value) ? value.toString('hex') : String(value);
@@ -391,38 +679,110 @@ export function createMeshClient({
     const state = getState();
     const netKeys = state.netKey ? netKeysFor(state) : null;
     const ourNetworkIdHex = netKeys ? toHex(netKeys.networkId) : null;
+    const pairedUuids = new Set(state.nodes.map((n) => n.uuid));
     const found = await scanForDisplayFn({ timeoutMs });
 
-    return found.map((f) => {
-      if (f.kind === 'unprovisioned') {
-        return { bleDeviceId: f.bleDeviceId, kind: 'unprovisioned', deviceUuid: toHex(f.deviceUuid), rssi: f.rssi, name: f.name };
-      }
-      const isOurs = Boolean(ourNetworkIdHex && f.networkId && toHex(f.networkId) === ourNetworkIdHex);
-      return { bleDeviceId: f.bleDeviceId, kind: 'provisioned', ours: isOurs, rssi: f.rssi, name: f.name };
-    });
+    return found
+      .map((f) => {
+        if (f.kind === 'unprovisioned') {
+          return { bleDeviceId: f.bleDeviceId, kind: 'unprovisioned', deviceUuid: toHex(f.deviceUuid), rssi: f.rssi, name: f.name };
+        }
+        const isOurs = Boolean(ourNetworkIdHex && f.networkId && toHex(f.networkId) === ourNetworkIdHex);
+        return { bleDeviceId: f.bleDeviceId, kind: 'provisioned', ours: isOurs, rssi: f.rssi, name: f.name };
+      })
+      // Une lampe déjà appairée localement ne doit jamais réapparaître comme
+      // « nouvelle » : un firmware qui continue d'émettre un beacon non-provisionné
+      // après coup (observé en dehors du provisioning lui-même, cf. RM75_SPEC_DEV.md
+      // §12) ne doit pas polluer la liste d'ajout.
+      .filter((lamp) => lamp.kind !== 'unprovisioned' || !pairedUuids.has(lamp.deviceUuid?.toLowerCase()));
   }
 
   // --- Provisioning -----------------------------------------------------------------
 
-  async function provision({ bleDeviceId, name, attentionDurationS = 0 } = {}) {
+  async function provision({ bleDeviceId, deviceUuid, name, attentionDurationS = 0 } = {}) {
     const state = getState();
+    if (!persistState) throw new Error('Persistance durable requise avant provisioning mesh');
     ensureNetworkKeys(state);
-    if (persistState) await persistState(state);
+    await persistState(state);
 
-    const found = await scanForLampAdvertisements({ timeoutMs: 8000 });
-    const target = found.find((f) => f.bleDeviceId === bleDeviceId && f.kind === 'unprovisioned');
-    if (!target) throw new Error('Lampe introuvable (relancez une découverte, elle est peut-être hors de portée ou déjà provisionnée)');
-
-    await closeProxy(); // libère l'adaptateur pour la connexion de provisioning
+    await closeProxy(); // libère l'adaptateur pour le scan et la connexion de provisioning
 
     const reassembler = createProxyPduReassembler();
     const pending = createAsyncQueue();
-    const conn = await openProvisioningConnection(target.device, {
-      onData: (bytes) => {
-        const msg = reassembler.feed(bytes);
-        if (msg && msg.type === PROXY_PDU_TYPE.PROVISIONING) pending.push(msg.data);
+    const onData = (bytes) => {
+      const msg = reassembler.feed(bytes);
+      if (msg && msg.type === PROXY_PDU_TYPE.PROVISIONING) pending.push(msg.data);
+    };
+
+    // Tous les scans et toute la session GATT sont exécutés dans des processus Node
+    // dédiés. Chaque tentative refait un scan puis ouvre un worker neuf : aucun handle
+    // WinRT périmé et aucun appel natif ne restent dans le processus Electron.
+    const PROVISION_ATTEMPTS = 3;
+    let conn = null;
+    let target = null;
+    let targetUuid = null;
+    let staleTargetReconciled = false;
+    let seenAsProvisioned = false;
+    let lastConnectError = null;
+    for (let attempt = 1; attempt <= PROVISION_ATTEMPTS && !conn; attempt++) {
+      const found = await scanForLampAdvertisements({ timeoutMs: 8000 });
+      target = found.find((f) => f.kind === 'unprovisioned' && (
+        f.bleDeviceId === bleDeviceId
+        || (deviceUuid && toHex(f.deviceUuid)?.toLowerCase() === deviceUuid.toLowerCase())
+      )) || null;
+      if (!target) {
+        seenAsProvisioned = found.some((f) => f.bleDeviceId === bleDeviceId && f.kind === 'provisioned');
+        log.warn(`Scan d'appairage : lampe cible non trouvée (essai ${attempt}/${PROVISION_ATTEMPTS})`, {
+          bleDeviceId,
+          seenAsProvisioned,
+          found: found.map((f) => ({ bleDeviceId: f.bleDeviceId, kind: f.kind, rssi: f.rssi }))
+        });
+        if (seenAsProvisioned) break; // état stable : inutile de rescanner, le message d'erreur guide vers le reset
+        if (attempt < PROVISION_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
       }
-    });
+
+      targetUuid = toHex(target.deviceUuid)?.toLowerCase() || null;
+      if (!targetUuid || !/^[0-9a-f]{32}$/.test(targetUuid)) {
+        throw new Error('Annonce de provisioning SmallRig invalide : Device UUID Mesh absent ou mal formé');
+      }
+      // Un beacon 0x1827 portant le même Device UUID prouve que cette lampe est
+      // actuellement non provisionnée. Un nœud/journal local du même UUID vient donc
+      // d'une tentative interrompue ou d'un reset usine : le retirer durablement avant
+      // de créer une nouvelle DevKey évite un état nodes/pending contradictoire.
+      if (!staleTargetReconciled && targetUuid) {
+        const staleNode = findNode(state, targetUuid);
+        const removedStaleNode = removeNode(state, targetUuid);
+        const clearedStalePending = state.pendingProvisioning?.uuid === targetUuid;
+        clearPendingProvisioning(state, targetUuid);
+        if (removedStaleNode || clearedStalePending) {
+          await persistState(state);
+          log.info('Etat local obsolète réconcilié avec le beacon non provisionné', {
+            uuid: targetUuid,
+            removedStaleNode,
+            clearedStalePending,
+            previousConfigurationStatus: staleNode?.configurationStatus || null
+          });
+        }
+        staleTargetReconciled = true;
+      }
+      try {
+        conn = await openProvisioningConnection(target.device, { onData });
+      } catch (err) {
+        lastConnectError = err;
+        log.warn(`Connexion GATT de provisioning échouée (essai ${attempt}/${PROVISION_ATTEMPTS})`, err.message);
+        if (attempt < PROVISION_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+    if (!conn) {
+      if (seenAsProvisioned) {
+        throw new Error('Cette lampe est déjà provisionnée (par ce compagnon, l\'app SmallGoGo ou un autre appareil). Réinitialise son réseau mesh (reset usine) puis relance un scan.');
+      }
+      if (lastConnectError) {
+        throw new Error(`Connexion à la lampe impossible après ${PROVISION_ATTEMPTS} essais : ${lastConnectError.message}. Rapproche la lampe du dongle et réessaie.`);
+      }
+      throw new Error('Lampe introuvable malgré plusieurs scans (hors de portée, éteinte, ou adaptateur Bluetooth capricieux — réessaie, et relance un scan si besoin)');
+    }
 
     const transport = {
       async send(type, params) {
@@ -439,26 +799,64 @@ export function createMeshClient({
     };
 
     let result;
+    let provisioningJournaled = false;
+    const pendingBeforeProvisioning = state.pendingProvisioning ? { ...state.pendingProvisioning } : null;
+    const nextUnicastAddressBeforeProvisioning = state.nextUnicastAddress;
     try {
-      result = await runProvisioning({
+      result = await runProvisioningFn({
         transport,
         netKey: netKeyBuffer(state),
         keyIndex: 0,
         ivIndex: state.ivIndex,
         unicastAddress: (capabilities) => allocateUnicastAddress(state, Math.max(1, capabilities.numElements)),
-        attentionDurationS
+        attentionDurationS,
+        onBeforeData: async ({ deviceKey, unicastAddress, numElements }) => {
+          setPendingProvisioning(state, {
+            uuid: targetUuid,
+            bleDeviceId,
+            name: name || null,
+            unicastAddress,
+            elementCount: numElements,
+            deviceKey: deviceKey.toString('hex'),
+            vendorElementAddress: unicastAddress,
+            phase: 'data-ready',
+            startedAt: new Date().toISOString()
+          });
+          await persistState(state);
+          provisioningJournaled = true;
+        }
       });
+    } catch (err) {
+      if (err.provisioningDataMayHaveBeenSent === false) {
+        // Le premier send(DATA) n'a pas commencé : l'allocation et l'éventuel
+        // journal de cette tentative peuvent être annulés sans ambiguïté.
+        state.nextUnicastAddress = nextUnicastAddressBeforeProvisioning;
+        setPendingProvisioning(state, pendingBeforeProvisioning);
+        if (provisioningJournaled) {
+          await persistState(state);
+        }
+      } else if (provisioningJournaled && state.pendingProvisioning) {
+        addNode(state, {
+          ...state.pendingProvisioning,
+          configurationStatus: 'provisioning-uncertain',
+          configurationError: err.message
+        });
+        if (persistState) await persistState(state);
+      }
+      throw err;
     } finally {
-      conn.close();
+      await conn.close();
     }
 
     const node = addNode(state, {
-      uuid: target.deviceUuid.toString('hex'),
+      uuid: targetUuid,
       name: name || null,
       unicastAddress: result.unicastAddress,
       elementCount: result.numElements,
-      deviceKey: result.deviceKey
+      deviceKey: result.deviceKey,
+      configurationStatus: 'pending'
     });
+    clearPendingProvisioning(state, node.uuid);
     if (persistState) await persistState(state);
 
     // La lampe bascule 0x1827 -> 0x1828 après le Complete (§4) : laisse-lui le temps
@@ -482,26 +880,132 @@ export function createMeshClient({
       }
     }
     if (lastConfigureError) {
-      throw new Error(`Lampe provisionnée mais configuration échouée : ${lastConfigureError.message}`);
+      node.configurationStatus = 'pending';
+      node.configurationError = lastConfigureError.message;
+      if (persistState) await persistState(state);
+      let resetError = null;
+      try {
+        await resetAndRemoveNode(state, node);
+      } catch (err) {
+        // Le Node Reset radio a déjà réussi : seul le retrait durable local est
+        // resté en suspens. Ne jamais retomber dans le résultat `provisioned: true`,
+        // qui ferait croire que la lampe accepte encore nos clés. Le journal
+        // pendingNodeReset conservé par resetAndRemoveNode permet la reprise.
+        if (err.code === 'NODE_RESET_LOCAL_FINALIZE_FAILED') throw err;
+        resetError = err;
+      }
+      if (!resetError) {
+        throw new Error(`Configuration post-provisioning échouée ; la lampe a été réinitialisée et le nœud local annulé : ${lastConfigureError.message}`);
+      }
+      node.configurationStatus = 'pending';
+      node.configurationError = `${lastConfigureError.message}; Node Reset impossible: ${resetError.message}`;
+      if (persistState) await persistState(state);
+      return {
+        uuid: node.uuid,
+        name: node.name,
+        unicastAddress: node.unicastAddress,
+        elementCount: node.elementCount,
+        provisioned: true,
+        configured: false,
+        configurationPending: true,
+        error: node.configurationError
+      };
     }
 
-    return { uuid: node.uuid, name: node.name, unicastAddress: node.unicastAddress, elementCount: node.elementCount };
+    return {
+      uuid: node.uuid,
+      name: node.name,
+      unicastAddress: node.unicastAddress,
+      elementCount: node.elementCount,
+      provisioned: true,
+      configured: true,
+      configurationPending: false
+    };
   }
 
-  async function forget({ uuid } = {}) {
+  async function sendNodeReset(node) {
+    return withNodeResponseLock(node.unicastAddress, async () => {
+      const session = await ensureProxySession();
+      try {
+        await exchangeConfigMessage(
+          session,
+          node,
+          Buffer.from([(CONFIG_NODE_RESET_OPCODE >> 8) & 0xff, CONFIG_NODE_RESET_OPCODE & 0xff]),
+          CONFIG_NODE_RESET_STATUS_OPCODE
+        );
+      } catch (err) {
+        // Une réponse tardive ne doit jamais satisfaire une future requête sur cette
+        // session. Fermer la connexion détruit également son inbox.
+        await closeProxy();
+        throw err;
+      }
+      await closeProxy();
+      return { reset: true };
+    });
+  }
+
+  async function resetAndRemoveNode(state, node, { forceLocal = false } = {}) {
+    if (!persistState) throw new Error('Persistance durable requise avant suppression d’un nœud mesh');
+    if (!forceLocal && state.pendingNodeReset && state.pendingNodeReset.uuid !== node.uuid) {
+      const pendingError = new Error(`Un Node Reset est déjà en attente pour ${state.pendingNodeReset.uuid} ; finalisez-le avant d'en lancer un autre`);
+      pendingError.code = 'SMALLRIG_NODE_RESET_PENDING';
+      throw pendingError;
+    }
+    // Preflight puis intention durable avant l'effet radio irréversible.
+    await persistState(state);
+    if (!forceLocal) {
+      state.pendingNodeReset = { uuid: node.uuid, requestedAt: new Date().toISOString() };
+      await persistState(state);
+      try {
+        await sendNodeReset(node);
+      } catch (err) {
+        const wrapped = new Error(`Node Reset impossible : ${err.message}`);
+        wrapped.code = 'SMALLRIG_NODE_RESET_FAILED';
+        throw wrapped;
+      }
+    }
+
+    const previousNodes = state.nodes;
+    const previousPendingNodeReset = state.pendingNodeReset;
+    removeNode(state, node.uuid);
+    clearPendingProvisioning(state, node.uuid);
+    if (state.pendingNodeReset?.uuid === node.uuid) state.pendingNodeReset = null;
+    try {
+      await persistState(state);
+    } catch (err) {
+      // Le journal durable permet la reprise ; restaurer aussi la vue runtime pour ne
+      // pas prétendre que la finalisation locale a réussi.
+      state.nodes = previousNodes;
+      state.pendingNodeReset = previousPendingNodeReset;
+      const wrapped = new Error(`Node Reset effectué mais finalisation locale impossible : ${err.message}`);
+      wrapped.code = 'NODE_RESET_LOCAL_FINALIZE_FAILED';
+      throw wrapped;
+    }
+    return { removed: true, reset: !forceLocal, forceLocal: Boolean(forceLocal) };
+  }
+
+  async function forget({ uuid, forceLocal = false } = {}) {
     const state = getState();
-    const removed = removeNode(state, uuid);
-    if (removed && persistState) await persistState(state);
-    await closeProxy(); // le nœud oublié ne doit plus être utilisé comme proxy
-    return { removed };
+    const node = findNode(state, uuid);
+    if (!node) return { removed: false, reset: false, forceLocal: Boolean(forceLocal) };
+    const result = await resetAndRemoveNode(state, node, { forceLocal });
+    await closeProxy();
+    return result;
   }
 
   // --- Configuration post-provisioning (§8) -----------------------------------------
 
   async function configureNode(node) {
+    return withNodeResponseLock(node.unicastAddress, () => configureNodeUnlocked(node));
+  }
+
+  async function configureNodeUnlocked(node) {
     const state = getState();
+    if (state.pendingNodeReset?.uuid === node.uuid) {
+      throw new Error('Node Reset en attente pour cette lampe ; finalisez l\'oubli local avant de la reconfigurer');
+    }
     const netKeys = netKeysFor(state);
-    const devKey = nodeDeviceKeyBuffer(node);
+    await closeProxy();
 
     // Reconnexion en mode Proxy (0x1828), après le délai de bascule du firmware —
     // observé sur matériel réel : peut prendre plus que les "1 à 3 secondes" indiqués
@@ -515,56 +1019,109 @@ export function createMeshClient({
     // configuration (symptôme : timeouts silencieux sans erreur). Les annonces Node
     // Identity (type 0x01, sans Network ID lisible) restent acceptées en dernier
     // recours — le NID au déchiffrement fera le tri.
-    const ourCandidates = proxyLampCandidates.filter((c) => !c.networkId || c.networkId.equals(netKeys.networkId));
-    const target = ourCandidates[0] || proxyLampCandidates[0];
-    const sessionRef = { feed: () => {} };
-    const conn = await openProxyConnection(target.device, { onData: (bytes) => sessionRef.feed(bytes) });
-    const session = createProxySession({
-      conn, netKeys, ivIndex: state.ivIndex, provisionerAddress: state.provisionerAddress,
-      seqAllocatorFactory: seqAllocator
-    });
-    sessionRef.feed = session.feed;
+    const expectedNetworkId = toHex(netKeys.networkId);
+    const exactCandidates = proxyLampCandidates.filter((candidate) => candidate.networkId
+      && toHex(candidate.networkId) === expectedNetworkId);
+    const identityCandidates = proxyLampCandidates.filter((candidate) => !candidate.networkId);
+    const ourCandidates = [...exactCandidates, ...identityCandidates];
+    if (!ourCandidates.length) throw new Error('Aucun Proxy du réseau SmallRig local détecté (Network ID étranger)');
+    let conn = null;
+    let session = null;
+    let lastConnectError = null;
+    for (const candidate of ourCandidates) {
+      const sessionRef = { feed: () => {} };
+      let candidateConn = null;
+      try {
+        candidateConn = await openProxyConnection(candidate.device, { onData: (bytes) => sessionRef.feed(bytes) });
+        const candidateSession = createProxySession({
+          conn: candidateConn,
+          netKeys,
+          ivIndex: state.ivIndex,
+          provisionerAddress: forcedProvisionerAddress ?? state.provisionerAddress,
+          seqAllocatorFactory: seqAllocator
+        });
+        sessionRef.feed = candidateSession.feed;
+        await candidateSession.configureProxyFilter([forcedProvisionerAddress ?? state.provisionerAddress]);
+        conn = candidateConn;
+        session = candidateSession;
+        break;
+      } catch (err) {
+        lastConnectError = err;
+        if (candidateConn) { try { await candidateConn.close(); } catch { /* déjà fermée */ } }
+      }
+    }
+    if (!session || !conn) throw lastConnectError || new Error('Connexion Proxy impossible pour la configuration');
 
     try {
       const allocator = seqAllocator();
-      const src = state.provisionerAddress;
-      const dst = node.unicastAddress;
-
-      async function sendConfig(accessPayload) {
-        await session.send({ seqAllocator: allocator, src, dst, key: devKey, keyType: 'device', aid: 0, accessPayload });
+      const compositionResponse = await exchangeConfigMessage(
+        session,
+        node,
+        encodeCompositionDataGet(0),
+        CONFIG_OPCODE.COMPOSITION_DATA_STATUS,
+        allocator
+      );
+      const composition = parseCompositionDataPage0(compositionResponse.params);
+      log.info('Composition Data Page 0 reçue', {
+        raw: compositionResponse.params.toString('hex'),
+        elements: composition.elements.map((element, index) => ({
+          index,
+          location: `0x${element.location.toString(16).padStart(4, '0')}`,
+          sigModels: element.sigModels.map((id) => `0x${id.toString(16).padStart(4, '0')}`),
+          vendorModels: element.vendorModels.map((id) => `0x${id.toString(16).padStart(8, '0')}`)
+        }))
+      });
+      if (composition.elements.length !== node.elementCount) {
+        throw new Error(`Composition Data incohérente : ${composition.elements.length} éléments, ${node.elementCount} attendus`);
       }
-      async function receiveConfig() {
-        const { upperTransportPdu, keyType, seq, szmic } = await session.receiveFrom(dst, { timeoutMs: CONFIG_RESPONSE_TIMEOUT_MS });
-        const accessPayload = decryptUpperTransportAccess({ key: devKey, keyType, aszmic: szmic, seq, src: dst, dst: src, ivIndex: state.ivIndex, encAccessPayload: upperTransportPdu });
-        return decodeAccessOpcode(accessPayload);
+      const vendorElementIndex = composition.elements.findIndex((element) => element.vendorModels.includes(VENDOR_MODEL_ID));
+      if (vendorElementIndex < 0 || vendorElementIndex >= node.elementCount) {
+        throw new Error('Vendor model DATATRANS_SERVER absent de la Composition Data');
       }
-
-      await sendConfig(encodeCompositionDataGet(0));
-      const compositionResponse = await receiveConfig();
-      if (compositionResponse.opcode === CONFIG_OPCODE.COMPOSITION_DATA_STATUS) {
-        try {
-          const parsed = parseCompositionDataPage0(compositionResponse.params);
-          const hasVendorModel = parsed.elements.some((e) => e.vendorModels.includes(VENDOR_MODEL_ID));
-          if (!hasVendorModel) log.warn('Vendor model DATATRANS_SERVER absent de la Composition Data (§12 point 4)', { uuid: node.uuid });
-        } catch (err) {
-          log.warn('Analyse Composition Data impossible (non bloquant)', err.message);
-        }
-      }
+      node.vendorElementAddress = node.unicastAddress + vendorElementIndex;
 
       const appKey = appKeyBuffer(state);
-      await sendConfig(encodeAppKeyAdd({ netKeyIndex: 0, appKeyIndex: 0, appKey }));
-      const appKeyStatusResponse = await receiveConfig();
+      const appKeyStatusResponse = await exchangeConfigMessage(
+        session,
+        node,
+        encodeAppKeyAdd({ netKeyIndex: 0, appKeyIndex: 0, appKey }),
+        CONFIG_OPCODE.APP_KEY_STATUS,
+        allocator
+      );
       const appKeyStatus = decodeAppKeyStatus(appKeyStatusResponse.params);
       if (!appKeyStatus.ok) throw new Error(`App Key Add refusé (status ${appKeyStatus.status})`);
+      if (appKeyStatus.netKeyIndex !== 0 || appKeyStatus.appKeyIndex !== 0) {
+        throw new Error('App Key Status ne correspond pas aux index demandés');
+      }
 
-      await sendConfig(encodeModelAppBind({ elementAddress: node.unicastAddress, appKeyIndex: 0, modelId: VENDOR_MODEL_ID, isVendorModel: true }));
-      const modelAppStatusResponse = await receiveConfig();
+      const modelAppStatusResponse = await exchangeConfigMessage(
+        session,
+        node,
+        encodeModelAppBind({ elementAddress: node.vendorElementAddress, appKeyIndex: 0, modelId: VENDOR_MODEL_ID, isVendorModel: true }),
+        CONFIG_OPCODE.MODEL_APP_STATUS,
+        allocator
+      );
       const modelAppStatus = decodeModelAppStatus(modelAppStatusResponse.params);
       if (!modelAppStatus.ok) throw new Error(`Model App Bind refusé (status ${modelAppStatus.status})`);
+      if (modelAppStatus.elementAddress !== node.vendorElementAddress
+          || modelAppStatus.appKeyIndex !== 0
+          || !modelAppStatus.isVendorModel
+          || modelAppStatus.modelId !== VENDOR_MODEL_ID) {
+        throw new Error('Model App Status ne correspond pas au bind demandé');
+      }
 
-      log.info('Nœud configuré (AppKey + Model App Bind)', { uuid: node.uuid, address: node.unicastAddress });
+      node.configurationStatus = 'configured';
+      node.configurationError = null;
+      clearPendingProvisioning(state, node.uuid);
+      if (persistState) await persistState(state);
+      log.info('Nœud configuré (AppKey + Model App Bind)', { uuid: node.uuid, address: node.vendorElementAddress });
+    } catch (err) {
+      node.configurationStatus = 'pending';
+      node.configurationError = err.message;
+      if (persistState) await persistState(state);
+      throw err;
     } finally {
-      conn.close();
+      await conn.close();
     }
   }
 
@@ -575,11 +1132,12 @@ export function createMeshClient({
     const session = await ensureProxySession();
     const appKey = appKeyBuffer(state);
     const aid = deriveAppKeyAid(appKey);
-    const accessPayload = buildVendorAccessPayload(lqFrame, { vendorOpcodeMode, cid: VENDOR_CID });
+    const accessPayload = buildVendorAccessPayload(lqFrame);
+    const dst = node.vendorElementAddress ?? node.unicastAddress;
     await session.send({
       seqAllocator: seqAllocator(),
       src: forcedProvisionerAddress ?? state.provisionerAddress,
-      dst: node.unicastAddress,
+      dst,
       key: appKey,
       keyType: 'app',
       aid,
@@ -587,26 +1145,58 @@ export function createMeshClient({
     });
   }
 
-  async function readLqFromNode(node, readFrame) {
-    const state = getState();
-    const session = await ensureProxySession();
-    const appKey = appKeyBuffer(state);
-    const aid = deriveAppKeyAid(appKey);
-    const src = forcedProvisionerAddress ?? state.provisionerAddress;
-    const accessPayload = buildVendorAccessPayload(readFrame, { vendorOpcodeMode, cid: VENDOR_CID });
-
-    await session.send({ seqAllocator: seqAllocator(), src, dst: node.unicastAddress, key: appKey, keyType: 'app', aid, accessPayload });
-    const { upperTransportPdu, keyType, seq, szmic } = await session.receiveFrom(node.unicastAddress, { timeoutMs: COMMAND_RESPONSE_TIMEOUT_MS });
-    const decrypted = decryptUpperTransportAccess({ key: appKey, keyType, aszmic: szmic, seq, src: node.unicastAddress, dst: src, ivIndex: state.ivIndex, encAccessPayload: upperTransportPdu });
-    const { params } = decodeAccessOpcode(decrypted);
-    return params;
+  async function readLqFromNode(node, readFrame, decodeResponse) {
+    const nodeAddress = node.vendorElementAddress ?? node.unicastAddress;
+    return withNodeResponseLock(nodeAddress, async () => {
+      const state = getState();
+      const session = await ensureProxySession();
+      const appKey = appKeyBuffer(state);
+      const aid = deriveAppKeyAid(appKey);
+      const src = forcedProvisionerAddress ?? state.provisionerAddress;
+      session.clearInbox(nodeAddress);
+      try {
+        await session.send({
+          seqAllocator: seqAllocator(),
+          src,
+          dst: nodeAddress,
+          key: appKey,
+          keyType: 'app',
+          aid,
+          accessPayload: buildVendorAccessPayload(readFrame)
+        });
+        return await receiveAccessMatching(session, {
+          source: nodeAddress,
+          destination: src,
+          key: appKey,
+          expectedKeyType: 'app',
+          expectedAid: aid,
+          timeoutMs: COMMAND_RESPONSE_TIMEOUT_MS,
+          match: (decrypted) => {
+            if (decrypted[0] !== VENDOR_SUBOPCODE_DATA) return undefined;
+            return decodeResponse(decrypted.subarray(1));
+          }
+        });
+      } catch (err) {
+        // Le protocole Lq n'expose aucun transaction ID. Après timeout, seule une
+        // nouvelle session garantit qu'une réponse tardive ne satisfera pas la lecture
+        // suivante du même type.
+        await closeProxy();
+        throw err;
+      }
+    });
   }
 
   function resolveNodes(uuids) {
     const state = getState();
-    const nodes = uuids.map((uuid) => findNode(state, uuid)).filter(Boolean);
-    if (nodes.length === 0) throw new Error('Aucune lampe cible connue (uuid inconnu ou non provisionnée)');
-    return nodes;
+    const resolved = uuids.map((uuid) => ({ uuid, node: findNode(state, uuid) }));
+    const unknown = resolved.filter(({ node }) => !node).map(({ uuid }) => uuid);
+    if (unknown.length) throw new Error(`Lampes inconnues ou non provisionnées : ${unknown.join(', ')}`);
+    if (resolved.length === 0) throw new Error('Aucune lampe cible connue');
+    const resetPending = resolved.filter(({ node }) => state.pendingNodeReset?.uuid === node.uuid).map(({ uuid }) => uuid);
+    if (resetPending.length) throw new Error(`Node Reset en attente pour ces lampes : ${resetPending.join(', ')}`);
+    const notConfigured = resolved.filter(({ node }) => node.configurationStatus !== 'configured').map(({ uuid }) => uuid);
+    if (notConfigured.length) throw new Error(`Lampes non configurées (reconfigure requis) : ${notConfigured.join(', ')}`);
+    return resolved.map(({ node }) => node);
   }
 
   async function forEachNode(uuids, fn) {
@@ -639,29 +1229,47 @@ export function createMeshClient({
   }
 
   async function setPower(uuids, { on, level }) {
-    return forEachNode(uuids, (node) => sendLqToNode(node, Number.isFinite(level) ? encodeLumLevel(level) : (on ? encodeLumOn() : encodeLumOff())));
+    return forEachNode(uuids, (node) => sendLqToNode(node, on === false
+      ? encodeLumOff()
+      : (Number.isFinite(level) ? encodeLumLevel(level) : encodeLumOn())));
   }
 
   async function readStatus(uuid) {
     const [node] = resolveNodes([uuid]);
-    const params = await readLqFromNode(node, encodeStatusRead());
-    return decodeStatus(params);
+    return readLqFromNode(node, encodeStatusRead(), decodeStatus);
   }
 
   async function readCapacity(uuid) {
     const [node] = resolveNodes([uuid]);
-    const params = await readLqFromNode(node, encodeCapacityRead());
-    return decodeCapacity(params);
+    return readLqFromNode(node, encodeCapacityRead(), (params) => {
+      const stripped = stripAtPrefix(params);
+      if (stripped.length !== 8 || !/^[0-9]{8}$/.test(stripped.toString('ascii'))) {
+        throw new Error('Réponse capacité inattendue');
+      }
+      return decodeCapacity(params);
+    });
   }
 
   async function readVersion(uuid) {
     const [node] = resolveNodes([uuid]);
-    const params = await readLqFromNode(node, encodeVersionRead());
-    return decodeVersion(params);
+    return readLqFromNode(node, encodeVersionRead(), (params) => {
+      const stripped = stripAtPrefix(params);
+      if (!stripped.toString('latin1').includes('_V')) throw new Error('Réponse version inattendue');
+      return decodeVersion(params);
+    });
   }
 
   function listNodes() {
-    return getState().nodes.map((n) => ({ uuid: n.uuid, name: n.name, unicastAddress: n.unicastAddress }));
+    return getState().nodes.map((node) => ({
+      uuid: node.uuid,
+      name: node.name,
+      unicastAddress: node.unicastAddress,
+      vendorElementAddress: node.vendorElementAddress ?? node.unicastAddress,
+      configurationStatus: node.configurationStatus || 'unknown',
+      configurationPending: node.configurationStatus !== 'configured',
+      configurationError: node.configurationError || null,
+      resetPending: getState().pendingNodeReset?.uuid === node.uuid
+    }));
   }
 
   async function healthcheck() {
@@ -674,9 +1282,20 @@ export function createMeshClient({
   }
 
   return {
-    discover, provision, forget, configureNode, listNodes,
-    setHsi, setCct, setRgbw, setFx, setPower,
-    readStatus, readCapacity, readVersion,
-    healthcheck, stop
+    discover: (payload) => enqueueOperation(() => discover(payload)),
+    provision: (payload) => enqueueOperation(() => provision(payload)),
+    forget: (payload) => enqueueOperation(() => forget(payload)),
+    configureNode: (node) => enqueueOperation(() => configureNode(node)),
+    listNodes,
+    setHsi: (...args) => enqueueOperation(() => setHsi(...args)),
+    setCct: (...args) => enqueueOperation(() => setCct(...args)),
+    setRgbw: (...args) => enqueueOperation(() => setRgbw(...args)),
+    setFx: (...args) => enqueueOperation(() => setFx(...args)),
+    setPower: (...args) => enqueueOperation(() => setPower(...args)),
+    readStatus: (...args) => enqueueOperation(() => readStatus(...args)),
+    readCapacity: (...args) => enqueueOperation(() => readCapacity(...args)),
+    readVersion: (...args) => enqueueOperation(() => readVersion(...args)),
+    healthcheck,
+    stop: () => enqueueOperation(stop)
   };
 }

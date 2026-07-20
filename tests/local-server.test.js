@@ -52,7 +52,7 @@ test('tokenMatches compare le token local sans comparaison directe', () => {
 });
 
 test('isAllowedOrigin refuse une origine cross-origin mais laisse passer l’absence d’Origin', () => {
-  // Client hors navigateur (curl, script, healthcheck Docker) : pas de header Origin.
+  // Client hors navigateur (curl, script, healthcheck) : pas de header Origin.
   assert.equal(isAllowedOrigin(undefined), true);
   assert.equal(isAllowedOrigin(''), true);
   // Loopback (aucun client légitime, mais inoffensif) autorisé.

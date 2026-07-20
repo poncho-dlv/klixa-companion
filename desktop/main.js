@@ -315,11 +315,11 @@ function registerIpc() {
   ipcMain.handle('smallrig:discover', async (_event, { timeoutMs } = {}) => {
     return requireRuntime().dispatch('smallrig.discover', { timeoutMs });
   });
-  ipcMain.handle('smallrig:provision', async (_event, { bleDeviceId, name } = {}) => {
-    return requireRuntime().dispatch('smallrig.provision', { bleDeviceId, name });
+  ipcMain.handle('smallrig:provision', async (_event, { bleDeviceId, deviceUuid, name } = {}) => {
+    return requireRuntime().dispatch('smallrig.provision', { bleDeviceId, deviceUuid, name });
   });
-  ipcMain.handle('smallrig:forget', async (_event, { uuid } = {}) => {
-    return requireRuntime().dispatch('smallrig.forget', { uuid });
+  ipcMain.handle('smallrig:forget', async (_event, { uuid, forceLocal } = {}) => {
+    return requireRuntime().dispatch('smallrig.forget', { uuid, forceLocal: forceLocal === true });
   });
   // Recours si la bascule 0x1827 -> 0x1828 après provisioning a été plus lente que le
   // délai imparti (observé sur certains matériels) : la lampe est provisionnée
@@ -510,6 +510,11 @@ app.whenReady().then(async () => {
   if (!process.argv.includes('--hidden')) showWindow();
 }).catch((error) => {
   log.error('Echec du demarrage de l\'application', error.stack || error.message);
+  updateStatus({ running: false, message: `Erreur : ${error.message}` });
+  dialog.showErrorBox(
+    'Klixa Companion — démarrage impossible',
+    `${error.message}\n\nLa configuration et les clés Mesh ont été conservées. Consulte les logs avant toute réinitialisation.`
+  );
   showWindow();
 });
 

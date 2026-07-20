@@ -54,15 +54,13 @@ return {
     // entièrement depuis l'IHM du compagnon (jamais via le cloud). L'état mesh
     // (clés réseau générées localement + nœuds appairés) est sérialisé en JSON ;
     // `onStateChange` est injecté par desktop/main.js pour la persistance chiffrée
-    // (ConfigStore/safeStorage, même principe que HUE_APP_KEY) — en mode headless
-    // (sans l'app desktop), l'état mesh ne vit qu'en mémoire pour la durée du process.
+    // (ConfigStore/safeStorage, même principe que HUE_APP_KEY). En mode headless,
+    // src/index.js branche obligatoirement un fichier durable avant toute émission.
     enabled: bool(env.SMALLRIG_ENABLED, true),
     meshStateJson: env.SMALLRIG_MESH_STATE || '',
+    meshStateFile: env.SMALLRIG_MESH_STATE_FILE || '',
     maxLamps: int(env.SMALLRIG_MAX_LAMPS, 50),
     concurrency: int(env.SMALLRIG_CONCURRENCY, 3),
-    // Encodage de l'opcode vendor (hypothèse A/B, cf. RM75_SPEC_DEV.md §9/§12 point
-    // 1) : point bloquant non vérifié sur matériel réel, à ajuster ici si besoin.
-    vendorOpcodeMode: env.SMALLRIG_VENDOR_OPCODE_MODE === 'B' ? 'B' : 'A',
     seqBlockSize: int(env.SMALLRIG_SEQ_BLOCK_SIZE, 100),
     onStateChange: undefined,
   },

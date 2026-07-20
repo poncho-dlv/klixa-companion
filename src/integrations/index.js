@@ -7,6 +7,32 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('integrations');
 
+const SMALLRIG_COMMAND_SCOPES = {
+  'smallrig.discover': 'local',
+  'smallrig.provision': 'local',
+  'smallrig.reconfigure': 'local',
+  'smallrig.forget': 'local',
+  'smallrig.list': 'all',
+  'smallrig.color': 'all',
+  'smallrig.power': 'all',
+  'smallrig.status': 'all'
+};
+
+function registerUnavailableSmallrig(registry, cause) {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const unavailable = async () => {
+    const error = new Error(`Intégration SmallRig indisponible : ${detail}`, { cause });
+    error.code = 'INTEGRATION_UNAVAILABLE';
+    throw error;
+  };
+  registry.register({
+    id: 'smallrig',
+    commands: Object.fromEntries(Object.keys(SMALLRIG_COMMAND_SCOPES).map((name) => [name, unavailable])),
+    commandScopes: SMALLRIG_COMMAND_SCOPES,
+    healthcheck: unavailable
+  });
+}
+
 /**
  * Enregistre les intégrations activées. `emitEvent` permet à une intégration de
  * REMONTER des events vers le cloud (ex. OBS scènes/stream). Point d'extension :
@@ -38,6 +64,9 @@ export function registerIntegration(registry, id, config, { emitEvent } = {}) {
       registry.register(createSmallrigIntegration(config.smallrig));
     } catch (err) {
       log.error('Intégration SmallRig non chargée', err.message);
+      // Conserver une entrée dégradée rend l'échec visible dans le healthcheck et
+      // renvoie la cause réelle aux IPC au lieu de « Commande inconnue ».
+      registerUnavailableSmallrig(registry, err);
     }
   }
 

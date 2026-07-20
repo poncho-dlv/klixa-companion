@@ -37,11 +37,10 @@ test('encodeRgbw: encode r,g,b,w bornés 0-255', () => {
   assert.deepEqual([...frame], [0x36, 0x04, (255 ^ 0 ^ 128 ^ 10), 255, 0, 128, 10]);
 });
 
-test('encodeFx: modes à 2 paramètres ajoutent un octet de payload', () => {
-  const oneParam = encodeFx({ mode: 4, param1: 3 }); // PULSING = 4, param unique (pas dans la liste §9.4)
-  assert.equal(oneParam.length, 3 + 3); // opcode+len+xor + [mode,5,p1]
-  const twoParams = encodeFx({ mode: 8, param1: 1, param2: 2 }); // FIREWORKS = 8 -> 2 params (liste §9.4)
-  assert.equal(twoParams.length, 3 + 4); // + [mode,5,p1,p2]
+test('encodeFx: formats exacts SmallGoGo pour mode 1, modes courts et autres', () => {
+  assert.deepEqual([...encodeFx({ mode: 1, param1: 3, param2: 0x1234 }).subarray(3)], [1, 5, 3, 0x12, 0x34]);
+  assert.deepEqual([...encodeFx({ mode: 8, param1: 7, param2: 9 }).subarray(3)], [8, 5, 7]);
+  assert.deepEqual([...encodeFx({ mode: 4, param1: 3, param2: 9 }).subarray(3)], [4, 5, 3, 9]);
 });
 
 test('decodeStatus: HSI (mode 3), vérifie le XOR', () => {
@@ -89,16 +88,9 @@ test('stripAtPrefix: tronque les marqueurs AT+DATA(X)@0001=', () => {
   assert.deepEqual(stripAtPrefix(inner), inner);
 });
 
-test('buildVendorAccessPayload: hypothèse A (par défaut) — E4 5D 00 pour sous-opcode 0x24', () => {
+test('buildVendorAccessPayload: opcode brut 0x24 confirmé par SmallGoGo', () => {
   const lqFrame = encodeHsi({ hue: 0, sat: 100, intensity: 100 });
   const payload = buildVendorAccessPayload(lqFrame);
-  assert.equal(payload.subarray(0, 3).toString('hex'), 'e45d00');
-  assert.deepEqual(payload.subarray(3), lqFrame);
-});
-
-test('buildVendorAccessPayload: hypothèse B — sous-opcode brut en tête du payload', () => {
-  const lqFrame = encodeLumOn();
-  const payload = buildVendorAccessPayload(lqFrame, { vendorOpcodeMode: 'B' });
   assert.equal(payload[0], 0x24);
   assert.deepEqual(payload.subarray(1), lqFrame);
 });

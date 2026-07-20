@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runProvisioning, simulateDeviceSide } from '../src/integrations/smallrig/provisioning.js';
+import { aesCcmEncrypt } from '../src/integrations/smallrig/mesh-crypto.js';
 
 // File FIFO asynchrone : représente une direction de communication entre le
 // Provisioner (nous) et un device simulé, via Proxy PDU type Provisioning (§2/§4).
@@ -53,8 +54,28 @@ test('provisioning: le Provisioner et le device dérivent la même DeviceKey et 
     outputOobSize: 0x00, outputOobAction: 0x0000, inputOobSize: 0x00, inputOobAction: 0x0000
   };
 
+  const timeline = [];
+  const originalSend = provisionerTransport.send.bind(provisionerTransport);
+  provisionerTransport.send = async (type, params) => {
+    timeline.push(type);
+    return originalSend(type, params);
+  };
   const [provisionerResult, deviceResult] = await Promise.all([
-    runProvisioning({ transport: provisionerTransport, netKey, keyIndex: 0, ivIndex: 0, unicastAddress }),
+    runProvisioning({
+      transport: provisionerTransport,
+      netKey,
+      keyIndex: 0,
+      ivIndex: 0,
+      unicastAddress,
+      encryptProvisioningData: (...args) => {
+        timeline.push('encrypt-data');
+        return aesCcmEncrypt(...args);
+      },
+      onBeforeData: async (pending) => {
+        timeline.push('journal');
+        assert.equal(pending.authenticationMitmProtected, false);
+      }
+    }),
     simulateDeviceSide({ transport: deviceTransport, capabilities })
   ]);
 
@@ -64,9 +85,13 @@ test('provisioning: le Provisioner et le device dérivent la même DeviceKey et 
   assert.equal(deviceResult.provisioningData.unicastAddress, unicastAddress);
   assert.equal(deviceResult.provisioningData.keyIndex, 0);
   assert.equal(deviceResult.provisioningData.ivIndex, 0);
+  assert.ok(timeline.indexOf('encrypt-data') < timeline.indexOf('journal'), 'le PDU Data doit être chiffré avant la journalisation');
+  assert.ok(timeline.indexOf('journal') < timeline.indexOf(0x07), 'la DevKey doit être journalisée avant Provisioning Data');
+  assert.equal(provisionerResult.authenticationMethod, 'no-oob');
+  assert.equal(provisionerResult.authenticationMitmProtected, false);
 });
 
-test('provisioning: une Confirmation falsifiée fait échouer le Provisioner (anti-MITM)', async () => {
+test('provisioning No-OOB: une Confirmation corrompue est rejetée, sans revendiquer de protection MITM', async () => {
   const { provisionerTransport, deviceTransport } = createLinkedTransports();
   const netKey = Buffer.alloc(16, 0x42);
   const capabilities = {
@@ -95,6 +120,22 @@ test('provisioning: une Confirmation falsifiée fait échouer le Provisioner (an
       runProvisioning({ transport: provisionerTransport, netKey, keyIndex: 0, ivIndex: 0, unicastAddress: 2 }),
       maliciousDeviceSide()
     ]),
-    /Confirmation du device invalide/
+    /Confirmation cryptographique du device invalide/
   );
+});
+
+test('provisioning: refuse des Capabilities sans FIPS P-256 avant Start', async () => {
+  const sent = [];
+  const transport = {
+    async send(type) { sent.push(type); },
+    async receive(expectedType) {
+      assert.equal(expectedType, 0x01);
+      return Buffer.from([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+  };
+  await assert.rejects(
+    runProvisioning({ transport, netKey: Buffer.alloc(16), unicastAddress: 2 }),
+    /FIPS P-256 non supporté/
+  );
+  assert.deepEqual(sent, [0x00], 'Start ne doit pas être envoyé avec des Capabilities incompatibles');
 });

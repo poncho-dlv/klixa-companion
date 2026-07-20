@@ -24,10 +24,12 @@ function u32(value) {
   return Buffer.from([(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]);
 }
 
-function networkNonce({ ctl, ttl, seq, src, ivIndex }) {
+function networkNonce({ ctl, ttl, seq, src, ivIndex, nonceType = 'network' }) {
+  const isProxyConfiguration = nonceType === 'proxy';
   return Buffer.concat([
-    Buffer.from([0x00]),
-    Buffer.from([((ctl ? 1 : 0) << 7) | (ttl & 0x7f)]),
+    Buffer.from([isProxyConfiguration ? 0x03 : 0x00]),
+    // Le Proxy Nonce a un octet PAD fixe à zéro. Le Network Nonce transporte CTL/TTL.
+    Buffer.from([isProxyConfiguration ? 0x00 : (((ctl ? 1 : 0) << 7) | (ttl & 0x7f))]),
     u24(seq),
     u16(src),
     Buffer.from([0x00, 0x00]),
@@ -47,9 +49,9 @@ function pecb({ privacyKey, ivIndex, random7 }) {
 // Encode un Network PDU complet à partir d'un Transport PDU déjà produit par la
 // couche transport (lower/upper). `ctl`=false pour les messages d'accès (MIC 4
 // octets), `ctl`=true pour les messages de contrôle (MIC 8 octets).
-export function encryptNetworkPdu({ encryptionKey, privacyKey, nid, ivi, ivIndex, ctl, ttl, seq, src, dst, transportPdu }) {
+export function encryptNetworkPdu({ encryptionKey, privacyKey, nid, ivi, ivIndex, ctl, ttl, seq, src, dst, transportPdu, nonceType = 'network' }) {
   const micLength = ctl ? 8 : 4;
-  const nonce = networkNonce({ ctl, ttl, seq, src, ivIndex });
+  const nonce = networkNonce({ ctl, ttl, seq, src, ivIndex, nonceType });
   const plaintext = Buffer.concat([u16(dst), transportPdu]);
   const { ciphertext, mic } = aesCcmEncrypt(encryptionKey, nonce, plaintext, micLength);
   const encDstAndTransport = Buffer.concat([ciphertext, mic]);
@@ -65,7 +67,7 @@ export function encryptNetworkPdu({ encryptionKey, privacyKey, nid, ivi, ivIndex
 
 // Décode un Network PDU reçu. Lève si le NID ne correspond pas à cette NetKey, ou si
 // l'authentification AES-CCM échoue (MIC invalide -> rejeu/corruption/mauvaise clé).
-export function decryptNetworkPdu({ encryptionKey, privacyKey, nid, ivIndex, pdu }) {
+export function decryptNetworkPdu({ encryptionKey, privacyKey, nid, ivIndex, pdu, nonceType = 'network' }) {
   if (pdu.length < 7) throw new Error('Network PDU trop court');
   const ividNidByte = pdu[0];
   const pduNid = ividNidByte & 0x7f;
@@ -75,6 +77,14 @@ export function decryptNetworkPdu({ encryptionKey, privacyKey, nid, ivIndex, pdu
     throw err;
   }
   const ivi = (ividNidByte >> 7) & 1;
+  // Cette implémentation ne gère pas encore l'IV Update et ne conserve donc pas
+  // l'IV Index précédent. Accepter un IVI différent tout en essayant l'IV Index
+  // courant contournerait le choix d'IV Index imposé par l'en-tête réseau.
+  if (ivi !== (ivIndex & 1)) {
+    const err = new Error('IVI incompatible avec l\'IV Index courant');
+    err.code = 'IVI_MISMATCH';
+    throw err;
+  }
   const obfuscatedHeader = pdu.subarray(1, 7);
   const encDstAndTransport = pdu.subarray(7);
 
@@ -92,7 +102,7 @@ export function decryptNetworkPdu({ encryptionKey, privacyKey, nid, ivIndex, pdu
   const ciphertext = encDstAndTransport.subarray(0, encDstAndTransport.length - micLength);
   const mic = encDstAndTransport.subarray(encDstAndTransport.length - micLength);
 
-  const nonce = networkNonce({ ctl, ttl, seq, src, ivIndex });
+  const nonce = networkNonce({ ctl, ttl, seq, src, ivIndex, nonceType });
   const plaintext = aesCcmDecrypt(encryptionKey, nonce, ciphertext, mic, micLength);
   const dst = (plaintext[0] << 8) | plaintext[1];
   const transportPdu = plaintext.subarray(2);

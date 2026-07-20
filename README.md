@@ -20,8 +20,7 @@ pousse ses commandes dans ce tuyau.
 ## Composants
 
 - **Compagnon** (`src/`) — Node.js. Liaison cloud sortante + serveur HTTP local
-  de test + registre d'intégrations. Se déploie soit en app Windows (Electron),
-  soit en conteneur Docker.
+  de test + registre d'intégrations. Se déploie en app Windows (Electron).
 - **Application desktop** (`desktop/`) — enrobage Electron du compagnon, avec
   écran de configuration et pairing. Voir [desktop/README.md](desktop/README.md).
 - **Service GPIO** (`rpi/`) — micro-service Python sur Raspberry Pi qui pilote
@@ -39,10 +38,7 @@ npm test                # node --test
 
 ## Déploiement
 
-Deux modes équivalents, à choisir selon le contexte : l'app Electron pour un
-poste de streamer (Windows), Docker pour un serveur/conteneur.
-
-### Option 1 — Application Windows (Electron)
+### Application Windows (Electron)
 
 Pensée pour les streamers : icône dans la zone de notification, écran de
 configuration, pairing par code à 6 chiffres avec le cloud Klixa, secrets
@@ -50,37 +46,38 @@ chiffrés via Windows, démarrage automatique à l'ouverture de session.
 
 ```bash
 npm install
+npm run build:webbluetooth:win # requis après une installation propre pour le mode dev
 npm run desktop         # lancer en développement
 npm run dist:win         # générer l'installateur NSIS dans release/
 ```
+
+`npm run dist:win` reconstruit automatiquement ce binding natif corrigé avant de
+fabriquer l'installeur ; la commande explicite ci-dessus ne concerne donc que le
+lancement direct avec `npm run desktop`.
 
 L'installateur généré est `release/Klixa-Companion-Setup-<version>.exe`. Pour
 une diffusion publique sans avertissement SmartScreen, signer l'exécutable et
 l'installateur avec un certificat de signature de code avant publication. Voir
 [desktop/README.md](desktop/README.md) pour le parcours complet et la publication.
 
-### Option 2 — Docker
-
-Pensée pour un déploiement headless (serveur, conteneur, machine dédiée), avec
-configuration via variables d'environnement.
-
-```bash
-cp .env.example .env    # remplir les valeurs
-docker compose up -d --build
-```
+Le provisioning RM75 utilise explicitement le mode Bluetooth Mesh **No OOB** : les
+échanges sont authentifiés contre la corruption, mais pas protégés contre un relais
+MITM actif. Effectuez l'appairage à proximité de la lampe, dans un environnement
+radio maîtrisé.
 
 ## Variables d'environnement
 
-> Ce tableau concerne le mode Docker headless (`.env` manuel). L'app desktop
-> (`desktop/`) peut obtenir `CLOUD_WS_URL`/`COMPANION_TOKEN` automatiquement via un
-> pairing par code à 6 chiffres — voir [desktop/README.md](desktop/README.md).
+> Ce tableau concerne le mode local headless (`npm start`, `.env` manuel), utile
+> en développement. L'app desktop (`desktop/`) peut obtenir
+> `CLOUD_WS_URL`/`COMPANION_TOKEN` automatiquement via un pairing par code à 6
+> chiffres — voir [desktop/README.md](desktop/README.md).
 
 | Variable | Description |
 | -------- | ----------- |
 | `CLOUD_WS_URL` | URL WS du serveur Klixa (`wss://<host>/companion/ws`). Vide = mode local seul. |
 | `COMPANION_TOKEN` | Token d'auth dédié, généré côté Klixa (Paramètres → Compagnon). Distinct du token overlay. Le serveur en déduit le tenant. |
 | `PORT` | Port du serveur local (défaut 8786). |
-| `COMPANION_HOST` | Adresse d'écoute (défaut `127.0.0.1`). Utiliser `0.0.0.0` dans le conteneur pour un accès LAN. |
+| `COMPANION_HOST` | Adresse d'écoute (défaut `127.0.0.1`). Utiliser `0.0.0.0` pour un accès LAN. |
 | `COMPANION_LOCAL_TOKEN` | Protège `POST /commands/*`. Obligatoire en production si l'écoute n'est pas limitée à loopback. |
 | `SMOKE_ENABLED` | Active l'intégration fumée (défaut true). |
 | `SMOKE_SERVICE_URL` | URL du service GPIO sur le RPi (ex. `http://192.168.1.50:8787`). |
@@ -91,24 +88,26 @@ docker compose up -d --build
 | `HUE_MAX_LIGHTS` / `HUE_CONCURRENCY` | Limite de lampes par commande (50) et de requêtes Hue simultanées (5). |
 | `SMALLRIG_ENABLED` | Active l'intégration lampes SmallRig RM75 (Bluetooth Mesh, défaut true). Nécessite un adaptateur Bluetooth actif sur la machine. En usage desktop, l'appairage (scan + provisioning) se fait depuis l'app Klixa Companion — voir [RM75_SPEC_DEV.md](RM75_SPEC_DEV.md). |
 | `SMALLRIG_MESH_STATE` | Clés réseau + lampes appairées (JSON), générées et gérées localement. Jamais fourni par le cloud ; sans intérêt à remplir à la main en usage desktop (persisté automatiquement). |
+| `SMALLRIG_MESH_STATE_FILE` | Fichier durable de l'état Mesh en mode headless. Obligatoire avant toute mutation/commande SmallRig. Ce fichier contient des clés secrètes et doit rester privé. |
 | `SMALLRIG_MAX_LAMPS` / `SMALLRIG_CONCURRENCY` | Limite de lampes appairées (50) et de commandes Bluetooth simultanées (3). |
-| `SMALLRIG_VENDOR_OPCODE_MODE` | Encodage de l'opcode vendor du protocole Lq (`A` par défaut ou `B`) — point non vérifié sur matériel réel, voir RM75_SPEC_DEV.md §12. |
 | `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
 | `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |
 | `OBS_WS_PASSWORD` | Mot de passe obs-websocket (si activé dans OBS). |
 | `SB_ENABLED` | Active le pont Streamer.bot (défaut true). |
-| `SB_HOST` / `SB_PORT` / `SB_ENDPOINT` / `SB_PASSWORD` / `SB_SCHEME` | Connexion au WebSocket Streamer.bot sur le LAN (`SB_HOST` = IP du PC SB, pas 127.0.0.1 si compagnon sur Docker). |
+| `SB_HOST` / `SB_PORT` / `SB_ENDPOINT` / `SB_PASSWORD` / `SB_SCHEME` | Connexion au WebSocket Streamer.bot sur le LAN (`SB_HOST` = IP du PC SB, pas 127.0.0.1 si le compagnon tourne sur une autre machine). |
 
 Le bridge Hue utilise un certificat local auto-signé : la chaîne TLS n'est pas validée. La cible est donc limitée à une adresse IP privée littérale. Le pont Streamer.bot relaie aussi `Pulsoid.HeartRatePulse` vers Klixa. Pour le mode BPM local, l'intégration Pulsoid doit être active dans Streamer.bot et la source BPM doit être réglée sur `Streamer.bot local` côté Klixa.
 
 ## Ajouter une intégration
 
 1. Créer `src/integrations/<nom>.js` exportant
-   `{ id, commands: { '<nom>.<action>': async (payload) => result }, healthcheck? }`.
+   `{ id, commands: { '<nom>.<action>': async (payload) => result }, commandScopes?, healthcheck? }`.
 2. L'enregistrer dans `src/integrations/index.js`.
 
 Les commandes deviennent automatiquement disponibles via la liaison cloud
-(`capabilities`) et le serveur local (`POST /commands/<nom>.<action>`).
+(`capabilities`) et le serveur local (`POST /commands/<nom>.<action>`). Déclarez
+`commandScopes: { '<nom>.appairer': 'local' }` pour toute action physique ou
+d'administration qui ne doit jamais être déclenchée par le cloud.
 
 ## Contribuer et sécurité
 

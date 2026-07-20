@@ -22,9 +22,15 @@ export function encodeConfigOpcode(value) {
 // (1er octet < 0x80 -> opcode 1 octet ; 0x80-0xBF -> opcode 2 octets ; 0xC0-0xFF ->
 // opcode vendor 3 octets).
 export function decodeAccessOpcode(bytes) {
+  if (!Buffer.isBuffer(bytes)) bytes = Buffer.from(bytes || []);
+  if (bytes.length < 1) throw new Error('Access Payload vide');
   const first = bytes[0];
   if (first < 0x80) return { opcode: first, length: 1, isVendor: false, params: bytes.subarray(1) };
-  if (first < 0xc0) return { opcode: (bytes[0] << 8) | bytes[1], length: 2, isVendor: false, params: bytes.subarray(2) };
+  if (first < 0xc0) {
+    if (bytes.length < 2) throw new Error('Opcode Access 2 octets tronqué');
+    return { opcode: (bytes[0] << 8) | bytes[1], length: 2, isVendor: false, params: bytes.subarray(2) };
+  }
+  if (bytes.length < 3) throw new Error('Opcode Access vendor tronqué');
   return { opcode: null, length: 3, isVendor: true, vendorOpcodeByte: bytes[0], vendorCid: bytes[1] | (bytes[2] << 8), params: bytes.subarray(3) };
 }
 
@@ -37,14 +43,18 @@ export function encodeCompositionDataGet(page = 0) {
 // point 4 — vérification optionnelle, pas bloquante pour le fonctionnement).
 export function parseCompositionDataPage0(params) {
   if (params.length < 11) throw new Error('Composition Data Status trop courte');
+  if (params[0] !== 0x00) throw new Error(`Composition Data Status page inattendue (${params[0]})`);
   // page(1) + CID(2) + PID(2) + VID(2) + CRPL(2) + Features(2) = 11 octets d'en-tête
   let offset = 11;
   const elements = [];
-  while (offset + 4 <= params.length) {
+  while (offset < params.length) {
+    if (offset + 4 > params.length) throw new Error('Composition Data : en-tête élément tronqué');
     // Location(2) + NumS(1) + NumV(1)
+    const location = params.readUInt16LE(offset);
     offset += 2;
     const numS = params[offset]; offset += 1;
     const numV = params[offset]; offset += 1;
+    if (offset + numS * 2 + numV * 4 > params.length) throw new Error('Composition Data : liste de modèles tronquée');
     const sigModels = [];
     for (let i = 0; i < numS && offset + 2 <= params.length; i++) {
       sigModels.push(params.readUInt16LE(offset));
@@ -59,9 +69,9 @@ export function parseCompositionDataPage0(params) {
       vendorModels.push((modelId << 16) | cid);
       offset += 4;
     }
-    elements.push({ sigModels, vendorModels });
+    elements.push({ location, sigModels, vendorModels });
   }
-  return { elements };
+  return { page: 0, elements };
 }
 
 export function encodeAppKeyAdd({ netKeyIndex = 0, appKeyIndex = 0, appKey }) {
@@ -74,7 +84,10 @@ export function encodeAppKeyAdd({ netKeyIndex = 0, appKeyIndex = 0, appKey }) {
 }
 
 export function decodeAppKeyStatus(params) {
-  return { status: params[0], ok: params[0] === 0x00 };
+  if (params.length !== 4) throw new Error('App Key Status mal formé');
+  const netKeyIndex = params[1] | ((params[2] & 0x0f) << 8);
+  const appKeyIndex = ((params[2] >> 4) & 0x0f) | (params[3] << 4);
+  return { status: params[0], ok: params[0] === 0x00, netKeyIndex, appKeyIndex };
 }
 
 export function encodeModelAppBind({ elementAddress, appKeyIndex = 0, modelId, isVendorModel = true }) {
@@ -90,5 +103,14 @@ export function encodeModelAppBind({ elementAddress, appKeyIndex = 0, modelId, i
 }
 
 export function decodeModelAppStatus(params) {
-  return { status: params[0], ok: params[0] === 0x00 };
+  if (params.length !== 7 && params.length !== 9) throw new Error('Model App Status mal formé');
+  const isVendorModel = params.length === 9;
+  return {
+    status: params[0],
+    ok: params[0] === 0x00,
+    elementAddress: params.readUInt16LE(1),
+    appKeyIndex: params.readUInt16LE(3) & 0x0fff,
+    modelId: isVendorModel ? params.readUInt32LE(5) : params.readUInt16LE(5),
+    isVendorModel
+  };
 }

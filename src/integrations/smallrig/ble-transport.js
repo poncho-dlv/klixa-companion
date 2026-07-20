@@ -5,15 +5,10 @@
 // et uniquement ici que ce module dépend d'un vrai adaptateur Bluetooth actif sur la
 // machine qui exécute le compagnon.
 //
-// [NON TESTABLE EN CI — nécessite du matériel réel] Cette couche n'a pas pu être
-// validée avec de vraies lampes RM75 (aucun accès matériel dans l'environnement de
-// développement). L'API webbluetooth utilisée ici (requestDevice + deviceFound +
-// device._adData.serviceData, characteristic.writeValueWithoutResponse/
-// startNotifications) est vérifiée contre le code source du paquet installé
-// (node_modules/webbluetooth), mais le comportement réel sur lampe physique reste à
-// confirmer — cf. RM75_SPEC_DEV.md §12 pour le point bloquant sur l'opcode vendor.
+// [NON TESTABLE EN CI — nécessite du matériel réel] Les transitions et erreurs sont
+// simulées par tests, et l'API est vérifiée contre le paquet natif installé. La
+// validation finale du correctif GATT reste à effectuer avec une RM75 physique.
 
-import { Bluetooth } from 'webbluetooth';
 import { fork } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,9 +16,13 @@ import { createLogger } from '../../logger.js';
 
 const log = createLogger('smallrig-ble');
 const SCAN_WORKER_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ble-scan-worker.js');
+const SESSION_WORKER_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ble-session-worker.js');
 // Marge laissée au processus enfant au-delà du timeout de scan demandé, avant de
 // considérer qu'il est bloqué et de le tuer de force (cf. scanForLampAdvertisements).
 const SCAN_WORKER_KILL_GRACE_MS = 5000;
+const SESSION_OPEN_TIMEOUT_MS = 50000;
+const SESSION_WRITE_TIMEOUT_MS = 15000;
+const SESSION_CLOSE_TIMEOUT_MS = 8000;
 
 export const GATT = {
   PROVISIONING_SERVICE: 0x1827,
@@ -46,6 +45,44 @@ function serviceUuidString(shortUuid) {
 
 function toBuffer(dataView) {
   return Buffer.from(dataView.buffer, dataView.byteOffset, dataView.byteLength);
+}
+
+// SimpleBLE fusionne les Service Data vus pendant un même scan. Si une lampe passe
+// de 0x1827 à 0x1828 dans cette fenêtre, les deux clés peuvent donc coexister. Le
+// provisioning est à sens unique : dans ce cas ambigu, 0x1828 est l'état le plus
+// récent possible et doit primer sur l'ancien 0x1827.
+export function parseLampAdvertisement(device) {
+  const adData = device._adData;
+  const serviceData = adData?.serviceData;
+  if (!serviceData) return null;
+
+  const provisioned = serviceData.get(serviceUuidString(GATT.PROXY_SERVICE));
+  if (provisioned && provisioned.byteLength >= 1) {
+    const buf = toBuffer(provisioned);
+    const isNetworkId = buf[0] === 0x00 && buf.length >= 9;
+    return {
+      bleDeviceId: device.id,
+      device,
+      kind: 'provisioned',
+      networkId: isNetworkId ? buf.subarray(1, 9) : null,
+      rssi: adData.rssi,
+      name: device.name || null
+    };
+  }
+
+  const unprovisioned = serviceData.get(serviceUuidString(GATT.PROVISIONING_SERVICE));
+  if (unprovisioned && unprovisioned.byteLength >= 16) {
+    return {
+      bleDeviceId: device.id,
+      device,
+      kind: 'unprovisioned',
+      deviceUuid: toBuffer(unprovisioned).subarray(0, 16),
+      rssi: adData.rssi,
+      name: device.name || null
+    };
+  }
+
+  return null;
 }
 
 // Scanne les lampes RM75 à proximité (provisionnées ou non) en lisant les Service Data
@@ -73,44 +110,28 @@ function toBuffer(dataView) {
 // ci-dessous, qui isole cet appel dans un processus séparé avec un timeout dur — voir
 // ble-scan-worker.js pour le pourquoi.
 export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, adapterIndex } = {}) {
+  // Import volontairement local. En desktop, ce module est aussi chargé par le
+  // processus principal Electron : charger l'addon SimpleBLE à ce niveau y ferait
+  // exécuter ses appels WinRT synchrones sur le thread UI/COM STA. Cette fonction
+  // n'est appelée que dans les workers Node dédiés (scan/session) ou les diagnostics.
+  const { Bluetooth, getAdapters } = await import('webbluetooth');
   const found = new Map();
+  const availableAdapters = getAdapters();
+  const selectedAdapter = typeof adapterIndex === 'number'
+    ? { index: adapterIndex }
+    : availableAdapters.find((adapter) => adapter.active) || availableAdapters[0];
+  if (!selectedAdapter) throw new Error('Aucun adaptateur Bluetooth disponible');
 
   const bt = new Bluetooth({
     // Large marge côté lib : on n'attend jamais son propre timeout (cf. ci-dessus),
     // c'est notre `setTimeout` + `cancelRequest()` plus bas qui pilote la durée réelle.
     scanTime: Math.max(1, timeoutMs / 1000) + 30,
-    adapterIndex,
+    // Toujours re-sélectionner l'index : le patch webbluetooth reconstruit ainsi un
+    // AdapterBase natif et purge son cache Service Data avant chaque nouveau scan.
+    adapterIndex: selectedAdapter.index,
     deviceFound: (device) => {
-      const adData = device._adData;
-      const serviceData = adData?.serviceData;
-      if (!serviceData) return false;
-
-      const unprovisioned = serviceData.get(serviceUuidString(GATT.PROVISIONING_SERVICE));
-      if (unprovisioned && unprovisioned.byteLength >= 16) {
-        found.set(device.id, {
-          bleDeviceId: device.id,
-          device,
-          kind: 'unprovisioned',
-          deviceUuid: toBuffer(unprovisioned).subarray(0, 16),
-          rssi: adData.rssi,
-          name: device.name || null
-        });
-        return false;
-      }
-
-      const provisioned = serviceData.get(serviceUuidString(GATT.PROXY_SERVICE));
-      if (provisioned && provisioned.byteLength >= 1) {
-        const buf = toBuffer(provisioned);
-        const isNetworkId = buf[0] === 0x00 && buf.length >= 9;
-        found.set(device.id, {
-          bleDeviceId: device.id,
-          device,
-          kind: 'provisioned',
-          networkId: isNetworkId ? buf.subarray(1, 9) : null,
-          rssi: adData.rssi,
-          name: device.name || null
-        });
-      }
+      const advertisement = parseLampAdvertisement(device);
+      if (advertisement) found.set(device.id, advertisement);
       return false;
     }
   });
@@ -129,12 +150,25 @@ export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, ada
   // fonction ci-dessus — elle ne se résout jamais dès qu'un device est vu). On stoppe
   // nous-mêmes le scan après `timeoutMs` via `cancelRequest()`, sans lien avec le
   // timeout interne de la lib.
+  let scanError = null;
   bt.requestDevice({ acceptAllDevices: true }).catch((err) => {
-    if (!/no devices found/i.test(String(err))) log.warn('Scan BLE (arrière-plan) terminé en erreur', String(err));
+    if (!/no devices found/i.test(String(err))) {
+      scanError = err instanceof Error ? err : new Error(String(err));
+      log.warn('Scan BLE (arrière-plan) terminé en erreur', scanError.message);
+    }
   });
 
   await new Promise((resolve) => setTimeout(resolve, timeoutMs));
-  try { bt.cancelRequest(); } catch (err) { log.warn('Erreur à l\'arrêt du scan BLE', err.message); }
+  try {
+    await bt.cancelRequest();
+  } catch (err) {
+    // Ne jamais rendre un handle au code de connexion si l'arrêt natif du scan n'a
+    // pas été confirmé : SimpleBLE/WinRT ne fiabilise pas scan + connect concurrents.
+    throw new Error(`Impossible d'arrêter le scan BLE avant connexion : ${err?.message || String(err)}`, { cause: err });
+  }
+  if (scanError) {
+    throw new Error(`Scan Bluetooth impossible : ${scanError.message}`, { cause: scanError });
+  }
 
   return [...found.values()];
 }
@@ -146,9 +180,9 @@ export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, ada
 // compris les timers — et tout le compagnon (Hue/OBS/Streamer.bot inclus) resterait
 // figé avec lui. En isolant l'appel, seul ce processus enfant peut se bloquer ; le
 // process principal reste réactif et peut le tuer de force s'il ne répond pas à temps.
-// Retourne des champs simples (deviceUuid/networkId en hex string) : le handle
-// `device` natif ne survit pas au changement de processus, donc pas exploitable ici —
-// provision()/reconnexion utilisent `scanForLampAdvertisementsInProcess` à la place.
+// Retourne des champs simples (deviceUuid/networkId en hex string) et un sélecteur
+// sérialisable. Le handle natif ne traverse jamais l'IPC : le worker de session
+// rescannera ce sélecteur avant d'ouvrir GATT.
 //
 // En pratique (testé sur cette machine avec un dongle Bluetooth réel), l'appel natif
 // sous-jacent (SimpleBLE/WinRT) reste parfois bloqué de façon intermittente — pas à
@@ -169,6 +203,27 @@ export async function scanForLampAdvertisements({ timeoutMs = 6000 } = {}) {
   }
 }
 
+function normalizeHexIdentity(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value) || ArrayBuffer.isView(value)) return Buffer.from(value).toString('hex');
+  return String(value).trim().toLowerCase() || null;
+}
+
+function attachBrokerSelectors(lamps) {
+  return (lamps || []).map((lamp) => ({
+    ...lamp,
+    // Objet volontairement sérialisable : ce n'est PAS le BluetoothDevice natif du
+    // worker de scan. open*Connection l'utilise pour faire rescanner puis connecter
+    // la cible dans un nouveau worker qui conserve, lui, le vrai handle GATT.
+    device: {
+      bleDeviceId: lamp.bleDeviceId,
+      kind: lamp.kind,
+      deviceUuid: normalizeHexIdentity(lamp.deviceUuid),
+      networkId: normalizeHexIdentity(lamp.networkId)
+    }
+  }));
+}
+
 async function scanOnceIsolated({ timeoutMs = 6000 } = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -184,7 +239,8 @@ async function scanOnceIsolated({ timeoutMs = 6000 } = {}) {
     };
 
     const child = fork(SCAN_WORKER_PATH, [], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      windowsHide: true
     });
 
     hardTimeout = setTimeout(() => {
@@ -198,7 +254,7 @@ async function scanOnceIsolated({ timeoutMs = 6000 } = {}) {
 
     child.on('message', (msg) => {
       if (!msg || msg.type !== 'result') return;
-      if (msg.ok) finish(resolve, msg.lamps);
+      if (msg.ok) finish(resolve, attachBrokerSelectors(msg.lamps));
       else finish(reject, new Error(msg.error));
     });
     child.on('error', (err) => finish(reject, err));
@@ -214,17 +270,83 @@ async function scanOnceIsolated({ timeoutMs = 6000 } = {}) {
 // (ou par un scan ciblé équivalent), sur le service Provisioning (0x1827) ou Proxy
 // (0x1828), avec notifications actives sur la caractéristique Data Out.
 export async function openGattConnection(device, { serviceUuid, dataInUuid, dataOutUuid, onData, maxAttributeValueLength = DEFAULT_MAX_ATTRIBUTE_VALUE_LENGTH }) {
-  const server = await device.gatt.connect();
-  const service = await server.getPrimaryService(serviceUuidString(serviceUuid));
-  const dataIn = await service.getCharacteristic(serviceUuidString(dataInUuid));
-  const dataOut = await service.getCharacteristic(serviceUuidString(dataOutUuid));
+  // Un seul essai par handle : le mesh-client pilote les retries et refait un scan
+  // avant chacun. Empiler ici des retries sur un handle SimpleBLE possiblement périmé
+  // créait jusqu'à neuf connexions et plusieurs déconnexions concurrentes.
+  let phase = 'connexion au périphérique';
+  let service;
+  let dataIn;
+  let dataOut;
+  let listener;
+  let listenerAttached = false;
+  let notificationsStarted = false;
 
-  const listener = () => {
-    const view = dataOut.value;
-    if (view) onData(toBuffer(view));
-  };
-  dataOut.addEventListener('characteristicvaluechanged', listener);
-  await dataOut.startNotifications();
+  try {
+    const server = await device.gatt.connect();
+
+    phase = `découverte du service 0x${serviceUuid.toString(16)}`;
+    service = await server.getPrimaryService(serviceUuidString(serviceUuid));
+
+    phase = `découverte de Data In 0x${dataInUuid.toString(16)}`;
+    dataIn = await service.getCharacteristic(serviceUuidString(dataInUuid));
+
+    phase = `découverte de Data Out 0x${dataOutUuid.toString(16)}`;
+    dataOut = await service.getCharacteristic(serviceUuidString(dataOutUuid));
+
+    listener = () => {
+      const view = dataOut.value;
+      if (!view) return;
+      try {
+        onData?.(toBuffer(view));
+      } catch (error) {
+        // Une notification radio mal formée ne doit pas devenir une exception globale
+        // capable d'arrêter tout Electron. La transaction en cours expirera proprement.
+        log.warn('Notification GATT SmallRig ignorée', error?.message || String(error));
+      }
+    };
+    dataOut.addEventListener('characteristicvaluechanged', listener);
+    listenerAttached = true;
+
+    phase = 'activation des notifications';
+    notificationsStarted = true;
+    await dataOut.startNotifications();
+  } catch (err) {
+    // Une erreur de connexion peut quand même laisser WinRT connecté. Effectuer un
+    // unique nettoyage ici, y compris si la couche Web Bluetooth se croit fermée.
+    const cleanupErrors = [];
+    if (notificationsStarted) {
+      try {
+        await dataOut.stopNotifications();
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
+    if (listenerAttached) {
+      try {
+        dataOut.removeEventListener('characteristicvaluechanged', listener);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
+    try {
+      await device.gatt.disconnect();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+
+    const nativeMessage = err?.message || String(err);
+    const cleanupMessage = cleanupErrors.length > 0
+      ? `; nettoyage GATT en erreur : ${cleanupErrors.map((error) => error?.message || String(error)).join(' | ')}`
+      : '';
+    const wrapped = new Error(
+      `Ouverture GATT 0x${serviceUuid.toString(16)} échouée pendant ${phase} : ${nativeMessage}${cleanupMessage}`,
+      { cause: err }
+    );
+    wrapped.code = err?.code || 'SMALLRIG_GATT_OPEN_FAILED';
+    if (err?.nativeDiagnostics !== undefined) wrapped.nativeDiagnostics = err.nativeDiagnostics;
+    if (cleanupErrors.length > 0) wrapped.cleanupErrors = cleanupErrors;
+    throw wrapped;
+  }
 
   let closed = false;
   return {
@@ -243,11 +365,28 @@ export async function openGattConnection(device, { serviceUuid, dataInUuid, data
       exact.set(buffer);
       await dataIn.writeValueWithoutResponse(exact);
     },
-    close() {
+    async close() {
       if (closed) return;
       closed = true;
-      dataOut.removeEventListener('characteristicvaluechanged', listener);
-      try { device.gatt.disconnect(); } catch (err) { log.warn('Erreur à la déconnexion GATT', err.message); }
+      if (notificationsStarted) {
+        try {
+          await dataOut.stopNotifications();
+        } catch (err) {
+          log.warn('Erreur à l’arrêt des notifications GATT', err?.message || String(err));
+        }
+        notificationsStarted = false;
+      }
+      try {
+        dataOut.removeEventListener('characteristicvaluechanged', listener);
+      } catch (err) {
+        log.warn('Erreur au retrait des notifications GATT', err?.message || String(err));
+      }
+      if (!device.gatt.connected) return;
+      try {
+        await device.gatt.disconnect();
+      } catch (err) {
+        log.warn('Erreur à la déconnexion GATT', err?.message || String(err));
+      }
     },
     get connected() {
       return !closed && device.gatt.connected;
@@ -255,7 +394,167 @@ export async function openGattConnection(device, { serviceUuid, dataInUuid, data
   };
 }
 
+function deserializeWorkerError(serialized, fallbackMessage) {
+  const error = new Error(serialized?.message || fallbackMessage);
+  if (serialized?.code) error.code = serialized.code;
+  if (serialized?.nativeDiagnostics !== undefined) error.nativeDiagnostics = serialized.nativeDiagnostics;
+  if (serialized?.phase) error.phase = serialized.phase;
+  if (serialized?.stack) error.workerStack = serialized.stack;
+  return error;
+}
+
+// Lance un processus Node dédié qui possède l'adaptateur, le BluetoothDevice et la
+// connexion GATT pendant toute la session. Aucun appel webbluetooth/SimpleBLE/WinRT
+// n'est ainsi exécuté dans le processus principal Electron (COM STA + thread UI).
+// Le timeout est réellement dur : si WinRT reste bloqué dans un appel synchrone, le
+// parent peut tuer uniquement ce worker et continuer à servir le reste du compagnon.
+export async function openBrokeredGattConnection(mode, selector, {
+  onData,
+  scanTimeoutMs = 8000,
+  openTimeoutMs = SESSION_OPEN_TIMEOUT_MS,
+  writeTimeoutMs = SESSION_WRITE_TIMEOUT_MS,
+  closeTimeoutMs = SESSION_CLOSE_TIMEOUT_MS,
+  forkProcess = fork
+} = {}) {
+  if (mode !== 'provisioning' && mode !== 'proxy') throw new Error(`Mode GATT SmallRig invalide : ${mode}`);
+
+  const child = forkProcess(SESSION_WORKER_PATH, [], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    windowsHide: true
+  });
+  const pending = new Map();
+  let nextRequestId = 1;
+  let connected = false;
+  let terminated = false;
+
+  const terminate = () => {
+    if (terminated) return;
+    terminated = true;
+    try { child.kill('SIGKILL'); } catch { /* processus déjà arrêté */ }
+  };
+
+  const rejectPending = (error) => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+    pending.clear();
+  };
+
+  const failWorker = (error) => {
+    connected = false;
+    rejectPending(error);
+  };
+
+  child.on('message', (message) => {
+    if (!message) return;
+    if (message.type === 'notification') {
+      try {
+        onData?.(Buffer.from(message.data || '', 'base64'));
+      } catch (error) {
+        log.warn('Notification du worker BLE SmallRig ignorée', error?.message || String(error));
+      }
+      return;
+    }
+    if (message.type !== 'response') return;
+    const request = pending.get(message.requestId);
+    if (!request) return;
+    pending.delete(message.requestId);
+    clearTimeout(request.timer);
+    if (message.ok) request.resolve(message.result);
+    else request.reject(deserializeWorkerError(message.error, `Échec du worker BLE (${request.operation})`));
+  });
+  child.on('error', (error) => {
+    failWorker(new Error(`Worker BLE SmallRig indisponible : ${error.message}`, { cause: error }));
+    terminate();
+  });
+  child.on('exit', (code, signal) => {
+    connected = false;
+    terminated = true;
+    if (pending.size > 0) {
+      const detail = signal ? `signal ${signal}` : `code ${code}`;
+      const error = new Error(`Le worker BLE SmallRig s'est arrêté pendant une opération (${detail})`);
+      error.code = 'SMALLRIG_BLE_WORKER_EXITED';
+      failWorker(error);
+    }
+  });
+
+  function request(operation, payload, timeoutMs) {
+    if (terminated) return Promise.reject(new Error('Worker BLE SmallRig déjà arrêté'));
+    return new Promise((resolve, reject) => {
+      const requestId = nextRequestId++;
+      const timer = setTimeout(() => {
+        if (!pending.delete(requestId)) return;
+        const error = new Error(
+          `Le worker BLE SmallRig ne répond plus pendant ${operation} (timeout ${timeoutMs} ms)`
+        );
+        error.code = 'SMALLRIG_BLE_WORKER_TIMEOUT';
+        connected = false;
+        reject(error);
+        rejectPending(error);
+        terminate();
+      }, timeoutMs);
+      pending.set(requestId, { operation, resolve, reject, timer });
+      try {
+        child.send({ type: 'request', requestId, operation, payload });
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(requestId);
+        reject(error);
+      }
+    });
+  }
+
+  let opened;
+  try {
+    opened = await request('open', {
+      mode,
+      selector: {
+        bleDeviceId: selector?.bleDeviceId || selector?.id || null,
+        deviceUuid: normalizeHexIdentity(selector?.deviceUuid),
+        networkId: normalizeHexIdentity(selector?.networkId)
+      },
+      scanTimeoutMs
+    }, openTimeoutMs);
+    connected = true;
+  } catch (error) {
+    terminate();
+    throw error;
+  }
+
+  let closed = false;
+  return {
+    maxAttributeValueLength: Number(opened?.maxAttributeValueLength) || DEFAULT_MAX_ATTRIBUTE_VALUE_LENGTH,
+    selectedDevice: opened?.selectedDevice || null,
+    async write(buffer) {
+      if (closed || !connected) throw new Error('Connexion GATT fermée');
+      const exact = Buffer.from(buffer);
+      await request('write', { data: exact.toString('base64') }, writeTimeoutMs);
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      connected = false;
+      try {
+        if (!terminated) await request('close', {}, closeTimeoutMs);
+      } catch (error) {
+        // Même contrat que l'ancien transport : une fermeture best-effort ne masque
+        // pas le résultat du provisioning/configuration qui vient de se terminer.
+        log.warn('Fermeture du worker BLE SmallRig en erreur', error?.message || String(error));
+      } finally {
+        terminate();
+      }
+    },
+    get connected() {
+      return !closed && connected && !terminated;
+    }
+  };
+}
+
 export async function openProvisioningConnection(device, { onData } = {}) {
+  if (!device?.gatt) {
+    return openBrokeredGattConnection('provisioning', device, { onData });
+  }
   return openGattConnection(device, {
     serviceUuid: GATT.PROVISIONING_SERVICE,
     dataInUuid: GATT.PROVISIONING_DATA_IN,
@@ -265,6 +564,9 @@ export async function openProvisioningConnection(device, { onData } = {}) {
 }
 
 export async function openProxyConnection(device, { onData } = {}) {
+  if (!device?.gatt) {
+    return openBrokeredGattConnection('proxy', device, { onData });
+  }
   return openGattConnection(device, {
     serviceUuid: GATT.PROXY_SERVICE,
     dataInUuid: GATT.PROXY_DATA_IN,
@@ -279,32 +581,18 @@ export async function openProxyConnection(device, { onData } = {}) {
 // premier device Proxy vu — le mesh-client validera via le NID au déchiffrement).
 export async function waitForProxyAdvertisement({ timeoutMs = 5000, retryDelayMs = 500 } = {}) {
   const deadline = Date.now() + timeoutMs;
-  // Fenêtres de sous-scan volontairement larges (pas ~2s) : chaque appel à
-  // scanForLampAdvertisementsInProcess repart d'un cache de peripherals vierge, et
-  // vérifié sur matériel réel qu'il faut plusieurs paquets publicitaires successifs
-  // (souvent les 2-3 premiers sont incomplets, sans Service Data) avant d'obtenir une
-  // annonce exploitable pour un même appareil — cf. patch webbluetooth
-  // (scanUpdated). Une fenêtre trop courte repart de zéro à chaque fois et rate
-  // systématiquement les paquets utiles.
+  // Fenêtres assez longues pour recevoir les Service Data complètes. Ce scan reste
+  // isolé ; la future connexion rescannera la même identité dans son worker de
+  // session. Aucun handle natif ne traverse donc l'IPC ni le processus Electron.
   const minSubScanMs = 6000;
   let lastError;
   while (Date.now() < deadline) {
     try {
       const remaining = deadline - Date.now();
-      // Étape 1 — confirmation de présence via le scan ISOLÉ (processus enfant frais,
-      // cf. scanForLampAdvertisements ci-dessus) : vérifié empiriquement bien plus
-      // fiable qu'un scan répété dans CE process, qui réutilise le même adaptateur
-      // natif tout juste sorti d'une connexion GATT (provisioning) — un état résiduel
-      // semble gêner les scans suivants dans le même process, alors qu'un process
-      // fraîchement forké n'a pas ce problème.
-      const confirmed = await scanForLampAdvertisements({ timeoutMs: Math.max(minSubScanMs, Math.min(8000, remaining)) });
-      if (!confirmed.some((f) => f.kind === 'provisioned')) continue;
-
-      // Étape 2 — scan in-process bref pour récupérer un handle `device` exploitable
-      // (non sérialisable depuis le process enfant) maintenant qu'on sait la lampe
-      // présente.
-      const found = await scanForLampAdvertisementsInProcess({ timeoutMs: Math.max(minSubScanMs, deadline - Date.now()) });
-      const proxy = found.filter((f) => f.kind === 'provisioned');
+      const found = await scanForLampAdvertisements({
+        timeoutMs: Math.max(minSubScanMs, Math.min(8000, remaining))
+      });
+      const proxy = found.filter((lamp) => lamp.kind === 'provisioned');
       if (proxy.length > 0) return proxy;
     } catch (err) {
       lastError = err;

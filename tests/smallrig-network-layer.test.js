@@ -14,7 +14,7 @@ test('deriveNetworkKeys: NID/EncryptionKey/PrivacyKey/NetworkID cohérents', () 
 
 test('Network PDU: round-trip chiffrement/déchiffrement (message d\'accès, MIC 4)', () => {
   const keys = deriveNetworkKeys(NET_KEY);
-  const transportPdu = Buffer.from('e45d0033040000006464', 'hex'); // trame HSI vendor exemple
+  const transportPdu = Buffer.from('2433040000006464', 'hex'); // payload Access SmallGoGo : 0x24 + trame HSI
   const pdu = encryptNetworkPdu({
     ...keys, ivi: 0, ivIndex: 0, ctl: false, ttl: 5, seq: 42, src: 0x0002, dst: 0xc001, transportPdu
   });
@@ -49,10 +49,37 @@ test('Network PDU: NID différent -> rejeté sans tenter le déchiffrement', () 
   assert.throws(() => decryptNetworkPdu({ ...otherKeys, ivIndex: 0, pdu }), /UNKNOWN_NID|NID inconnu/);
 });
 
-test('Network PDU: IVIndex différent -> échec d\'authentification (nonce faux)', () => {
+test('Network PDU: IVI incohérent ou IV Index différent -> rejet', () => {
   const keys = deriveNetworkKeys(NET_KEY);
   const pdu = encryptNetworkPdu({
     ...keys, ivi: 0, ivIndex: 0, ctl: false, ttl: 5, seq: 1, src: 1, dst: 2, transportPdu: Buffer.from([1, 2, 3])
   });
-  assert.throws(() => decryptNetworkPdu({ ...keys, ivIndex: 1, pdu }));
+  const flippedIvi = Buffer.from(pdu);
+  flippedIvi[0] ^= 0x80;
+  assert.throws(() => decryptNetworkPdu({ ...keys, ivIndex: 0, pdu: flippedIvi }), { code: 'IVI_MISMATCH' });
+  assert.throws(() => decryptNetworkPdu({ ...keys, ivIndex: 1, pdu }), { code: 'IVI_MISMATCH' });
+  // Même bit IVI mais IV Index complet différent : la CCM doit encore échouer.
+  assert.throws(() => decryptNetworkPdu({ ...keys, ivIndex: 2, pdu }));
+});
+
+test('Proxy Configuration PDU: Proxy Nonce round-trip et incompatible avec Network Nonce', () => {
+  const keys = deriveNetworkKeys(NET_KEY);
+  const pdu = encryptNetworkPdu({
+    ...keys,
+    ivi: 0,
+    ivIndex: 0,
+    ctl: true,
+    ttl: 0,
+    seq: 0x010203,
+    src: 0x0001,
+    dst: 0x0000,
+    transportPdu: Buffer.from([0x00, 0x00]),
+    nonceType: 'proxy'
+  });
+  const decoded = decryptNetworkPdu({ ...keys, ivIndex: 0, pdu, nonceType: 'proxy' });
+  assert.equal(decoded.ctl, true);
+  assert.equal(decoded.ttl, 0);
+  assert.equal(decoded.dst, 0);
+  assert.deepEqual(decoded.transportPdu, Buffer.from([0x00, 0x00]));
+  assert.throws(() => decryptNetworkPdu({ ...keys, ivIndex: 0, pdu }), /authenticate|Unsupported state/i);
 });

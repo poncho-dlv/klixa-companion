@@ -20,7 +20,7 @@ test('deriveAppKeyAid: 6 bits (0..63)', () => {
 });
 
 test('Upper Transport (AppKey): round-trip chiffrement/déchiffrement', () => {
-  const accessPayload = Buffer.from('e45d0033040000006464', 'hex');
+  const accessPayload = Buffer.from('2433040000006464', 'hex');
   const params = { key: APP_KEY, keyType: 'app', seq: 10, src: 2, dst: 0xc001, ivIndex: 0 };
   const enc = encryptUpperTransportAccess({ ...params, accessPayload });
   const dec = decryptUpperTransportAccess({ ...params, encAccessPayload: enc });
@@ -40,7 +40,7 @@ test('Upper Transport (DevKey): round-trip, nonce différent de AppKey', () => {
 });
 
 test('Lower Transport non segmenté : round-trip, rejette >15 octets', () => {
-  const upperTransportPdu = Buffer.from('e45d0033040000006464aabbccdd', 'hex').subarray(0, 15);
+  const upperTransportPdu = Buffer.from('2433040000006464aabbccdd', 'hex').subarray(0, 15);
   const encoded = encodeLowerTransportUnsegmented({ akf: true, aid: 0x12, upperTransportPdu });
   const decoded = decodeLowerTransportUnsegmented(encoded);
   assert.equal(decoded.akf, true);

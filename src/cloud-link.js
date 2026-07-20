@@ -118,7 +118,7 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
     }
     const ack = await commandDeduplicator.execute(id, async () => {
       try {
-        const result = await registry.dispatch(name, payload);
+        const result = await registry.dispatch(name, payload, { source: 'cloud' });
         return { type: 'ack', id, ok: true, result };
       } catch (err) {
         log.error(`Échec commande ${name}`, err.message);
@@ -157,7 +157,7 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
         type: 'hello',
         tenantId: config.tenantId,
         token: config.token,
-        capabilities: registry.listCommands(),
+        capabilities: registry.listCommands({ source: 'cloud' }),
       });
     });
     ws.on('message', (data) => handleMessage(data.toString()));

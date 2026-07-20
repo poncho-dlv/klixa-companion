@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createIntegrationRegistry } from '../src/integration-registry.js';
+import { registerIntegration } from '../src/integrations/index.js';
 
 test('registry.stop ferme toutes les intégrations qui exposent stop', async () => {
   const registry = createIntegrationRegistry();
@@ -48,4 +49,57 @@ test('registry.healthcheck borne une vérification bloquée', async () => {
   const result = await registry.healthcheck();
   assert.equal(result.blocked.ok, false);
   assert.match(result.blocked.error, /expiré/);
+});
+
+test('registry masque et refuse les commandes locales depuis le cloud', async () => {
+  const registry = createIntegrationRegistry();
+  registry.register({
+    id: 'scoped',
+    commands: {
+      'scoped.control': async () => 'cloud-ok',
+      'scoped.pair': async () => 'local-ok'
+    },
+    commandScopes: { 'scoped.pair': 'local' }
+  });
+
+  assert.deepEqual(registry.listCommands({ source: 'cloud' }), ['scoped.control']);
+  assert.deepEqual(registry.listCommands(), ['scoped.control', 'scoped.pair']);
+  assert.equal(await registry.dispatch('scoped.pair', {}, { source: 'local' }), 'local-ok');
+  await assert.rejects(
+    registry.dispatch('scoped.pair', {}, { source: 'cloud' }),
+    (error) => error.code === 'COMMAND_NOT_ALLOWED'
+  );
+});
+
+test('registry refuse une portée de commande inconnue', () => {
+  const registry = createIntegrationRegistry();
+  assert.throws(() => registry.register({
+    id: 'invalid-scope',
+    commands: { 'invalid.command': async () => {} },
+    commandScopes: { 'invalid.command': 'internet' }
+  }), /Portée invalide/);
+});
+
+test('registry échoue fermé pour une source de dispatch inconnue', async () => {
+  const registry = createIntegrationRegistry();
+  registry.register({ id: 'safe', commands: { 'safe.local': async () => true } });
+
+  await assert.rejects(registry.dispatch('safe.local', {}, { source: 'remote' }), /Source de commande invalide/);
+  assert.throws(() => registry.listCommands({ source: 'remote' }), /Source de commande invalide/);
+});
+
+test('une intégration SmallRig invalide reste visible avec sa cause exacte', async () => {
+  const registry = createIntegrationRegistry();
+  registerIntegration(registry, 'smallrig', {
+    smallrig: { enabled: true, meshStateJson: '{état invalide' }
+  });
+
+  const health = await registry.healthcheck();
+  assert.equal(health.smallrig.ok, false);
+  assert.match(health.smallrig.error, /SmallRig indisponible/i);
+  assert.match(health.smallrig.error, /JSON|état Mesh/i);
+  await assert.rejects(
+    registry.dispatch('smallrig.list', {}),
+    (error) => error.code === 'INTEGRATION_UNAVAILABLE' && /SmallRig indisponible/i.test(error.message)
+  );
 });

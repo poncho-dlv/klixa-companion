@@ -74,7 +74,7 @@ function hostnameOf(value) {
 
 // Anti-CSRF : un navigateur envoie TOUJOURS un header Origin sur une requête
 // cross-origin (et sur les POST). Un client légitime hors navigateur (curl, script,
-// healthcheck Docker) n'en envoie pas. On refuse donc tout Origin présent qui ne
+// healthcheck) n'en envoie pas. On refuse donc tout Origin présent qui ne
 // pointe pas vers la loopback — ce qui neutralise une page malveillante visitée par
 // le streamer, quel que soit le Content-Type.
 export function isAllowedOrigin(originHeader) {
