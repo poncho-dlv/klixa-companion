@@ -215,21 +215,24 @@ function renderSmallrigStatus() {
   }
 }
 
+// Ligne compacte du pattern « strip list » (miroir de .el-line côté Klixa) :
+// libellé en ellipse + méta discrète + actions à droite, sur UNE seule ligne.
 function lampRow({ title, meta, buttonLabel, onClick, extraNode }) {
   const li = document.createElement('li');
-  const nameRow = document.createElement('div');
-  nameRow.className = 'lamp-name-row';
+  li.className = 'lamp-row';
+  const line = document.createElement('div');
+  line.className = 'lamp-line';
   const titleEl = document.createElement('span');
+  titleEl.className = 'lamp-label';
   titleEl.textContent = title;
-  nameRow.appendChild(titleEl);
-  if (extraNode) nameRow.appendChild(extraNode);
+  line.appendChild(titleEl);
+  if (extraNode) line.appendChild(extraNode);
   if (meta) {
     const metaEl = document.createElement('span');
     metaEl.className = 'lamp-meta';
     metaEl.textContent = meta;
-    nameRow.appendChild(metaEl);
+    line.appendChild(metaEl);
   }
-  li.appendChild(nameRow);
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = buttonLabel;
@@ -237,7 +240,8 @@ function lampRow({ title, meta, buttonLabel, onClick, extraNode }) {
   const actions = document.createElement('div');
   actions.className = 'lamp-actions';
   actions.appendChild(button);
-  li.appendChild(actions);
+  line.appendChild(actions);
+  li.appendChild(line);
   return li;
 }
 
@@ -346,9 +350,17 @@ function describeSmallrigStatus(state, capacity) {
 // persisté. Un seul mode couleur actif a la fois (HSI/CCT/RGBW/Effet), l'alimentation
 // et la luminosité restent pilotables separement des le mode choisi.
 function buildLampControlPanel(lamp) {
+  // Wrapper animé du pattern strip list (grid-template-rows 0fr→1fr piloté par
+  // .lamp-row--open sur la ligne parente, cf. styles.css) : le contenu vit dans
+  // `body`, `panel` n'est que l'enveloppe de dépliage.
   const panel = document.createElement('div');
   panel.className = 'lamp-panel';
-  panel.hidden = true;
+  const panelInner = document.createElement('div');
+  panelInner.className = 'lamp-panel-inner';
+  const body = document.createElement('div');
+  body.className = 'lamp-panel-body';
+  panelInner.appendChild(body);
+  panel.appendChild(panelInner);
 
   const panelMessage = document.createElement('p');
   panelMessage.className = 'lamp-panel-message';
@@ -387,7 +399,7 @@ function buildLampControlPanel(lamp) {
   brightnessInput.value = '85';
   brightnessLabel.appendChild(brightnessInput);
   powerRow.append(powerToggleLabel, brightnessLabel);
-  panel.appendChild(powerRow);
+  body.appendChild(powerRow);
 
   powerToggle.addEventListener('change', () => {
     powerToggleText.textContent = powerToggle.checked ? 'Allumée' : 'Éteinte';
@@ -409,7 +421,7 @@ function buildLampControlPanel(lamp) {
     modeSelect.appendChild(option);
   }
   modeLabel.appendChild(modeSelect);
-  panel.appendChild(modeLabel);
+  body.appendChild(modeLabel);
 
   const hsiFields = document.createElement('label');
   hsiFields.textContent = 'Couleur';
@@ -417,7 +429,7 @@ function buildLampControlPanel(lamp) {
   colorInput.type = 'color';
   colorInput.value = '#ffffff';
   hsiFields.appendChild(colorInput);
-  panel.appendChild(hsiFields);
+  body.appendChild(hsiFields);
 
   const cctFields = document.createElement('div');
   cctFields.className = 'lamp-panel-row';
@@ -441,7 +453,7 @@ function buildLampControlPanel(lamp) {
   gmInput.value = '0';
   gmLabel.appendChild(gmInput);
   cctFields.append(kelvinLabel, gmLabel);
-  panel.appendChild(cctFields);
+  body.appendChild(cctFields);
 
   const rgbwFields = document.createElement('div');
   rgbwFields.className = 'lamp-panel-row';
@@ -461,7 +473,7 @@ function buildLampControlPanel(lamp) {
   const gInput = channelControl('Vert', 255);
   const bInput = channelControl('Bleu', 255);
   const wInput = channelControl('Blanc', 0);
-  panel.appendChild(rgbwFields);
+  body.appendChild(rgbwFields);
 
   const fxFields = document.createElement('div');
   fxFields.className = 'lamp-panel-row';
@@ -487,7 +499,7 @@ function buildLampControlPanel(lamp) {
   fxSpeedInput.value = '50';
   fxSpeedLabel.appendChild(fxSpeedInput);
   fxFields.append(fxModeLabel, fxSpeedLabel);
-  panel.appendChild(fxFields);
+  body.appendChild(fxFields);
 
   function updateVisibleMode() {
     hsiFields.hidden = modeSelect.value !== 'hsi';
@@ -518,7 +530,7 @@ function buildLampControlPanel(lamp) {
         break;
     }
   }));
-  panel.append(applyBtn, panelMessage);
+  body.append(applyBtn, panelMessage);
 
   const statusBtn = document.createElement('button');
   statusBtn.type = 'button';
@@ -542,7 +554,7 @@ function buildLampControlPanel(lamp) {
       statusBtn.disabled = false;
     }
   });
-  panel.append(statusBtn, statusOutput);
+  body.append(statusBtn, statusOutput);
 
   return panel;
 }
@@ -618,12 +630,23 @@ function renderSmallrigPaired() {
     controlButton.textContent = 'Piloter';
     controlButton.disabled = configurationPending;
     const panel = buildLampControlPanel(lamp);
-    controlButton.addEventListener('click', () => {
-      panel.hidden = !panel.hidden;
-      controlButton.textContent = panel.hidden ? 'Piloter' : 'Masquer le pilotage';
-    });
+    const setOpen = (open) => {
+      row.classList.toggle('lamp-row--open', open);
+      controlButton.textContent = open ? 'Masquer le pilotage' : 'Piloter';
+    };
+    controlButton.addEventListener('click', () => setOpen(!row.classList.contains('lamp-row--open')));
     actions.appendChild(controlButton);
     row.appendChild(panel);
+
+    // Comme sur Klixa (pattern el-line), la ligne elle-même déplie le panneau —
+    // sauf clic sur un contrôle (Oublier/Reconfigurer/Piloter gèrent leur action).
+    if (!configurationPending) {
+      row.classList.add('lamp-row--togglable');
+      row.querySelector('.lamp-line').addEventListener('click', (event) => {
+        if (event.target.closest('button, input, select, label')) return;
+        setOpen(!row.classList.contains('lamp-row--open'));
+      });
+    }
 
     smallrigPaired.appendChild(row);
   }
