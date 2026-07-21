@@ -153,6 +153,9 @@ function renderStatus(status) {
 function renderPairingUi() {
   const linked = Boolean(lastConfig.CLOUD_WS_URL);
   disconnectBtn.hidden = !linked;
+  // Rien à faire sur cette page une fois lié (le "Déconnecter" de la sidebar suffit) :
+  // masquée plutôt que juste désactivée, comme navSmoke pour les fonctionnalités tenant.
+  navButtons.get('connexion').hidden = linked;
   setNavLocked(!linked);
 }
 
@@ -825,7 +828,7 @@ function renderCloudStatus(cloudStatus) {
   lastCloudStatus = cloudStatus || { connected: false, features: {} };
   const smokeAvailable = Boolean(lastCloudStatus.connected && lastCloudStatus.features?.smoke === true);
   navSmoke.hidden = !smokeAvailable;
-  if (!smokeAvailable && activePage === 'smoke') setActivePage('connexion');
+  if (!smokeAvailable && activePage === 'smoke') setActivePage('obs');
   renderHeaderStatus();
 }
 
