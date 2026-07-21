@@ -299,9 +299,22 @@ function renderSmallrigFound() {
   }
 }
 
-const FX_MODE_LABELS = {
+// Numérotation "commande" (LqFx, premier octet du payload envoyé) — cf.
+// RM75_SPEC_DEV.md §9.4 / RM75_protocole.md §4. Reverse-engineered depuis la classe
+// LqFx de SmallGoGo, PAS encore validé sur lampe reelle (§12 point 5 du spec : "Formats
+// confirmés dans LqFx de SmallGoGo ; validation radio encore requise").
+const FX_COMMAND_MODE_LABELS = {
   1: 'Paparazzi', 2: 'Cycle', 3: 'Éclair', 4: 'Pulsation', 5: 'SOS', 6: 'Soudure',
   7: 'Alarme', 8: 'Feu d’artifice', 9: 'Aléatoire', 10: 'Feu', 11: 'TV', 12: 'Ampoule défectueuse'
+};
+
+// Numérotation "device" (MODE_DEV_*, valeur `mode` renvoyée par LqCStatus) — DIFFERENTE
+// de la numerotation commande ci-dessus (cf. memes docs). Utilisee uniquement pour
+// interpreter smallrig.status, jamais pour construire une commande FX.
+const FX_STATUS_MODE_LABELS = {
+  1: 'RGB', 2: 'Paparazzi', 3: 'Party', 4: 'Éclair', 5: 'Ampoule défectueuse', 6: 'TV',
+  7: 'Bougie', 8: 'Aléatoire', 9: 'Feu d’artifice', 10: 'Police', 11: 'Camion de pompiers',
+  12: 'Ambulance', 13: 'Soudure', 14: 'SOS', 15: 'Pulsation'
 };
 
 // Traduit la réponse brute de smallrig.status (cf. lq-protocol.js#decodeStatus/
@@ -315,7 +328,7 @@ function describeSmallrigStatus(state, capacity) {
       case 'hsi': parts.push(`Couleur · teinte ${state.hue}° · saturation ${state.sat}% · luminosité ${state.intensity}%`); break;
       case 'cct': parts.push(`Température · ${state.kelvin}K · luminosité ${state.intensity}% · teinte ${state.gm >= 0 ? '+' : ''}${state.gm}`); break;
       case 'rgbw': parts.push(`RGBW · R${state.r} V${state.g} B${state.b} · blanc ${state.w}`); break;
-      case 'fx': parts.push(`Effet ${FX_MODE_LABELS[state.mode] || state.mode} · vitesse ${state.freq} · luminosité ${state.intensity}%`); break;
+      case 'fx': parts.push(`Effet ${FX_STATUS_MODE_LABELS[state.mode] || state.mode} · vitesse ${state.freq} · luminosité ${state.intensity}%`); break;
       default: parts.push(`Mode ${state.type}`);
     }
   }
@@ -455,7 +468,7 @@ function buildLampControlPanel(lamp) {
   const fxModeLabel = document.createElement('label');
   fxModeLabel.textContent = 'Effet';
   const fxSelect = document.createElement('select');
-  for (const [value, label] of Object.entries(FX_MODE_LABELS)) {
+  for (const [value, label] of Object.entries(FX_COMMAND_MODE_LABELS)) {
     const option = document.createElement('option');
     option.value = value;
     option.textContent = label;

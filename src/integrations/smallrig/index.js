@@ -33,6 +33,13 @@ const DEFAULTS = {
 // reconnexion garantie après échec restent justifiés.
 const SNAPSHOT_READ_OPTIONS = { timeoutMs: 1200, closeOnTimeout: false };
 
+// Le défaut de mesh-client.js (COMMAND_RESPONSE_TIMEOUT_MS = 5000 ms) vise les
+// commandes routinières sur une session déjà ouverte ; une lecture manuelle
+// déclenchée depuis le panneau de pilotage tolère d'attendre plus longtemps un
+// aller-retour mesh (relais éventuels) plutôt que d'échouer trop tôt sur une lampe
+// par ailleurs joignable.
+const STATUS_READ_OPTIONS = { timeoutMs: 12000 };
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -385,8 +392,8 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     if (!uuid) throw new Error('uuid manquant');
     let lightState;
     let capacity;
-    try { lightState = await client.readStatus(uuid); } catch (err) { lightState = { error: err.message }; }
-    try { capacity = await client.readCapacity(uuid); } catch (err) { capacity = { error: err.message }; }
+    try { lightState = await client.readStatus(uuid, STATUS_READ_OPTIONS); } catch (err) { lightState = { error: err.message }; }
+    try { capacity = await client.readCapacity(uuid, STATUS_READ_OPTIONS); } catch (err) { capacity = { error: err.message }; }
     if (lightState.error && capacity.error) {
       const error = new Error(`Lecture SmallRig impossible : état (${lightState.error}), batterie (${capacity.error})`);
       error.code = 'SMALLRIG_STATUS_FAILED';
