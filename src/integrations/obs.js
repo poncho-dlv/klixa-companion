@@ -191,6 +191,19 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     return { scenes: names, currentScene: currentProgramSceneName || '' };
   }
 
+  // obs.set-scene — bascule la scène active (canevas programme), consommé par la page
+  // admin « Régie » (server/routers/obs.js, POST /api/obs/regie/switch). Le serveur a
+  // déjà validé la scène contre sa whitelist ; ici on ne fait que transmettre à OBS.
+  async function setScene(payload = {}) {
+    if (!connected) throw new Error('OBS non connecté');
+
+    const sceneName = String(payload.sceneName || '').trim();
+    if (!sceneName) throw new Error('sceneName manquant');
+
+    await obs.call('SetCurrentProgramScene', { sceneName });
+    return { sceneName };
+  }
+
   async function healthcheck() {
     if (!connected) throw new Error('OBS non connecté');
     return { url, connected };
@@ -200,7 +213,8 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     id: 'obs',
     commands: {
       'obs.sync-overlay-token': syncOverlayToken,
-      'obs.get-scenes': getScenes
+      'obs.get-scenes': getScenes,
+      'obs.set-scene': setScene
     },
     healthcheck,
     stop() { stopped = true; clearTimeout(reconnectTimer); obs.disconnect().catch(() => {}); }
