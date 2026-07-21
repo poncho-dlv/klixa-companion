@@ -1145,7 +1145,15 @@ export function createMeshClient({
     });
   }
 
-  async function readLqFromNode(node, readFrame, decodeResponse) {
+  // `closeOnTimeout` casse volontairement toute la session Proxy après un échec de
+  // lecture (cf. commentaire ci-dessous) : correct, mais un lecteur BEST-EFFORT à
+  // haute fréquence (snapshot avant blink, cf. index.js#snapshotLightState, appelé à
+  // CHAQUE alerte/test) transformait un simple timeout de lecture en re-scan + re-connexion
+  // complète (plusieurs secondes) pour la commande suivante, y compris une commande
+  // d'écriture (couleur) qui n'a elle-même jamais besoin de teardown. Un appelant qui
+  // n'a pas besoin de cette garantie (résultat déjà toléré `null` en cas d'échec) peut
+  // passer `closeOnTimeout: false` et un `timeoutMs` plus court.
+  async function readLqFromNode(node, readFrame, decodeResponse, { timeoutMs = COMMAND_RESPONSE_TIMEOUT_MS, closeOnTimeout = true } = {}) {
     const nodeAddress = node.vendorElementAddress ?? node.unicastAddress;
     return withNodeResponseLock(nodeAddress, async () => {
       const state = getState();
@@ -1170,7 +1178,7 @@ export function createMeshClient({
           key: appKey,
           expectedKeyType: 'app',
           expectedAid: aid,
-          timeoutMs: COMMAND_RESPONSE_TIMEOUT_MS,
+          timeoutMs,
           match: (decrypted) => {
             if (decrypted[0] !== VENDOR_SUBOPCODE_DATA) return undefined;
             return decodeResponse(decrypted.subarray(1));
@@ -1180,7 +1188,7 @@ export function createMeshClient({
         // Le protocole Lq n'expose aucun transaction ID. Après timeout, seule une
         // nouvelle session garantit qu'une réponse tardive ne satisfera pas la lecture
         // suivante du même type.
-        await closeProxy();
+        if (closeOnTimeout) await closeProxy();
         throw err;
       }
     });
@@ -1234,12 +1242,12 @@ export function createMeshClient({
       : (Number.isFinite(level) ? encodeLumLevel(level) : encodeLumOn())));
   }
 
-  async function readStatus(uuid) {
+  async function readStatus(uuid, options) {
     const [node] = resolveNodes([uuid]);
-    return readLqFromNode(node, encodeStatusRead(), decodeStatus);
+    return readLqFromNode(node, encodeStatusRead(), decodeStatus, options);
   }
 
-  async function readCapacity(uuid) {
+  async function readCapacity(uuid, options) {
     const [node] = resolveNodes([uuid]);
     return readLqFromNode(node, encodeCapacityRead(), (params) => {
       const stripped = stripAtPrefix(params);
@@ -1247,7 +1255,7 @@ export function createMeshClient({
         throw new Error('Réponse capacité inattendue');
       }
       return decodeCapacity(params);
-    });
+    }, options);
   }
 
   async function readVersion(uuid) {
