@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 if (process.platform !== 'win32') {
   throw new Error('La reconstruction native webbluetooth est réservée à Windows');
@@ -20,6 +21,17 @@ const simpleBleRoot = join(packageRoot, 'SimpleBLE');
 const nativeSource = join(packageRoot, 'SimpleBLE', 'simpleble', 'src', 'backends', 'windows', 'PeripheralBase.cpp');
 const nativePatch = join(projectRoot, 'patches', 'simpleble+0.6.1+klixa-windows.patch');
 const marker = 'rm75-gatt-discovery-v3';
+// Fichiers touchés par nativePatch (un git diff --git a/<path> par fichier patché).
+const NATIVE_PATCH_FILES = [
+  'simpleble/src/backends/windows/PeripheralBase.cpp',
+  'simpleble/src/backends/windows/PeripheralBase.h',
+  'simpleble/src/backends/windows/Utils.h',
+  'simpleble/src/backends/windows/AdapterBase.cpp',
+  'simpleble/src_c/peripheral.cpp',
+  'simpleble/src_c/adapter.cpp',
+  'simpleble/CMakeLists.txt',
+  'cmake/prelude.cmake'
+];
 
 function patchTextFile(file, transform) {
   const raw = readFileSync(file, 'utf8');
@@ -36,41 +48,46 @@ function replaceRequired(source, before, after, label) {
   return source.replace(before, after);
 }
 
+function nativePatchAlreadyApplied() {
+  const source = readFileSync(nativeSource, 'utf8');
+  return source.includes('GetGattServicesForUuidAsync') && source.includes('_cleanup_gatt() noexcept');
+}
+
 function applyNativePatch() {
-  // node_modules est listé dans .gitignore. Sans GIT_CEILING_DIRECTORIES, `git apply`
-  // remonte jusqu'au dépôt klixa-companion et, une fois le chemin cible reconnu comme
-  // ignoré, applique le patch en silence sans écrire les hunks (succès signalé à tort).
-  // Empêcher la découverte du dépôt force une application indépendante de tout .gitignore.
-  const gitEnv = { ...process.env, GIT_CEILING_DIRECTORIES: join(projectRoot, 'node_modules') };
-  const check = spawnSync('git', ['apply', '--check', nativePatch], {
-    cwd: simpleBleRoot,
-    encoding: 'utf8',
-    windowsHide: true,
-    env: gitEnv
-  });
-  if (check.status === 0) {
+  if (nativePatchAlreadyApplied()) return;
+
+  // node_modules est listé dans .gitignore. Appliqué depuis simpleBleRoot, `git apply`
+  // remonte jusqu'au dépôt klixa-companion, reconnaît le chemin cible comme ignoré, et
+  // selon la version de Git, applique le patch en silence sans écrire les hunks (succès
+  // signalé à tort) ou échoue purement et simplement — les deux constatés en pratique
+  // (localement puis en CI) pour ce même patch. Plutôt que de dépendre d'un réglage Git
+  // (GIT_CEILING_DIRECTORIES, core.autocrlf, etc.) pour contourner ce comportement lié à
+  // .gitignore, on copie les fichiers concernés dans un répertoire temporaire hors de
+  // tout dépôt Git, on y applique le patch sans ambiguïté possible, puis on les recopie.
+  const stagingDir = mkdtempSync(join(tmpdir(), 'klixa-simpleble-'));
+  try {
+    for (const relativePath of NATIVE_PATCH_FILES) {
+      const dest = join(stagingDir, relativePath);
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(join(simpleBleRoot, relativePath), dest);
+    }
+
     const apply = spawnSync('git', ['apply', nativePatch], {
-      cwd: simpleBleRoot,
+      cwd: stagingDir,
       encoding: 'utf8',
-      windowsHide: true,
-      env: gitEnv
+      windowsHide: true
     });
     if (apply.error) throw apply.error;
     assert.equal(apply.status, 0, `Application du patch SimpleBLE échouée : ${apply.stderr || apply.stdout}`);
-    return;
+
+    for (const relativePath of NATIVE_PATCH_FILES) {
+      copyFileSync(join(stagingDir, relativePath), join(simpleBleRoot, relativePath));
+    }
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
   }
 
-  const reverseCheck = spawnSync('git', ['apply', '--reverse', '--check', nativePatch], {
-    cwd: simpleBleRoot,
-    encoding: 'utf8',
-    windowsHide: true,
-    env: gitEnv
-  });
-  assert.equal(
-    reverseCheck.status,
-    0,
-    `Sources SimpleBLE dans un état partiellement patché : ${check.stderr || reverseCheck.stderr}`
-  );
+  assert.ok(nativePatchAlreadyApplied(), 'Le patch natif SimpleBLE a été appliqué mais le marqueur attendu reste absent');
 }
 
 applyNativePatch();
