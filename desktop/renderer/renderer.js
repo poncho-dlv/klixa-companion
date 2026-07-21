@@ -299,6 +299,241 @@ function renderSmallrigFound() {
   }
 }
 
+const FX_MODE_LABELS = {
+  1: 'Paparazzi', 2: 'Cycle', 3: 'Éclair', 4: 'Pulsation', 5: 'SOS', 6: 'Soudure',
+  7: 'Alarme', 8: 'Feu d’artifice', 9: 'Aléatoire', 10: 'Feu', 11: 'TV', 12: 'Ampoule défectueuse'
+};
+
+// Traduit la réponse brute de smallrig.status (cf. lq-protocol.js#decodeStatus/
+// decodeCapacity) en une ligne lisible pour le panneau de pilotage.
+function describeSmallrigStatus(state, capacity) {
+  const parts = [];
+  if (state?.error) {
+    parts.push(`Mode : lecture impossible (${state.error})`);
+  } else if (state) {
+    switch (state.type) {
+      case 'hsi': parts.push(`Couleur · teinte ${state.hue}° · saturation ${state.sat}% · luminosité ${state.intensity}%`); break;
+      case 'cct': parts.push(`Température · ${state.kelvin}K · luminosité ${state.intensity}% · teinte ${state.gm >= 0 ? '+' : ''}${state.gm}`); break;
+      case 'rgbw': parts.push(`RGBW · R${state.r} V${state.g} B${state.b} · blanc ${state.w}`); break;
+      case 'fx': parts.push(`Effet ${FX_MODE_LABELS[state.mode] || state.mode} · vitesse ${state.freq} · luminosité ${state.intensity}%`); break;
+      default: parts.push(`Mode ${state.type}`);
+    }
+  }
+  if (capacity?.error) {
+    parts.push(`Batterie : lecture impossible (${capacity.error})`);
+  } else if (capacity) {
+    const chargeLabel = { discharged: 'sur batterie', charging: 'en charge', full: 'chargée' }[capacity.chargeState] || capacity.chargeState;
+    parts.push(`${capacity.poweredOn ? 'Allumée' : 'Éteinte'} · batterie ${capacity.battery}% (${chargeLabel}) · autonomie ${capacity.autonomyHours}h`);
+  }
+  return parts.join(' — ') || 'Aucune information disponible.';
+}
+
+// Panneau de pilotage direct d'une lampe appairée : actions immédiates (comme
+// discover/provision/forget/reconfigure), independantes du formulaire de config
+// persisté. Un seul mode couleur actif a la fois (HSI/CCT/RGBW/Effet), l'alimentation
+// et la luminosité restent pilotables separement des le mode choisi.
+function buildLampControlPanel(lamp) {
+  const panel = document.createElement('div');
+  panel.className = 'lamp-panel';
+  panel.hidden = true;
+
+  const panelMessage = document.createElement('p');
+  panelMessage.className = 'lamp-panel-message';
+  panelMessage.setAttribute('role', 'status');
+
+  async function runCommand(action) {
+    panelMessage.className = '';
+    panelMessage.textContent = 'Envoi…';
+    try {
+      await action();
+      panelMessage.className = 'ok';
+      panelMessage.textContent = 'Envoyé.';
+    } catch (error) {
+      panelMessage.className = 'error';
+      panelMessage.textContent = error.message;
+    }
+  }
+
+  const powerRow = document.createElement('div');
+  powerRow.className = 'lamp-panel-row';
+  const powerToggleLabel = document.createElement('label');
+  powerToggleLabel.className = 'toggle switch-row';
+  const powerToggle = document.createElement('input');
+  powerToggle.type = 'checkbox';
+  powerToggle.checked = true;
+  const powerToggleText = document.createElement('span');
+  powerToggleText.className = 'switch-label-text';
+  powerToggleText.textContent = 'Allumée';
+  powerToggleLabel.append(powerToggle, powerToggleText);
+  const brightnessLabel = document.createElement('label');
+  brightnessLabel.textContent = 'Luminosité';
+  const brightnessInput = document.createElement('input');
+  brightnessInput.type = 'range';
+  brightnessInput.min = '1';
+  brightnessInput.max = '100';
+  brightnessInput.value = '85';
+  brightnessLabel.appendChild(brightnessInput);
+  powerRow.append(powerToggleLabel, brightnessLabel);
+  panel.appendChild(powerRow);
+
+  powerToggle.addEventListener('change', () => {
+    powerToggleText.textContent = powerToggle.checked ? 'Allumée' : 'Éteinte';
+    runCommand(() => window.klixa.smallrigPower([lamp.uuid], powerToggle.checked, powerToggle.checked ? Number(brightnessInput.value) : undefined));
+  });
+  brightnessInput.addEventListener('change', () => {
+    powerToggle.checked = true;
+    powerToggleText.textContent = 'Allumée';
+    runCommand(() => window.klixa.smallrigPower([lamp.uuid], true, Number(brightnessInput.value)));
+  });
+
+  const modeLabel = document.createElement('label');
+  modeLabel.textContent = 'Mode';
+  const modeSelect = document.createElement('select');
+  for (const [value, label] of [['hsi', 'Couleur'], ['cct', 'Température'], ['rgbw', 'RGBW'], ['fx', 'Effet']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    modeSelect.appendChild(option);
+  }
+  modeLabel.appendChild(modeSelect);
+  panel.appendChild(modeLabel);
+
+  const hsiFields = document.createElement('label');
+  hsiFields.textContent = 'Couleur';
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = '#ffffff';
+  hsiFields.appendChild(colorInput);
+  panel.appendChild(hsiFields);
+
+  const cctFields = document.createElement('div');
+  cctFields.className = 'lamp-panel-row';
+  const kelvinLabel = document.createElement('label');
+  const kelvinText = document.createTextNode('Température (5600K)');
+  kelvinLabel.appendChild(kelvinText);
+  const kelvinInput = document.createElement('input');
+  kelvinInput.type = 'range';
+  kelvinInput.min = '2700';
+  kelvinInput.max = '10000';
+  kelvinInput.step = '100';
+  kelvinInput.value = '5600';
+  kelvinInput.addEventListener('input', () => { kelvinText.textContent = `Température (${kelvinInput.value}K)`; });
+  kelvinLabel.appendChild(kelvinInput);
+  const gmLabel = document.createElement('label');
+  gmLabel.textContent = 'Teinte vert/magenta';
+  const gmInput = document.createElement('input');
+  gmInput.type = 'range';
+  gmInput.min = '-10';
+  gmInput.max = '10';
+  gmInput.value = '0';
+  gmLabel.appendChild(gmInput);
+  cctFields.append(kelvinLabel, gmLabel);
+  panel.appendChild(cctFields);
+
+  const rgbwFields = document.createElement('div');
+  rgbwFields.className = 'lamp-panel-row';
+  function channelControl(label, defaultValue) {
+    const l = document.createElement('label');
+    l.textContent = label;
+    const i = document.createElement('input');
+    i.type = 'range';
+    i.min = '0';
+    i.max = '255';
+    i.value = String(defaultValue);
+    l.appendChild(i);
+    rgbwFields.appendChild(l);
+    return i;
+  }
+  const rInput = channelControl('Rouge', 255);
+  const gInput = channelControl('Vert', 255);
+  const bInput = channelControl('Bleu', 255);
+  const wInput = channelControl('Blanc', 0);
+  panel.appendChild(rgbwFields);
+
+  const fxFields = document.createElement('div');
+  fxFields.className = 'lamp-panel-row';
+  const fxModeLabel = document.createElement('label');
+  fxModeLabel.textContent = 'Effet';
+  const fxSelect = document.createElement('select');
+  for (const [value, label] of Object.entries(FX_MODE_LABELS)) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    fxSelect.appendChild(option);
+  }
+  fxModeLabel.appendChild(fxSelect);
+  // Un seul curseur "vitesse" pour param1/param2 : le mapping exact par mode n'a pas
+  // été confirmé sur matériel réel (cf. index.js#restoreLightState) et la plupart des
+  // modes utilisent les deux octets de façon similaire (cadence/intensité de l'effet).
+  const fxSpeedLabel = document.createElement('label');
+  fxSpeedLabel.textContent = 'Vitesse';
+  const fxSpeedInput = document.createElement('input');
+  fxSpeedInput.type = 'range';
+  fxSpeedInput.min = '0';
+  fxSpeedInput.max = '255';
+  fxSpeedInput.value = '50';
+  fxSpeedLabel.appendChild(fxSpeedInput);
+  fxFields.append(fxModeLabel, fxSpeedLabel);
+  panel.appendChild(fxFields);
+
+  function updateVisibleMode() {
+    hsiFields.hidden = modeSelect.value !== 'hsi';
+    cctFields.hidden = modeSelect.value !== 'cct';
+    rgbwFields.hidden = modeSelect.value !== 'rgbw';
+    fxFields.hidden = modeSelect.value !== 'fx';
+  }
+  modeSelect.addEventListener('change', updateVisibleMode);
+  updateVisibleMode();
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'primary';
+  applyBtn.textContent = 'Appliquer';
+  applyBtn.addEventListener('click', () => runCommand(async () => {
+    switch (modeSelect.value) {
+      case 'hsi':
+        await window.klixa.smallrigColor([lamp.uuid], colorInput.value, Number(brightnessInput.value));
+        break;
+      case 'cct':
+        await window.klixa.smallrigCct([lamp.uuid], Number(kelvinInput.value), Number(brightnessInput.value), Number(gmInput.value));
+        break;
+      case 'rgbw':
+        await window.klixa.smallrigRgbw([lamp.uuid], Number(rInput.value), Number(gInput.value), Number(bInput.value), Number(wInput.value));
+        break;
+      case 'fx':
+        await window.klixa.smallrigFx([lamp.uuid], Number(fxSelect.value), Number(fxSpeedInput.value), Number(fxSpeedInput.value));
+        break;
+    }
+  }));
+  panel.append(applyBtn, panelMessage);
+
+  const statusBtn = document.createElement('button');
+  statusBtn.type = 'button';
+  statusBtn.className = 'secondary-button';
+  statusBtn.textContent = 'Lire l’état actuel';
+  const statusOutput = document.createElement('p');
+  statusOutput.className = 'lamp-panel-message';
+  statusOutput.setAttribute('role', 'status');
+  statusBtn.addEventListener('click', async () => {
+    statusBtn.disabled = true;
+    statusOutput.className = '';
+    statusOutput.textContent = 'Lecture…';
+    try {
+      const { state, capacity } = await window.klixa.smallrigStatus(lamp.uuid);
+      statusOutput.className = '';
+      statusOutput.textContent = describeSmallrigStatus(state, capacity);
+    } catch (error) {
+      statusOutput.className = 'error';
+      statusOutput.textContent = error.message;
+    } finally {
+      statusBtn.disabled = false;
+    }
+  });
+  panel.append(statusBtn, statusOutput);
+
+  return panel;
+}
+
 function renderSmallrigPaired() {
   smallrigPaired.innerHTML = '';
   if (lastPairedLamps.length === 0) {
@@ -364,6 +599,19 @@ function renderSmallrigPaired() {
       }
     });
     actions.prepend(reconfigureButton);
+
+    const controlButton = document.createElement('button');
+    controlButton.type = 'button';
+    controlButton.textContent = 'Piloter';
+    controlButton.disabled = configurationPending;
+    const panel = buildLampControlPanel(lamp);
+    controlButton.addEventListener('click', () => {
+      panel.hidden = !panel.hidden;
+      controlButton.textContent = panel.hidden ? 'Piloter' : 'Masquer le pilotage';
+    });
+    actions.appendChild(controlButton);
+    row.appendChild(panel);
+
     smallrigPaired.appendChild(row);
   }
 }

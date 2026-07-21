@@ -35,6 +35,24 @@ test('smallrig.fx exige au moins une lampe cible', async () => {
   );
 });
 
+test('smallrig.cct exige au moins une lampe cible', async () => {
+  const integration = createSmallrigIntegration();
+
+  await assert.rejects(
+    integration.commands['smallrig.cct']({ kelvin: 5600 }),
+    /Aucune lampe cible/
+  );
+});
+
+test('smallrig.rgbw exige au moins une lampe cible', async () => {
+  const integration = createSmallrigIntegration();
+
+  await assert.rejects(
+    integration.commands['smallrig.rgbw']({ r: 255 }),
+    /Aucune lampe cible/
+  );
+});
+
 test('smallrig bloque le provisioning et les opérations suivantes si la persistance échoue', async () => {
   const integration = createSmallrigIntegration({
     onStateChange: async () => { throw new Error('disque plein'); }

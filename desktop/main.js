@@ -336,6 +336,27 @@ function registerIpc() {
     if (!runtime) return { lamps: [] };
     return runtime.dispatch('smallrig.list', {});
   });
+  // Pilotage direct depuis le panneau de controle de la page SmallRig : effet
+  // immediat sur la/les lampe(s) ciblee(s), independant du formulaire de config
+  // (comme discover/provision/forget/reconfigure ci-dessus).
+  ipcMain.handle('smallrig:power', async (_event, { uuids, on, level } = {}) => {
+    return requireRuntime().dispatch('smallrig.power', { lightIds: uuids, on, level });
+  });
+  ipcMain.handle('smallrig:color', async (_event, { uuids, color, brightness } = {}) => {
+    return requireRuntime().dispatch('smallrig.color', { lightIds: uuids, color, brightness });
+  });
+  ipcMain.handle('smallrig:cct', async (_event, { uuids, kelvin, brightness, gm } = {}) => {
+    return requireRuntime().dispatch('smallrig.cct', { lightIds: uuids, kelvin, brightness, gm });
+  });
+  ipcMain.handle('smallrig:rgbw', async (_event, { uuids, r, g, b, w } = {}) => {
+    return requireRuntime().dispatch('smallrig.rgbw', { lightIds: uuids, r, g, b, w });
+  });
+  ipcMain.handle('smallrig:fx', async (_event, { uuids, mode, param1, param2 } = {}) => {
+    return requireRuntime().dispatch('smallrig.fx', { lightIds: uuids, mode, param1, param2 });
+  });
+  ipcMain.handle('smallrig:status', async (_event, { uuid } = {}) => {
+    return requireRuntime().dispatch('smallrig.status', { uuid });
+  });
   ipcMain.handle('pairing:start', async (_event, { baseUrl } = {}) => {
     stopPairingPoll();
     const resolvedBaseUrl = String(baseUrl || store.load().CLOUD_PAIR_URL || DEFAULT_CLOUD_PAIR_URL)

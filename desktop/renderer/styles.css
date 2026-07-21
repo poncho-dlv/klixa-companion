@@ -94,6 +94,35 @@ input:hover{border-color:var(--border-focus)}
 input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
 input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent)}
 
+/* ── Select (repris de Klixa admin/css/selects.css) : chevron custom en SVG
+   inline (CSP script-src 'self', mais les data-URI sur background-image
+   restent autorisees) plutot que le rendu par defaut du navigateur. ──── */
+select{
+  width:100%;box-sizing:border-box;padding:10px 42px 10px 12px;
+  font:inherit;font-size:.9rem;color:var(--text);
+  background-color:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r-md);
+  outline:none;cursor:pointer;transition:border-color .15s,box-shadow .15s,background-color .15s;
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='%23ADADB8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 14px center;background-size:16px 16px;
+}
+select:hover{border-color:var(--border-focus);background-color:var(--bg-muted)}
+select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+select:disabled{opacity:.6;cursor:not-allowed}
+select option{background:var(--bg-elevated);color:var(--text)}
+
+/* ── Color picker (repris de Klixa admin/css/tools.css .color-picker-swatch) :
+   meme gabarit de swatch, sur l'input natif plutot qu'une modale iro.js (pas
+   de dependance JS supplementaire a vendre sous la CSP script-src 'self'). */
+input[type="color"]{
+  width:44px;height:44px;padding:0;flex-shrink:0;
+  border:2px solid rgba(255,255,255,.12);border-radius:14px;
+  box-shadow:0 8px 20px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.25);
+  cursor:pointer;
+}
+input[type="color"]::-webkit-color-swatch-wrapper{padding:0;border-radius:12px}
+input[type="color"]::-webkit-color-swatch{border:none;border-radius:12px}
+
 button{
   width:100%;border:0;border-radius:var(--r-md);padding:11px 13px;
   background:var(--bg-muted);color:var(--text);font:inherit;font-weight:700;font-size:.875rem;cursor:pointer;
@@ -142,13 +171,32 @@ input.masked-secret[readonly]{cursor:pointer;letter-spacing:2px}
 .field-hint{color:var(--text-muted);font-size:12px;margin:6px 0 14px;line-height:1.4}
 h3{font-size:13px;color:var(--text-muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.04em}
 .lamp-list{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
-.lamp-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r-sm)}
+.lamp-list li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r-sm)}
 .lamp-name-row{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .lamp-name-row input{margin:0}
 .lamp-meta{color:var(--text-muted);font-size:12px}
 .lamp-list button{width:auto;flex-shrink:0;padding:8px 13px;font-size:12px}
 .lamp-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
 .lamp-empty{color:var(--text-muted);font-size:13px;margin:8px 0}
+
+/* ── Panneau de pilotage SmallRig (couleur/température/RGBW/effet) : bascule
+   sous la ligne de la lampe, pleine largeur (flex-basis:100% dans le li en
+   flex-wrap ci-dessus) plutot que troisieme colonne a cote du nom/actions. */
+.lamp-panel{flex-basis:100%;display:grid;gap:12px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.lamp-panel-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* [hidden] seul ne suffit pas : une regle auteur (meme moins specifique, ex. le
+   `label{display:grid}` global) l'emporte toujours sur la regle [hidden] du user-agent
+   dans la cascade (l'origine prime sur la specificite, cf. CSS Cascade). Il faut donc
+   re-affirmer display:none explicitement : sur le panneau lui-meme (repli/depli via
+   "Piloter") et sur tout descendant cache selon le mode couleur choisi. */
+.lamp-panel[hidden],
+.lamp-panel [hidden]{display:none}
+.lamp-panel-message{margin:0;min-height:16px;font-size:12px;color:var(--text-muted)}
+.lamp-panel input[type="range"]{width:100%;padding:0;background:transparent;border:none;height:20px;accent-color:var(--accent)}
+/* Les items de grille s'etirent par defaut (justify-items:stretch) : sans ca, les
+   boutons heritent width:auto de .lamp-list button mais s'etirent quand meme sur
+   toute la largeur de leur cellule de grille. */
+.lamp-panel>button{justify-self:start}
 
 /* ── Switch (repris de Klixa admin/css/forms.css) ──────────── */
 .switch-row{display:flex;align-items:center;gap:12px;cursor:pointer}

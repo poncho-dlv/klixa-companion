@@ -27,6 +27,12 @@ const DEFAULTS = {
   pulseMs: 300
 };
 
+// Timeout court + pas de teardown de session pour les lectures de snapshot : déjà
+// best-effort (repli `null`), sur le chemin chaud de CHAQUE alerte/test — contrairement
+// à smallrig.status (lecture manuelle ponctuelle), où le timeout complet + la
+// reconnexion garantie après échec restent justifiés.
+const SNAPSHOT_READ_OPTIONS = { timeoutMs: 1200, closeOnTimeout: false };
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -225,11 +231,11 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   // cette fonctionnalité) si la lecture échoue.
   async function snapshotLightState(uuid) {
     const [status, capacity] = await Promise.all([
-      client.readStatus(uuid).catch((err) => {
+      client.readStatus(uuid, SNAPSHOT_READ_OPTIONS).catch((err) => {
         log.warn(`Snapshot SmallRig : lecture du mode impossible pour ${uuid}`, err.message);
         return null;
       }),
-      client.readCapacity(uuid).catch((err) => {
+      client.readCapacity(uuid, SNAPSHOT_READ_OPTIONS).catch((err) => {
         log.warn(`Snapshot SmallRig : lecture de l'alimentation impossible pour ${uuid}`, err.message);
         return null;
       })
@@ -303,6 +309,42 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     }
   }
 
+  // smallrig.cct — mode température de couleur (Kelvin) + intensité, avec décalage
+  // vert/magenta optionnel (gm, -10..10), cf. encodeCct. Pas d'équivalent hue.* : Hue
+  // exprime la température en mired sur une plage différente, pas de mapping direct.
+  async function cct(payload = {}) {
+    const lightIds = normalizeLightIds(payload.lightIds ?? payload.smallrigLightIds);
+    checkLightIds(lightIds);
+
+    const kelvin = clamp(payload.kelvin, 0, 0xffff, 5600);
+    const intensity = clamp(payload.brightness ?? payload.intensity, 1, 100, DEFAULTS.brightness);
+    const gm = clamp(payload.gm, -10, 10, 0);
+
+    await executeForLights('Commande température de couleur', lightIds, (uuid) =>
+      client.setCct([uuid], { kelvin, intensity, gm }));
+
+    log.info('Commande température de couleur envoyée', { lights: lightIds.length, kelvin, intensity, gm });
+    return { lights: lightIds.length, kelvin, intensity, gm };
+  }
+
+  // smallrig.rgbw — canaux RGB + blanc dédié indépendants (0-255 chacun), mode matériel
+  // distinct du HSI (cf. encodeRgbw). Aucun équivalent hue.* (Hue n'expose pas de canal
+  // blanc dédié séparé de la teinte/saturation).
+  async function rgbw(payload = {}) {
+    const lightIds = normalizeLightIds(payload.lightIds ?? payload.smallrigLightIds);
+    checkLightIds(lightIds);
+
+    const r = clamp(payload.r, 0, 255, 0);
+    const g = clamp(payload.g, 0, 255, 0);
+    const b = clamp(payload.b, 0, 255, 0);
+    const w = clamp(payload.w, 0, 255, 0);
+
+    await executeForLights('Commande RGBW', lightIds, (uuid) => client.setRgbw([uuid], { r, g, b, w }));
+
+    log.info('Commande RGBW envoyée', { lights: lightIds.length, r, g, b, w });
+    return { lights: lightIds.length, r, g, b, w };
+  }
+
   // smallrig.power — allumage/extinction ou réglage de luminosité (0-100), même esprit
   // que hue.color avec `on`/`brightness` mais sans couleur.
   async function power(payload = {}) {
@@ -370,6 +412,8 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
       'smallrig.forget': forget,
       'smallrig.list': list,
       'smallrig.color': color,
+      'smallrig.cct': cct,
+      'smallrig.rgbw': rgbw,
       'smallrig.power': power,
       'smallrig.fx': fx,
       'smallrig.status': status
