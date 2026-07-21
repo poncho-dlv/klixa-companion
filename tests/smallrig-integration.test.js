@@ -26,6 +26,15 @@ test('smallrig signale les résultats manquants comme succès partiel', () => {
   );
 });
 
+test('smallrig.fx exige au moins une lampe cible', async () => {
+  const integration = createSmallrigIntegration();
+
+  await assert.rejects(
+    integration.commands['smallrig.fx']({ mode: 4 }),
+    /Aucune lampe cible/
+  );
+});
+
 test('smallrig bloque le provisioning et les opérations suivantes si la persistance échoue', async () => {
   const integration = createSmallrigIntegration({
     onStateChange: async () => { throw new Error('disque plein'); }

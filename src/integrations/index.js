@@ -15,6 +15,7 @@ const SMALLRIG_COMMAND_SCOPES = {
   'smallrig.list': 'all',
   'smallrig.color': 'all',
   'smallrig.power': 'all',
+  'smallrig.fx': 'all',
   'smallrig.status': 'all'
 };
 

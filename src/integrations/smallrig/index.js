@@ -245,6 +245,27 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     return { lights: lightIds.length };
   }
 
+  // smallrig.fx — effet dynamique matériel (12 modes Lq : Paparazzi/Cycle/Éclair/
+  // Pulsing (respiration)/SOS/Soudure/Alarme/Feu d'artifice/Aléatoire/Feu/TV/Ampoule
+  // défectueuse, cf. RM75_SPEC_DEV.md §9.3). Aucun équivalent hue.* : Hue ne
+  // supporte pas d'effets matériels, seulement couleur/luminosité. `param2` est
+  // ignoré pour les modes à un seul paramètre (LIGHTNING/WELDING/FIREWORKS/TV/
+  // FAULT_BULB) — encodeFx s'en charge déjà, on ne fait que clamp les entrées.
+  async function fx(payload = {}) {
+    const lightIds = normalizeLightIds(payload.lightIds ?? payload.smallrigLightIds);
+    checkLightIds(lightIds);
+
+    const mode = clamp(payload.mode, 1, 12, 1);
+    const param1 = clamp(payload.param1, 0, 255, 0);
+    const param2 = clamp(payload.param2, 0, 65535, 0);
+
+    await executeForLights('Effet dynamique', lightIds, (uuid) =>
+      client.setFx([uuid], { mode, param1, param2 }));
+
+    log.info('Effet dynamique envoyé', { lights: lightIds.length, mode, param1, param2 });
+    return { lights: lightIds.length, mode };
+  }
+
   // smallrig.status — lecture d'état (mode courant + batterie) d'une seule lampe.
   async function status(payload = {}) {
     const uuid = String(payload.uuid || '').trim();
@@ -279,6 +300,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
       'smallrig.list': list,
       'smallrig.color': color,
       'smallrig.power': power,
+      'smallrig.fx': fx,
       'smallrig.status': status
     },
     commandScopes: {
