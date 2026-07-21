@@ -37,16 +37,23 @@ function replaceRequired(source, before, after, label) {
 }
 
 function applyNativePatch() {
+  // node_modules est listé dans .gitignore. Sans GIT_CEILING_DIRECTORIES, `git apply`
+  // remonte jusqu'au dépôt klixa-companion et, une fois le chemin cible reconnu comme
+  // ignoré, applique le patch en silence sans écrire les hunks (succès signalé à tort).
+  // Empêcher la découverte du dépôt force une application indépendante de tout .gitignore.
+  const gitEnv = { ...process.env, GIT_CEILING_DIRECTORIES: join(projectRoot, 'node_modules') };
   const check = spawnSync('git', ['apply', '--check', nativePatch], {
     cwd: simpleBleRoot,
     encoding: 'utf8',
-    windowsHide: true
+    windowsHide: true,
+    env: gitEnv
   });
   if (check.status === 0) {
     const apply = spawnSync('git', ['apply', nativePatch], {
       cwd: simpleBleRoot,
       encoding: 'utf8',
-      windowsHide: true
+      windowsHide: true,
+      env: gitEnv
     });
     if (apply.error) throw apply.error;
     assert.equal(apply.status, 0, `Application du patch SimpleBLE échouée : ${apply.stderr || apply.stdout}`);
@@ -56,7 +63,8 @@ function applyNativePatch() {
   const reverseCheck = spawnSync('git', ['apply', '--reverse', '--check', nativePatch], {
     cwd: simpleBleRoot,
     encoding: 'utf8',
-    windowsHide: true
+    windowsHide: true,
+    env: gitEnv
   });
   assert.equal(
     reverseCheck.status,
