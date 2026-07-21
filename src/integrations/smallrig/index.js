@@ -217,19 +217,90 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     return { lights: lightIds.length, color: hex };
   }
 
-  // Clignotement coloré puis extinction/rallumage (mode alerte, cf. hue.js#blinkLights
-  // — pas de restauration d'état précédent ici : les lampes RM75 n'ont pas d'API de
-  // lecture d'état aussi complète que Hue pour un snapshot fiable pré-clignotement).
+  // Snapshot pré-clignotement (mode/couleur via LqCStatus 0x43 + alimentation via
+  // LqCapacity 0x31, cf. lq-protocol.js#decodeStatus/decodeCapacity) — miroir de
+  // hue.js#readLightState, mais un aller-retour BLE mesh par lampe (au lieu d'un GET
+  // HTTP quasi instantané côté Hue) : plus lent et non garanti, d'où le try/catch par
+  // lampe et le repli sur `null` (restauré en simple rallumage, comportement d'avant
+  // cette fonctionnalité) si la lecture échoue.
+  async function snapshotLightState(uuid) {
+    const [status, capacity] = await Promise.all([
+      client.readStatus(uuid).catch((err) => {
+        log.warn(`Snapshot SmallRig : lecture du mode impossible pour ${uuid}`, err.message);
+        return null;
+      }),
+      client.readCapacity(uuid).catch((err) => {
+        log.warn(`Snapshot SmallRig : lecture de l'alimentation impossible pour ${uuid}`, err.message);
+        return null;
+      })
+    ]);
+    return { status, poweredOn: capacity?.poweredOn };
+  }
+
+  // Réapplique l'état capturé par snapshotLightState. Si la lampe était éteinte, on se
+  // contente de la rééteindre (pas besoin de réappliquer une couleur qui ne sera pas
+  // visible). Le mapping freq/intensity -> param1/param2 du mode 'fx' est déduit de la
+  // position des octets dans la trame (cf. encodeFx) mais n'a pas été confirmé sur
+  // matériel réel.
+  async function restoreLightState(uuid, snapshot) {
+    if (!snapshot) {
+      await client.setPower([uuid], { on: true });
+      return;
+    }
+
+    const { status, poweredOn } = snapshot;
+    if (poweredOn === false) {
+      await client.setPower([uuid], { on: false });
+      return;
+    }
+
+    switch (status?.type) {
+      case 'hsi':
+        await client.setHsi([uuid], { hue: status.hue, sat: status.sat, intensity: status.intensity });
+        break;
+      case 'cct':
+        await client.setCct([uuid], { kelvin: status.kelvin, intensity: status.intensity, gm: status.gm });
+        break;
+      case 'rgbw':
+        await client.setRgbw([uuid], { r: status.r, g: status.g, b: status.b, w: status.w });
+        break;
+      case 'fx':
+        await client.setFx([uuid], { mode: status.mode, param1: status.freq, param2: status.intensity });
+        break;
+      default:
+        // manual_cct/manual_hsi/pickup/inconnu : rien de fiable à réappliquer côté
+        // couleur, on ne touche qu'à l'alimentation ci-dessous.
+        break;
+    }
+
+    await client.setPower([uuid], { on: true });
+  }
+
+  // Clignotement coloré puis restauration de l'état initial (mode alerte « simple »,
+  // cf. hue.js#blinkLights). Snapshot/restore best-effort par lampe : un échec de
+  // lecture ou de réapplication sur une lampe ne bloque jamais les autres ni le blink
+  // lui-même (log.warn seulement).
   async function blink(lightIds, { hue, sat, intensity, durationMs }) {
+    const previous = {};
+    await mapWithConcurrency(lightIds, requestConcurrency, async (uuid) => {
+      previous[uuid] = await snapshotLightState(uuid);
+    });
+
     const endAt = Date.now() + durationMs;
     const pulseMs = Math.max(150, Math.min(400, Math.floor(durationMs / 4)));
-    while (Date.now() < endAt) {
-      await executeForLights('Impulsion couleur', lightIds, (uuid) => client.setHsi([uuid], { hue, sat, intensity }));
-      await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
-      await executeForLights('Extinction de l’impulsion', lightIds, (uuid) => client.setPower([uuid], { on: false }));
-      await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
+    try {
+      while (Date.now() < endAt) {
+        await executeForLights('Impulsion couleur', lightIds, (uuid) => client.setHsi([uuid], { hue, sat, intensity }));
+        await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
+        await executeForLights('Extinction de l’impulsion', lightIds, (uuid) => client.setPower([uuid], { on: false }));
+        await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
+      }
+    } finally {
+      await mapWithConcurrency(lightIds, requestConcurrency, async (uuid) => {
+        try { await restoreLightState(uuid, previous[uuid]); }
+        catch (err) { log.warn(`Restauration SmallRig impossible pour ${uuid}`, err.message); }
+      });
     }
-    await executeForLights('Rallumage après impulsion', lightIds, (uuid) => client.setPower([uuid], { on: true }));
   }
 
   // smallrig.power — allumage/extinction ou réglage de luminosité (0-100), même esprit
