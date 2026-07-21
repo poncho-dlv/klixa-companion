@@ -108,9 +108,10 @@ button.primary:hover:not(:disabled){background:var(--accent-dark)}
 .ok{color:var(--success)!important}
 .error{color:var(--danger)!important}
 
-/* ── Bouton "Enregistrer" par page : une action parmi d'autres dans sa
-   section, pas une barre pleine largeur qui domine toute la fenêtre. */
-.page-save-btn{margin:4px 0 14px}
+/* ── Bouton "Enregistrer" par page : en bas de sa section, au style primary
+   de l'app (cf. .account-btn--primary cote console Klixa) mais a la largeur
+   de son contenu, pas une barre pleine largeur qui domine toute la fenêtre. */
+.page-save-btn{width:auto;flex-shrink:0;padding:9px 16px;margin:16px 0 0}
 
 .secondary-button,
 .disconnect-btn{
