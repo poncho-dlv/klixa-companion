@@ -8,110 +8,144 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main>
-    <header>
-      <div class="logo">K</div>
-      <div class="header-text">
-        <h1>Klixa Companion</h1>
-        <p id="status" class="status-line">
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="app-title">
+          <div class="logo">K</div>
+          <span>Klixa Companion</span>
+        </h1>
+        <p id="status" class="status-line app-subtitle">
           <svg id="statusIcon" class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
           <span id="statusMessage">Démarrage...</span>
         </p>
       </div>
-      <button type="button" id="disconnectBtn" class="disconnect-btn" hidden>
+
+      <nav id="navList" class="config-list">
+        <div class="nav-group">
+          <button type="button" class="config-button" data-page="connexion">Connexion</button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-label">Intégrations</span>
+          <button type="button" class="config-button" data-page="obs">OBS</button>
+          <button type="button" class="config-button" data-page="streamerbot">Streamer.bot</button>
+          <button type="button" class="config-button" data-page="smoke" id="navSmoke" hidden>Machine à fumée</button>
+          <button type="button" class="config-button" data-page="hue">Philips Hue</button>
+          <button type="button" class="config-button" data-page="smallrig">Lampes SmallRig</button>
+        </div>
+      </nav>
+
+      <button type="button" id="disconnectBtn" class="secondary-button disconnect-btn" hidden>
         <svg viewBox="0 0 512 512" aria-hidden="true"><path d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"/></svg>
         Déconnecter
       </button>
-    </header>
-    <div id="updateBanner" class="update-banner" role="status" hidden>
-      <span id="updateBannerMessage"></span>
-      <button type="button" id="updateInstallBtn" hidden>Redémarrer et installer</button>
-    </div>
-    <form id="config">
-      <section id="pairingSection"><h2>Connexion Klixa</h2>
-        <div class="pairing">
-          <button type="button" id="pairBtn">Lier ce compagnon</button>
-          <div id="pairCode" class="pair-code" hidden>
-            <p class="pair-code-value" id="pairCodeValue"></p>
-            <p>Va sur ta console Klixa, Paramètres puis Compagnon, et entre ce code.</p>
-            <p id="pairCodeTimer"></p>
-          </div>
-          <p id="pairMessage" role="status"></p>
-        </div>
-      </section>
-      <div id="integrations" hidden>
-        <section>
-          <div class="section-head"><h2>OBS</h2>
-            <p class="integration-status status-line" data-integration="obs">
-              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
-              <span></span>
-            </p>
-          </div>
-          <label class="toggle"><input name="OBS_ENABLED" type="checkbox"> Activer OBS</label>
-          <div class="row"><label>IP ou hôte<input name="OBS_WS_HOST" placeholder="127.0.0.1"></label><label>Port<input name="OBS_WS_PORT" type="number" min="1" max="65535" placeholder="4455"></label></div>
-          <label>Mot de passe<input name="OBS_WS_PASSWORD" id="obsWsPassword" type="password" autocomplete="new-password"></label>
-          <button type="button" id="obsConnectionBtn">Connecter</button>
-        </section>
-        <section>
-          <div class="section-head"><h2>Streamer.bot</h2>
-            <p class="integration-status status-line" data-integration="streamerbot">
-              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
-              <span></span>
-            </p>
-          </div>
-          <label class="toggle"><input name="SB_ENABLED" type="checkbox"> Activer Streamer.bot</label>
-          <div class="row"><label>Hôte<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
-          <label>Mot de passe<input name="SB_PASSWORD" id="sbPassword" type="password" autocomplete="new-password"></label>
-          <button type="button" id="streamerbotConnectionBtn">Connecter</button>
-        </section>
-        <section id="section-smoke" hidden>
-          <div class="section-head"><h2>Machine à fumée</h2>
-            <p class="integration-status status-line" data-integration="smoke">
-              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
-              <span></span>
-            </p>
-          </div>
-          <label class="toggle"><input name="SMOKE_ENABLED" type="checkbox"> Activer la machine à fumée</label>
-          <div class="row"><label>IP ou hôte<input name="SMOKE_SERVICE_HOST" id="smokeServiceHost" placeholder="192.168.1.50"></label><label>Port<input name="SMOKE_SERVICE_PORT" type="number" min="1" max="65535" placeholder="8787"></label></div>
-          <label>Token du service<input name="SMOKE_SERVICE_TOKEN" id="smokeServiceToken" type="password" autocomplete="new-password"></label>
-          <button type="button" id="smokeConnectionBtn">Connecter</button>
-        </section>
-        <section>
-          <div class="section-head"><h2>Philips Hue</h2>
-            <p id="hueStatus" class="integration-status status-line">
-              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
-              <span></span>
-            </p>
-          </div>
-          <label class="toggle"><input name="HUE_ENABLED" type="checkbox"> Activer Hue</label>
-          <div class="row"><label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label>Port<input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
-          <button type="button" id="huePairBtn">Appairer (presser le bouton du bridge avant)</button>
-          <button type="button" id="hueUnpairBtn" class="disconnect-btn" hidden>Déconnecter</button>
-          <p id="hueMessage" role="status"></p>
-        </section>
-        <section>
-          <div class="section-head"><h2>Lampes SmallRig RM75</h2>
-            <p id="smallrigStatus" class="integration-status status-line">
-              <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
-              <span></span>
-            </p>
-          </div>
-          <label class="toggle"><input name="SMALLRIG_ENABLED" type="checkbox"> Activer les lampes SmallRig</label>
-          <p class="hint">Le Bluetooth doit être activé sur cette machine. Rapproche les lampes et mets-les sous tension avant de scanner.</p>
-          <button type="button" id="smallrigScanBtn">Scanner les lampes à proximité</button>
-          <ul id="smallrigFound" class="lamp-list"></ul>
-          <h3>Lampes appairées</h3>
-          <ul id="smallrigPaired" class="lamp-list"></ul>
-          <p id="smallrigMessage" role="status"></p>
-        </section>
+    </aside>
+
+    <main class="main-content">
+      <div id="updateBanner" class="update-banner" role="status" hidden>
+        <span id="updateBannerMessage"></span>
+        <button type="button" id="updateInstallBtn" hidden>Redémarrer et installer</button>
       </div>
-      <section>
-        <label class="toggle"><input id="autoLaunch" type="checkbox"> Lancer automatiquement avec Windows</label>
-        <div id="message" role="status"></div>
-        <button type="submit" id="saveBtn">Enregistrer et redémarrer</button>
-      </section>
-    </form>
-  </main>
+
+      <form id="config" class="app-form">
+        <div class="header-bar">
+          <div>
+            <h2 id="pageTitle"></h2>
+            <p id="pageDescription"></p>
+          </div>
+        </div>
+
+        <div class="page-scroll">
+          <section class="page" data-page="connexion">
+            <div class="pairing">
+              <button type="button" id="pairBtn" class="primary">Lier ce compagnon</button>
+              <div id="pairCode" class="pair-code" hidden>
+                <p class="pair-code-value" id="pairCodeValue"></p>
+                <p>Va sur ta console Klixa, Paramètres puis Compagnon, et entre ce code.</p>
+                <p id="pairCodeTimer"></p>
+              </div>
+              <p id="pairMessage" role="status"></p>
+            </div>
+          </section>
+
+          <section class="page" data-page="obs">
+            <div class="section-head">
+              <p class="integration-status status-line" data-integration="obs">
+                <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+                <span></span>
+              </p>
+            </div>
+            <label class="toggle switch-row"><input name="OBS_ENABLED" type="checkbox"><span class="switch-label-text">Activer OBS</span></label>
+            <div class="row"><label>IP ou hôte<input name="OBS_WS_HOST" placeholder="127.0.0.1"></label><label>Port<input name="OBS_WS_PORT" type="number" min="1" max="65535" placeholder="4455"></label></div>
+            <label>Mot de passe<input name="OBS_WS_PASSWORD" id="obsWsPassword" type="password" autocomplete="new-password"></label>
+            <button type="button" id="obsConnectionBtn">Connecter</button>
+          </section>
+
+          <section class="page" data-page="streamerbot">
+            <div class="section-head">
+              <p class="integration-status status-line" data-integration="streamerbot">
+                <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+                <span></span>
+              </p>
+            </div>
+            <label class="toggle switch-row"><input name="SB_ENABLED" type="checkbox"><span class="switch-label-text">Activer Streamer.bot</span></label>
+            <div class="row"><label>Hôte<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
+            <label>Mot de passe<input name="SB_PASSWORD" id="sbPassword" type="password" autocomplete="new-password"></label>
+            <button type="button" id="streamerbotConnectionBtn">Connecter</button>
+          </section>
+
+          <section class="page" id="section-smoke" data-page="smoke">
+            <div class="section-head">
+              <p class="integration-status status-line" data-integration="smoke">
+                <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+                <span></span>
+              </p>
+            </div>
+            <label class="toggle switch-row"><input name="SMOKE_ENABLED" type="checkbox"><span class="switch-label-text">Activer la machine à fumée</span></label>
+            <div class="row"><label>IP ou hôte<input name="SMOKE_SERVICE_HOST" id="smokeServiceHost" placeholder="192.168.1.50"></label><label>Port<input name="SMOKE_SERVICE_PORT" type="number" min="1" max="65535" placeholder="8787"></label></div>
+            <label>Token du service<input name="SMOKE_SERVICE_TOKEN" id="smokeServiceToken" type="password" autocomplete="new-password"></label>
+            <button type="button" id="smokeConnectionBtn">Connecter</button>
+          </section>
+
+          <section class="page" data-page="hue">
+            <div class="section-head">
+              <p id="hueStatus" class="integration-status status-line">
+                <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+                <span></span>
+              </p>
+            </div>
+            <label class="toggle switch-row"><input name="HUE_ENABLED" type="checkbox"><span class="switch-label-text">Activer Hue</span></label>
+            <div class="row"><label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label>Port<input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
+            <button type="button" id="huePairBtn">Appairer (presser le bouton du bridge avant)</button>
+            <button type="button" id="hueUnpairBtn" class="secondary-button disconnect-btn" hidden>Déconnecter</button>
+            <p id="hueMessage" role="status"></p>
+          </section>
+
+          <section class="page" data-page="smallrig">
+            <div class="section-head">
+              <p id="smallrigStatus" class="integration-status status-line">
+                <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
+                <span></span>
+              </p>
+            </div>
+            <label class="toggle switch-row"><input name="SMALLRIG_ENABLED" type="checkbox"><span class="switch-label-text">Activer les lampes SmallRig</span></label>
+            <p class="field-hint">Le Bluetooth doit être activé sur cette machine. Rapproche les lampes et mets-les sous tension avant de scanner.</p>
+            <button type="button" id="smallrigScanBtn">Scanner les lampes à proximité</button>
+            <ul id="smallrigFound" class="lamp-list"></ul>
+            <h3>Lampes appairées</h3>
+            <ul id="smallrigPaired" class="lamp-list"></ul>
+            <p id="smallrigMessage" role="status"></p>
+          </section>
+        </div>
+
+        <div class="footer-bar">
+          <label class="toggle switch-row"><input id="autoLaunch" type="checkbox"><span class="switch-label-text">Lancer automatiquement avec Windows</span></label>
+          <div id="message" role="status"></div>
+          <button type="submit" id="saveBtn" class="primary">Enregistrer et redémarrer</button>
+        </div>
+      </form>
+    </main>
+  </div>
   <script src="renderer.js"></script>
 </body>
 </html>

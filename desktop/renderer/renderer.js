@@ -9,9 +9,7 @@ const pairCode = document.querySelector('#pairCode');
 const pairCodeValue = document.querySelector('#pairCodeValue');
 const pairCodeTimer = document.querySelector('#pairCodeTimer');
 const pairMessage = document.querySelector('#pairMessage');
-const pairingSection = document.querySelector('#pairingSection');
-const integrations = document.querySelector('#integrations');
-const smokeSection = document.querySelector('#section-smoke');
+const navSmoke = document.querySelector('#navSmoke');
 const disconnectBtn = document.querySelector('#disconnectBtn');
 const updateBanner = document.querySelector('#updateBanner');
 const updateBannerMessage = document.querySelector('#updateBannerMessage');
@@ -70,6 +68,57 @@ const secretFields = [
 const ICON_CHECK = 'M256 512a256 256 0 1 1 0-512 256 256 0 1 1 0 512zM374 145.7c-10.7-7.8-25.7-5.4-33.5 5.3L221.1 315.2 169 263.1c-9.4-9.4-24.6-9.4-33.9 0s-9.4 24.6 0 33.9l72 72c5 5 11.8 7.5 18.8 7s13.4-4.1 17.5-9.8L379.3 179.2c7.8-10.7 5.4-25.7-5.3-33.5z';
 const ICON_WARNING = 'M256 0c14.7 0 28.2 8.1 35.2 21l216 400c6.7 12.4 6.4 27.4-.8 39.5S486.1 480 472 480L40 480c-14.1 0-27.2-7.4-34.4-19.5s-7.5-27.1-.8-39.5l216-400c7-12.9 20.5-21 35.2-21zm0 352a32 32 0 1 0 0 64 32 32 0 1 0 0-64zm0-192c-18.2 0-32.7 15.5-31.4 33.7l7.4 104c.9 12.5 11.4 22.3 23.9 22.3 12.6 0 23-9.7 23.9-22.3l7.4-104c1.3-18.2-13.1-33.7-31.4-33.7z';
 
+// Navigation en pages dediees (une section = une page), a la place de l'ancien
+// empilement vertical unique. Le formulaire #config reste UNIQUE et englobe toutes
+// les pages : masquer une page via [hidden] ne retire pas ses champs de FormData,
+// donc "Enregistrer" (barre persistante en bas) sauvegarde toujours l'integralite
+// de la config, quelle que soit la page affichee.
+const pageTitle = document.querySelector('#pageTitle');
+const pageDescription = document.querySelector('#pageDescription');
+const navButtons = new Map(
+  [...document.querySelectorAll('.config-button[data-page]')].map((el) => [el.dataset.page, el])
+);
+const pageSections = new Map(
+  [...document.querySelectorAll('.page[data-page]')].map((el) => [el.dataset.page, el])
+);
+const PAGE_META = {
+  connexion: { title: 'Connexion Klixa', description: 'Lie ce compagnon à ta console Klixa.' },
+  obs: { title: 'OBS', description: 'Contrôle OBS Studio via obs-websocket.' },
+  streamerbot: { title: 'Streamer.bot', description: 'Déclenche des actions Streamer.bot.' },
+  smoke: { title: 'Machine à fumée', description: 'Pilote la machine à fumée de la régie.' },
+  hue: { title: 'Philips Hue', description: 'Contrôle les lumières via le bridge Hue.' },
+  smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' }
+};
+let activePage = 'connexion';
+
+function setActivePage(id) {
+  if (!pageSections.has(id)) return;
+  activePage = id;
+  for (const [pid, section] of pageSections) section.hidden = pid !== id;
+  for (const [pid, btn] of navButtons) btn.classList.toggle('active', pid === id);
+  const meta = PAGE_META[id];
+  pageTitle.textContent = meta.title;
+  pageDescription.textContent = meta.description;
+}
+
+// Tant que le compagnon n'est pas lie a une console Klixa, les pages d'integration
+// n'ont rien a configurer de fonctionnel (rien a connecter) : on les grise dans le
+// menu et on force le retour sur la page Connexion.
+function setNavLocked(locked) {
+  for (const [pid, btn] of navButtons) {
+    if (pid === 'connexion') continue;
+    btn.disabled = locked;
+  }
+  if (locked) setActivePage('connexion');
+  else if (activePage === 'connexion') setActivePage('obs');
+}
+
+for (const [pid, btn] of navButtons) {
+  btn.addEventListener('click', () => setActivePage(pid));
+}
+
+setActivePage('connexion');
+
 let lastStatus = { running: false, message: 'Démarrage...' };
 let lastCloudStatus = { connected: false, features: {} };
 let lastConfig = {};
@@ -91,17 +140,16 @@ function renderStatus(status) {
   renderHeaderStatus();
 }
 
-// Le panneau pairing/integrations se base sur la config PERSISTEE (CLOUD_WS_URL
-// present ou non), pas sur le statut WS live : sauver la config ou appairer Hue
-// redemarre tout le runtime (donc coupe puis rouvre la liaison cloud un instant), et
-// piloter la visibilite des sections sur ce flottement faisait sauter toute la page
-// en haut a chaque sauvegarde. Le statut live (cloud:status) reste reserve au texte
-// du header et aux features tenant (ex. machine a fumee).
+// Le verrouillage du menu se base sur la config PERSISTEE (CLOUD_WS_URL present ou
+// non), pas sur le statut WS live : sauver la config ou appairer Hue redemarre tout
+// le runtime (donc coupe puis rouvre la liaison cloud un instant), et piloter le menu
+// sur ce flottement aurait fait sauter la page active a chaque sauvegarde. Le statut
+// live (cloud:status) reste reserve au texte du header et aux features tenant (ex.
+// machine a fumee).
 function renderPairingUi() {
   const linked = Boolean(lastConfig.CLOUD_WS_URL);
-  pairingSection.hidden = linked;
-  integrations.hidden = !linked;
   disconnectBtn.hidden = !linked;
+  setNavLocked(!linked);
 }
 
 function renderHueUi() {
@@ -487,7 +535,9 @@ window.klixa.onUpdateStatus(renderUpdateStatus);
 
 function renderCloudStatus(cloudStatus) {
   lastCloudStatus = cloudStatus || { connected: false, features: {} };
-  smokeSection.hidden = !(lastCloudStatus.connected && lastCloudStatus.features?.smoke === true);
+  const smokeAvailable = Boolean(lastCloudStatus.connected && lastCloudStatus.features?.smoke === true);
+  navSmoke.hidden = !smokeAvailable;
+  if (!smokeAvailable && activePage === 'smoke') setActivePage('connexion');
   renderHeaderStatus();
 }
 

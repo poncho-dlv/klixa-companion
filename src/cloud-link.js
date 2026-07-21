@@ -72,7 +72,28 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
   let attempt = 0;
   let reconnectTimer = null;
   let stopHeartbeat = null;
+  let disconnectTimer = null;
   const commandDeduplicator = createCommandDeduplicator();
+
+  // Une coupure suivie d'une reconnexion réussie avant ce délai reste invisible pour
+  // l'UI (évite que les sections pilotées par cloudStatus.features, ex. machine à
+  // fumée, clignotent affiché/masqué à chaque tentative pendant le backoff initial).
+  function notifyConnected(status) {
+    if (disconnectTimer) {
+      clearTimeout(disconnectTimer);
+      disconnectTimer = null;
+    }
+    onCloudStatus(status);
+  }
+
+  function notifyDisconnectedSoon() {
+    if (disconnectTimer) return;
+    disconnectTimer = setTimeout(() => {
+      disconnectTimer = null;
+      onCloudStatus({ connected: false, features: {} });
+    }, config.reconnect.minDelayMs);
+    disconnectTimer.unref?.();
+  }
 
   function scheduleReconnect() {
     if (stopped) return;
@@ -107,7 +128,7 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
     // porte les features tenant — ex. machine à fumée — pour que l'app desktop n'affiche
     // que les intégrations effectivement autorisées).
     if (msg.type === 'connected') {
-      onCloudStatus({ connected: true, features: msg.features && typeof msg.features === 'object' ? msg.features : {} });
+      notifyConnected({ connected: true, features: msg.features && typeof msg.features === 'object' ? msg.features : {} });
       return;
     }
     if (msg.type !== 'command') return;
@@ -166,7 +187,7 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
       stopHeartbeat = null;
       const detail = reason?.toString() || '';
       log.warn(`Liaison cloud fermée${code ? ` (code ${code}${detail ? ` : ${detail}` : ''})` : ''}`);
-      onCloudStatus({ connected: false, features: {} });
+      notifyDisconnectedSoon();
       scheduleReconnect();
     });
     ws.on('error', (err) => {
@@ -184,6 +205,8 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
     stopped = true;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null;
+    if (disconnectTimer) clearTimeout(disconnectTimer);
+    disconnectTimer = null;
     stopHeartbeat?.();
     stopHeartbeat = null;
     if (!ws || ws.readyState === WebSocket.CLOSED) return Promise.resolve();
