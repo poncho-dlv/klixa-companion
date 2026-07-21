@@ -599,6 +599,15 @@ export function createMeshClient({
   }
 
   let ensureProxyPromise = null;
+  // Dernier candidat Proxy avec lequel une session a réussi (mémoire process
+  // uniquement). Permet une reconnexion DIRECTE après une coupure (drop GATT,
+  // closeOnTimeout d'une lecture) sans re-payer le pré-scan de 8 s : le worker de
+  // session refait de toute façon son propre scan ciblé sur cette identité (RPA-safe,
+  // matching par Network ID, cf. ble-session-worker.js#selectProxyTargets). Candidat
+  // périmé (lampe éteinte/reset) = échec de connexion → invalidé, repli sur le scan
+  // complet ci-dessous. Jamais persisté : au redémarrage du compagnon, premier
+  // établissement par scan complet comme avant.
+  let lastGoodProxyCandidate = null;
 
   async function ensureProxySession() {
     if (proxySession?.connected) return proxySession;
@@ -612,6 +621,32 @@ export function createMeshClient({
     return ensureProxyPromise;
   }
 
+  async function connectProxyCandidate(candidate) {
+    const state = getState();
+    const netKeys = netKeysFor(state);
+    const sessionRef = { feed: () => {} };
+    const conn = await openProxyConnection(candidate.device, { onData: (bytes) => sessionRef.feed(bytes) });
+    try {
+      const provisionerAddress = forcedProvisionerAddress ?? state.provisionerAddress;
+      const session = createProxySession({
+        conn,
+        netKeys,
+        ivIndex: state.ivIndex,
+        provisionerAddress,
+        seqAllocatorFactory: seqAllocator
+      });
+      sessionRef.feed = session.feed;
+      await session.configureProxyFilter([provisionerAddress]);
+      proxyConn = conn;
+      proxySession = session;
+      lastGoodProxyCandidate = candidate;
+      return session;
+    } catch (err) {
+      try { await conn.close(); } catch { /* connexion déjà fermée */ }
+      throw err;
+    }
+  }
+
   async function establishProxySession() {
     const state = getState();
     if (proxySession?.connected) return proxySession;
@@ -619,6 +654,19 @@ export function createMeshClient({
 
     if (state.nodes.length === 0) throw new Error('Aucune lampe provisionnée');
     const netKeys = netKeysFor(state);
+
+    // Fast-path : reconnexion directe au dernier Proxy connu, sans pré-scan (cf.
+    // commentaire de lastGoodProxyCandidate). L'authenticité réseau reste garantie
+    // par le déchiffrement mesh (mauvais réseau = configureProxyFilter échoue).
+    if (lastGoodProxyCandidate) {
+      const candidate = lastGoodProxyCandidate;
+      try {
+        return await connectProxyCandidate(candidate);
+      } catch (err) {
+        lastGoodProxyCandidate = null;
+        log.warn('Reconnexion directe au dernier Proxy connu échouée, re-scan complet', err.message);
+      }
+    }
 
     // Fenêtre >= 6s : en dessous, le scan manque souvent les annonces exploitables
     // (les premiers paquets publicitaires d'un appareil sont parfois incomplets —
@@ -638,26 +686,7 @@ export function createMeshClient({
     let lastError;
     for (const candidate of proxyCandidates) {
       try {
-        const sessionRef = { feed: () => {} };
-        const conn = await openProxyConnection(candidate.device, { onData: (bytes) => sessionRef.feed(bytes) });
-        try {
-          const provisionerAddress = forcedProvisionerAddress ?? state.provisionerAddress;
-          const session = createProxySession({
-            conn,
-            netKeys,
-            ivIndex: state.ivIndex,
-            provisionerAddress,
-            seqAllocatorFactory: seqAllocator
-          });
-          sessionRef.feed = session.feed;
-          await session.configureProxyFilter([provisionerAddress]);
-          proxyConn = conn;
-          proxySession = session;
-          return session;
-        } catch (err) {
-          try { await conn.close(); } catch { /* connexion déjà fermée */ }
-          throw err;
-        }
+        return await connectProxyCandidate(candidate);
       } catch (err) {
         lastError = err;
         log.warn('Connexion Proxy échouée sur un candidat, essai suivant', err.message);

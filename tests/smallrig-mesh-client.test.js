@@ -316,6 +316,7 @@ test('mesh-client : découverte, provisioning, configuration et commande HSI de 
   const persisted = [];
   let persistenceError = null;
   let advertisementScanCount = 0;
+  let failNextProxyOpen = false;
 
   // getState()/persistState() doivent partager le MÊME objet mutable entre appels au
   // sein d'une opération (ex. ensureNetworkKeys puis addNode dans provision()).
@@ -340,7 +341,13 @@ test('mesh-client : découverte, provisioning, configuration et commande HSI de 
       return [{ bleDeviceId: 'lamp-1', kind: 'provisioned', networkId: lamp.networkId, device: lamp, rssi: -50, name: null }];
     },
     openProvisioningConnection: async (device, { onData }) => device.openProvisioningLink(onData),
-    openProxyConnection: async (device, { onData }) => device.openProxyLink(onData),
+    openProxyConnection: async (device, { onData }) => {
+      if (failNextProxyOpen) {
+        failNextProxyOpen = false;
+        throw new Error('connexion Proxy simulée en échec');
+      }
+      return device.openProxyLink(onData);
+    },
     waitForProxyAdvertisement: async () => {
       assert.equal(lamp._state.provisioningClosing, false, 'la déconnexion PB-GATT doit être attendue avant le rescan Proxy');
       assert.equal(lamp._state.provisioningCloseComplete, true);
@@ -395,6 +402,22 @@ test('mesh-client : découverte, provisioning, configuration et commande HSI de 
 
   await client.setPower([provisioned.uuid], { on: false, level: 50 });
   assert.equal(lamp._state.lastLqFrame.toString('hex'), '4202fcfc00', 'OFF doit primer sur level');
+
+  // Fast-path de reconnexion : après une coupure de session, le dernier candidat
+  // Proxy connu est retenté DIRECTEMENT, sans nouveau pré-scan de 8 s.
+  const scansBeforeReconnect = advertisementScanCount;
+  await client.stop();
+  const reconnectResults = await client.setHsi([provisioned.uuid], { hue: 5, sat: 5, intensity: 5 });
+  assert.equal(reconnectResults[0].ok, true);
+  assert.equal(advertisementScanCount, scansBeforeReconnect, 'reconnexion directe attendue, sans nouveau scan');
+
+  // Candidat mémorisé périmé (échec de connexion) : repli sur le scan complet, qui
+  // doit aboutir sur le même réseau.
+  await client.stop();
+  failNextProxyOpen = true;
+  const fallbackResults = await client.setHsi([provisioned.uuid], { hue: 6, sat: 6, intensity: 6 });
+  assert.equal(fallbackResults[0].ok, true);
+  assert.equal(advertisementScanCount, scansBeforeReconnect + 1, 'repli sur un scan complet après échec du candidat mémorisé');
 
   liveState.seqAllocatedUpTo = liveState.seq;
   persistenceError = new Error('réservation non durable');

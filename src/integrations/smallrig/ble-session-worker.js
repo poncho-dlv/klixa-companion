@@ -87,7 +87,17 @@ async function closeConnection() {
 
 async function openSession({ mode, selector, scanTimeoutMs }) {
   await closeConnection();
-  const lamps = await scanForLampAdvertisementsInProcess({ timeoutMs: scanTimeoutMs });
+  // Sortie anticipée (mode Proxy uniquement) : dès qu'une lampe provisionnée du
+  // Network ID ciblé est vue, inutile d'attendre la fin de la fenêtre — n'importe
+  // quel Proxy du même réseau relaie les messages mesh (cf. selectProxyTargets).
+  // Jamais sur une annonce Node Identity (réseau non vérifiable avant connexion) ni
+  // en mode provisioning (opération manuelle rare, on garde la fenêtre complète pour
+  // fiabiliser la découverte).
+  const expectedNetworkId = normalizeHex(selector?.networkId);
+  const stopWhen = mode === 'proxy' && expectedNetworkId
+    ? (lamp) => lamp.kind === 'provisioned' && normalizeHex(lamp.networkId) === expectedNetworkId
+    : undefined;
+  const lamps = await scanForLampAdvertisementsInProcess({ timeoutMs: scanTimeoutMs, stopWhen });
   // SmallGoGo laisse elle aussi retomber le watcher avant connectGatt. Ce repos est
   // exécuté dans le worker (jamais sur le thread UI Electron) et évite que WinRT voie
   // encore le scan actif au moment d'ouvrir la session GATT.

@@ -109,7 +109,15 @@ export function parseLampAdvertisement(device) {
 // processus) ; l'écran "Scanner" de l'UI passe par `scanForLampAdvertisements`
 // ci-dessous, qui isole cet appel dans un processus séparé avec un timeout dur — voir
 // ble-scan-worker.js pour le pourquoi.
-export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, adapterIndex } = {}) {
+// `stopWhen` (optionnel) : prédicat appelé sur chaque annonce de lampe parsée — s'il
+// retourne true, le scan s'arrête immédiatement au lieu d'attendre la fin de la
+// fenêtre `timeoutMs` (qui n'est alors qu'un plafond). Utilisé par le worker de
+// session Proxy pour se reconnecter à une cible déjà connue sans payer les 8 s
+// pleines du scan à chaque coupure GATT. Le prédicat ne reçoit que des annonces
+// COMPLÈTES (parseLampAdvertisement a déjà exigé les Service Data exploitables) ;
+// l'arrêt passe par le même `cancelRequest()` que le chemin nominal, la contrainte
+// « jamais scan + connect concurrents » (SimpleBLE/WinRT) reste respectée.
+export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, adapterIndex, stopWhen } = {}) {
   // Import volontairement local. En desktop, ce module est aussi chargé par le
   // processus principal Electron : charger l'addon SimpleBLE à ce niveau y ferait
   // exécuter ses appels WinRT synchrones sur le thread UI/COM STA. Cette fonction
@@ -122,6 +130,13 @@ export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, ada
     : availableAdapters.find((adapter) => adapter.active) || availableAdapters[0];
   if (!selectedAdapter) throw new Error('Aucun adaptateur Bluetooth disponible');
 
+  let stopRequested = false;
+  let resolveScanWait = null;
+  const requestEarlyStop = () => {
+    stopRequested = true;
+    resolveScanWait?.();
+  };
+
   const bt = new Bluetooth({
     // Large marge côté lib : on n'attend jamais son propre timeout (cf. ci-dessus),
     // c'est notre `setTimeout` + `cancelRequest()` plus bas qui pilote la durée réelle.
@@ -131,7 +146,14 @@ export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, ada
     adapterIndex: selectedAdapter.index,
     deviceFound: (device) => {
       const advertisement = parseLampAdvertisement(device);
-      if (advertisement) found.set(device.id, advertisement);
+      if (advertisement) {
+        found.set(device.id, advertisement);
+        if (stopWhen && !stopRequested) {
+          try {
+            if (stopWhen(advertisement)) requestEarlyStop();
+          } catch { /* prédicat best-effort : ne jamais casser le scan */ }
+        }
+      }
       return false;
     }
   });
@@ -158,7 +180,13 @@ export async function scanForLampAdvertisementsInProcess({ timeoutMs = 6000, ada
     }
   });
 
-  await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  await new Promise((resolve) => {
+    if (stopRequested) return resolve();
+    const timer = setTimeout(resolve, timeoutMs);
+    // clearTimeout à la résolution anticipée : timer inoffensif sinon, mais autant ne
+    // pas laisser traîner un handle dans un worker à durée de vie courte.
+    resolveScanWait = () => { clearTimeout(timer); resolve(); };
+  });
   try {
     await bt.cancelRequest();
   } catch (err) {

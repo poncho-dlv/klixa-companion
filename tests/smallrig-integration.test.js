@@ -1,6 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertLightCommandResults, createSmallrigIntegration } from '../src/integrations/smallrig/index.js';
+import { assertLightCommandResults, createSmallrigIntegration, mergeBaseline } from '../src/integrations/smallrig/index.js';
+
+test('mergeBaseline conserve la dernière couleur écrite à travers un power off/on', () => {
+  const afterColor = mergeBaseline(undefined, { status: { type: 'hsi', hue: 10, sat: 50, intensity: 80 }, poweredOn: true });
+  const afterOff = mergeBaseline(afterColor, { poweredOn: false });
+  assert.deepEqual(afterOff, { status: { type: 'hsi', hue: 10, sat: 50, intensity: 80 }, poweredOn: false });
+  const afterOn = mergeBaseline(afterOff, { poweredOn: true });
+  assert.deepEqual(afterOn, { status: { type: 'hsi', hue: 10, sat: 50, intensity: 80 }, poweredOn: true });
+});
+
+test('mergeBaseline sans antécédent part d\'une lampe allumée sans mode connu', () => {
+  assert.deepEqual(mergeBaseline(undefined, { poweredOn: false }), { status: null, poweredOn: false });
+  assert.deepEqual(
+    mergeBaseline(null, { status: { type: 'fx', mode: 4, freq: 0, intensity: 0 } }),
+    { status: { type: 'fx', mode: 4, freq: 0, intensity: 0 }, poweredOn: true }
+  );
+});
+
+test('smallrig.color mode simple rejette immédiatement une lampe inconnue (pré-validation avant le blink asynchrone)', async () => {
+  const integration = createSmallrigIntegration();
+
+  await assert.rejects(
+    integration.commands['smallrig.color']({ lightIds: ['unknown'], color: '#FF0000', mode: 'simple' }),
+    /Lampes inconnues/
+  );
+});
 
 test('smallrig agrège les résultats réussis de toutes les lampes', () => {
   const summary = assertLightCommandResults('Couleur', ['one', 'two'], [

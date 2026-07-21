@@ -44,6 +44,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Fusion d'un patch de baseline avec l'état précédent d'une lampe (pur, testé) :
+// `status` et `poweredOn` évoluent indépendamment (un power off ne doit pas oublier
+// la dernière couleur écrite, un changement de couleur implique poweredOn true).
+export function mergeBaseline(previous, patch) {
+  const base = previous || { status: null, poweredOn: true };
+  return {
+    status: patch.status !== undefined ? patch.status : base.status,
+    poweredOn: patch.poweredOn !== undefined ? patch.poweredOn : base.poweredOn
+  };
+}
+
 export function assertLightCommandResults(command, lightIds, batches) {
   const results = batches.flatMap((batch) => Array.isArray(batch) ? batch : [batch]).filter(Boolean);
   const failures = results.filter((result) => result.ok !== true);
@@ -121,9 +132,42 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     if (lightIds.length > maxLamps) throw new Error(`Trop de lampes ciblées (${lightIds.length}, maximum ${maxLamps})`);
   }
 
-  async function executeForLights(command, lightIds, operation) {
+  // Baseline logicielle par lampe : dernier état ÉCRIT par le compagnon (couleur/CCT/
+  // RGBW/FX/alimentation), utilisé comme snapshot de restauration du blink à la place
+  // d'un aller-retour BLE mesh par lampe (2 lectures × 1,2 s de timeout, toutes
+  // sérialisées par la chaîne d'opérations du mesh-client — c'était la latence
+  // principale avant la première impulsion d'une alerte, cf. audit 2026-07-21).
+  // Bonus : deux blinks qui se chevauchent restaurent tous deux la baseline PRÉ-blink
+  // au lieu que le second « capture » l'état d'alerte du premier (même classe de bug
+  // que les lampes Hue bloquées, corrigée côté file d'alertes Klixa).
+  // Compromis assumé : un état changé HORS compagnon (app SmallGoGo, boutons de la
+  // lampe) après notre dernière écriture sera restauré sur notre baseline, pas sur
+  // l'état physique courant. La lecture BLE ne subsiste qu'en repli, au plus une fois
+  // par lampe et par session du compagnon (résultat mis en cache même vide : même
+  // restauration best-effort qu'avant, sans re-payer les timeouts à chaque blink).
+  const baselineByUuid = new Map();
+
+  function recordBaseline(lightIds, patch) {
+    for (const uuid of lightIds) {
+      baselineByUuid.set(uuid, mergeBaseline(baselineByUuid.get(uuid), patch));
+    }
+  }
+
+  // `baselinePatch` (optionnel) : état à mémoriser pour chaque lampe dont la commande
+  // a réussi — y compris en cas d'échec partiel (finally), puisque les lampes OK ont
+  // bien changé d'état.
+  async function executeForLights(command, lightIds, operation, baselinePatch) {
     const batches = await mapWithConcurrency(lightIds, requestConcurrency, operation);
-    return assertLightCommandResults(command, lightIds, batches);
+    try {
+      return assertLightCommandResults(command, lightIds, batches);
+    } finally {
+      if (baselinePatch) {
+        const okIds = batches.flatMap((batch) => Array.isArray(batch) ? batch : [batch])
+          .filter((result) => result?.ok === true)
+          .map((result) => result.uuid);
+        recordBaseline(okIds, baselinePatch);
+      }
+    }
   }
 
   // smallrig.discover — scanne localement les lampes RM75 à proximité
@@ -195,6 +239,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const uuid = String(payload.uuid || '').trim();
     if (!uuid) throw new Error('uuid manquant');
     const result = await client.forget({ uuid, forceLocal: payload.forceLocal === true });
+    if (result.removed) baselineByUuid.delete(uuid);
     log.info('Lampe oubliée', { uuid, removed: result.removed });
     return result;
   }
@@ -221,10 +266,29 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const mode = String(payload.mode || payload.smallrigMode || '').trim().toLowerCase();
 
     if (mode === 'simple') {
-      await blink(lightIds, { hue, sat, intensity, durationMs });
-    } else {
-      await executeForLights('Commande couleur', lightIds, (uuid) => client.setHsi([uuid], { hue, sat, intensity }));
+      // Blink en ARRIÈRE-PLAN, ack immédiat : le hub Klixa timeout ses commandes à
+      // 8 s — attendre ici la fin du blink (impulsions durationMs + restauration)
+      // faisait mécaniquement expirer le bouton « Tester » alors que la lampe
+      // finissait par clignoter. Pré-validation synchrone légère (lampes connues)
+      // pour que ces erreurs-là partent quand même dans l'ack ; les échecs
+      // d'exécution ne sont visibles que dans le journal (même contrat que le chemin
+      // d'alerte, déjà fire-and-forget côté orchestrateur Klixa).
+      const known = new Set(client.listNodes().map((node) => node.uuid));
+      const unknown = lightIds.filter((id) => !known.has(id));
+      if (unknown.length > 0) throw new Error(`Lampes inconnues ou non provisionnées : ${unknown.join(', ')}`);
+      blink(lightIds, { hue, sat, intensity, durationMs }).catch((err) => {
+        log.warn('Clignotement SmallRig en échec', err?.message || String(err));
+      });
+      log.info('Clignotement lancé', { lights: lightIds.length, color: hex, durationMs });
+      return { lights: lightIds.length, color: hex, accepted: true };
     }
+
+    await executeForLights(
+      'Commande couleur',
+      lightIds,
+      (uuid) => client.setHsi([uuid], { hue, sat, intensity }),
+      { status: { type: 'hsi', hue, sat, intensity }, poweredOn: true }
+    );
 
     log.info('Commande couleur envoyée', { lights: lightIds.length, color: hex, mode: mode || 'steady' });
     return { lights: lightIds.length, color: hex };
@@ -237,6 +301,11 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   // lampe et le repli sur `null` (restauré en simple rallumage, comportement d'avant
   // cette fonctionnalité) si la lecture échoue.
   async function snapshotLightState(uuid) {
+    // Baseline connue = zéro I/O BLE avant la première impulsion (cf. commentaire de
+    // baselineByUuid). Le repli lecture ne se paye qu'une fois par lampe.
+    const cached = baselineByUuid.get(uuid);
+    if (cached) return cached;
+
     const [status, capacity] = await Promise.all([
       client.readStatus(uuid, SNAPSHOT_READ_OPTIONS).catch((err) => {
         log.warn(`Snapshot SmallRig : lecture du mode impossible pour ${uuid}`, err.message);
@@ -247,7 +316,9 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
         return null;
       })
     ]);
-    return { status, poweredOn: capacity?.poweredOn };
+    const snapshot = { status, poweredOn: capacity?.poweredOn };
+    baselineByUuid.set(uuid, snapshot);
+    return snapshot;
   }
 
   // Réapplique l'état capturé par snapshotLightState. Si la lampe était éteinte, on se
@@ -328,7 +399,8 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const gm = clamp(payload.gm, -10, 10, 0);
 
     await executeForLights('Commande température de couleur', lightIds, (uuid) =>
-      client.setCct([uuid], { kelvin, intensity, gm }));
+      client.setCct([uuid], { kelvin, intensity, gm }),
+    { status: { type: 'cct', kelvin, intensity, gm }, poweredOn: true });
 
     log.info('Commande température de couleur envoyée', { lights: lightIds.length, kelvin, intensity, gm });
     return { lights: lightIds.length, kelvin, intensity, gm };
@@ -346,7 +418,8 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const b = clamp(payload.b, 0, 255, 0);
     const w = clamp(payload.w, 0, 255, 0);
 
-    await executeForLights('Commande RGBW', lightIds, (uuid) => client.setRgbw([uuid], { r, g, b, w }));
+    await executeForLights('Commande RGBW', lightIds, (uuid) => client.setRgbw([uuid], { r, g, b, w }),
+      { status: { type: 'rgbw', r, g, b, w }, poweredOn: true });
 
     log.info('Commande RGBW envoyée', { lights: lightIds.length, r, g, b, w });
     return { lights: lightIds.length, r, g, b, w };
@@ -360,7 +433,10 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const level = payload.level ?? payload.brightness;
     const on = payload.on !== false;
     const normalizedLevel = on && Number.isFinite(Number(level)) ? clamp(level, 0, 100, undefined) : undefined;
-    await executeForLights('Commande alimentation', lightIds, (uuid) => client.setPower([uuid], { on, level: normalizedLevel }));
+    // Baseline : seul `poweredOn` bouge (le level ajuste la luminosité sans changer le
+    // mode couleur courant — la restauration ne réapplique de toute façon que le mode).
+    await executeForLights('Commande alimentation', lightIds, (uuid) => client.setPower([uuid], { on, level: normalizedLevel }),
+      { poweredOn: on });
     log.info('Commande alimentation envoyée', { lights: lightIds.length, on, level });
     return { lights: lightIds.length };
   }
@@ -379,8 +455,11 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const param1 = clamp(payload.param1, 0, 255, 0);
     const param2 = clamp(payload.param2, 0, 65535, 0);
 
+    // Forme alignée sur decodeStatus type 'fx' (freq/intensity), consommée telle
+    // quelle par restoreLightState.
     await executeForLights('Effet dynamique', lightIds, (uuid) =>
-      client.setFx([uuid], { mode, param1, param2 }));
+      client.setFx([uuid], { mode, param1, param2 }),
+    { status: { type: 'fx', mode, freq: param1, intensity: param2 }, poweredOn: true });
 
     log.info('Effet dynamique envoyé', { lights: lightIds.length, mode, param1, param2 });
     return { lights: lightIds.length, mode };
