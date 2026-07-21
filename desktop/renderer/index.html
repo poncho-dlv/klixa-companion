@@ -33,6 +33,9 @@
           <button type="button" class="config-button" data-page="hue">Philips Hue</button>
           <button type="button" class="config-button" data-page="smallrig">Lampes SmallRig</button>
         </div>
+        <div class="nav-group">
+          <button type="button" class="config-button" data-page="settings">Paramètres</button>
+        </div>
       </nav>
 
       <button type="button" id="disconnectBtn" class="secondary-button disconnect-btn" hidden>
@@ -53,6 +56,7 @@
             <h2 id="pageTitle"></h2>
             <p id="pageDescription"></p>
           </div>
+          <div id="message" role="status"></div>
         </div>
 
         <div class="page-scroll">
@@ -78,6 +82,7 @@
             <label class="toggle switch-row"><input name="OBS_ENABLED" type="checkbox"><span class="switch-label-text">Activer OBS</span></label>
             <div class="row"><label>IP ou hôte<input name="OBS_WS_HOST" placeholder="127.0.0.1"></label><label>Port<input name="OBS_WS_PORT" type="number" min="1" max="65535" placeholder="4455"></label></div>
             <label>Mot de passe<input name="OBS_WS_PASSWORD" id="obsWsPassword" type="password" autocomplete="new-password"></label>
+            <button type="submit" class="secondary-button page-save-btn" data-integration="obs">Enregistrer</button>
             <button type="button" id="obsConnectionBtn">Connecter</button>
           </section>
 
@@ -91,6 +96,7 @@
             <label class="toggle switch-row"><input name="SB_ENABLED" type="checkbox"><span class="switch-label-text">Activer Streamer.bot</span></label>
             <div class="row"><label>Hôte<input name="SB_HOST" placeholder="127.0.0.1"></label><label>Port<input name="SB_PORT" type="number" min="1" max="65535" placeholder="8080"></label></div>
             <label>Mot de passe<input name="SB_PASSWORD" id="sbPassword" type="password" autocomplete="new-password"></label>
+            <button type="submit" class="secondary-button page-save-btn" data-integration="streamerbot">Enregistrer</button>
             <button type="button" id="streamerbotConnectionBtn">Connecter</button>
           </section>
 
@@ -104,6 +110,7 @@
             <label class="toggle switch-row"><input name="SMOKE_ENABLED" type="checkbox"><span class="switch-label-text">Activer la machine à fumée</span></label>
             <div class="row"><label>IP ou hôte<input name="SMOKE_SERVICE_HOST" id="smokeServiceHost" placeholder="192.168.1.50"></label><label>Port<input name="SMOKE_SERVICE_PORT" type="number" min="1" max="65535" placeholder="8787"></label></div>
             <label>Token du service<input name="SMOKE_SERVICE_TOKEN" id="smokeServiceToken" type="password" autocomplete="new-password"></label>
+            <button type="submit" class="secondary-button page-save-btn" data-integration="smoke">Enregistrer</button>
             <button type="button" id="smokeConnectionBtn">Connecter</button>
           </section>
 
@@ -116,6 +123,7 @@
             </div>
             <label class="toggle switch-row"><input name="HUE_ENABLED" type="checkbox"><span class="switch-label-text">Activer Hue</span></label>
             <div class="row"><label>IP du bridge<input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label>Port<input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
+            <button type="submit" class="secondary-button page-save-btn" data-integration="hue">Enregistrer</button>
             <button type="button" id="huePairBtn">Appairer (presser le bouton du bridge avant)</button>
             <button type="button" id="hueUnpairBtn" class="secondary-button disconnect-btn" hidden>Déconnecter</button>
             <p id="hueMessage" role="status"></p>
@@ -129,6 +137,7 @@
               </p>
             </div>
             <label class="toggle switch-row"><input name="SMALLRIG_ENABLED" type="checkbox"><span class="switch-label-text">Activer les lampes SmallRig</span></label>
+            <button type="submit" class="secondary-button page-save-btn" data-integration="smallrig">Enregistrer</button>
             <p class="field-hint">Le Bluetooth doit être activé sur cette machine. Rapproche les lampes et mets-les sous tension avant de scanner.</p>
             <button type="button" id="smallrigScanBtn">Scanner les lampes à proximité</button>
             <ul id="smallrigFound" class="lamp-list"></ul>
@@ -136,12 +145,10 @@
             <ul id="smallrigPaired" class="lamp-list"></ul>
             <p id="smallrigMessage" role="status"></p>
           </section>
-        </div>
 
-        <div class="footer-bar">
-          <label class="toggle switch-row"><input id="autoLaunch" type="checkbox"><span class="switch-label-text">Lancer automatiquement avec Windows</span></label>
-          <div id="message" role="status"></div>
-          <button type="submit" id="saveBtn" class="primary">Enregistrer et redémarrer</button>
+          <section class="page" data-page="settings">
+            <label class="toggle switch-row"><input id="autoLaunch" type="checkbox"><span class="switch-label-text">Lancer automatiquement avec Windows</span></label>
+          </section>
         </div>
       </form>
     </main>

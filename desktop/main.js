@@ -273,9 +273,13 @@ function registerIpc() {
     }
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');
     store.save(next);
-    const nextRuntimeConfig = createConfig({ ...process.env, ...next, NODE_ENV: 'production' });
-    if (['obs', 'streamerbot', 'smoke'].includes(integrationId) && runtime?.reconfigureIntegration) {
-      await runtime.reconfigureIntegration(integrationId, nextRuntimeConfig);
+    // Chaque page a son propre bouton "Enregistrer" cible sur SON integration (cf.
+    // data-integration cote renderer) : un redemarrage complet du runtime n'est donc
+    // plus necessaire (il couperait la liaison cloud pour rien) des qu'on sait laquelle
+    // reconfigurer isolement. Reste sur restartRuntime seulement le pairing/disconnect
+    // (qui changent CLOUD_WS_URL/COMPANION_TOKEN eux-memes, hors de ce handler).
+    if (['obs', 'streamerbot', 'smoke', 'hue', 'smallrig'].includes(integrationId) && runtime?.reconfigureIntegration) {
+      await runtime.reconfigureIntegration(integrationId, buildRuntimeConfig(next));
     } else {
       await restartRuntime(next);
     }

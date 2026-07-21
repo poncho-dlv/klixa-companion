@@ -70,9 +70,12 @@ const ICON_WARNING = 'M256 0c14.7 0 28.2 8.1 35.2 21l216 400c6.7 12.4 6.4 27.4-.
 
 // Navigation en pages dediees (une section = une page), a la place de l'ancien
 // empilement vertical unique. Le formulaire #config reste UNIQUE et englobe toutes
-// les pages : masquer une page via [hidden] ne retire pas ses champs de FormData,
-// donc "Enregistrer" (barre persistante en bas) sauvegarde toujours l'integralite
-// de la config, quelle que soit la page affichee.
+// les pages (un bouton "Enregistrer" par page ne fait que declencher le meme submit
+// via son attribut form) : masquer une page via [hidden] ne retire pas ses champs de
+// FormData, donc chaque "Enregistrer" sauvegarde en realite l'integralite de la
+// config, quelle que soit la page affichee — sans consequence puisque les autres
+// pages refletent deja l'etat persiste tant qu'elles n'ont pas ete modifiees sans
+// sauvegarder.
 const pageTitle = document.querySelector('#pageTitle');
 const pageDescription = document.querySelector('#pageDescription');
 const navButtons = new Map(
@@ -87,7 +90,8 @@ const PAGE_META = {
   streamerbot: { title: 'Streamer.bot', description: 'Déclenche des actions Streamer.bot.' },
   smoke: { title: 'Machine à fumée', description: 'Pilote la machine à fumée de la régie.' },
   hue: { title: 'Philips Hue', description: 'Contrôle les lumières via le bridge Hue.' },
-  smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' }
+  smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' },
+  settings: { title: 'Paramètres', description: 'Réglages généraux du compagnon.' }
 };
 let activePage = 'connexion';
 
@@ -106,10 +110,10 @@ function setActivePage(id) {
 // menu et on force le retour sur la page Connexion.
 function setNavLocked(locked) {
   for (const [pid, btn] of navButtons) {
-    if (pid === 'connexion') continue;
+    if (pid === 'connexion' || pid === 'settings') continue;
     btn.disabled = locked;
   }
-  if (locked) setActivePage('connexion');
+  if (locked) { if (activePage !== 'settings') setActivePage('connexion'); }
   else if (activePage === 'connexion') setActivePage('obs');
 }
 
@@ -719,8 +723,13 @@ window.klixa.onPairingStatus(async (statusUpdate) => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = document.querySelector('#saveBtn');
-  button.disabled = true;
+  // Un bouton "Enregistrer" par page porte data-integration : ca cible directement
+  // l'integration a reconfigurer (cf. main.js) sans redemarrer tout le runtime (donc
+  // sans couper la liaison cloud). Le clic sur "Connecter" appelle form.requestSubmit()
+  // sans designer de submitter : on retombe alors sur pendingConnections, deja au
+  // courant de l'integration visee par ce flux-la.
+  const button = event.submitter;
+  if (button) button.disabled = true;
   message.className = '';
   message.textContent = 'Enregistrement...';
   const data = Object.fromEntries(new FormData(form));
@@ -733,7 +742,7 @@ form.addEventListener('submit', async (event) => {
   for (const field of secretFields) {
     if (field.input.dataset.masked === 'true') delete data[field.input.name];
   }
-  const integrationId = pendingConnections.size === 1 ? [...pendingConnections][0] : undefined;
+  const integrationId = button?.dataset.integration || (pendingConnections.size === 1 ? [...pendingConnections][0] : undefined);
   try {
     setForm(await window.klixa.saveConfig(data, integrationId));
     if (!obsEnabled.checked) pendingConnections.delete('obs');
@@ -747,6 +756,6 @@ form.addEventListener('submit', async (event) => {
     message.className = 'error';
     message.textContent = error.message;
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
   }
 });
