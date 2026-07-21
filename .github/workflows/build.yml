@@ -24,7 +24,9 @@ jobs:
 
   windows-installer:
     needs: test
-    runs-on: windows-latest
+    # Voir release.yml : windows-latest a basculé vers un MSVC trop récent pour
+    # <experimental/coroutine> (backend Windows de SimpleBLE).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

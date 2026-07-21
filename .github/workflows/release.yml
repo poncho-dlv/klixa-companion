@@ -15,7 +15,10 @@ permissions:
 
 jobs:
   publish-windows:
-    runs-on: windows-latest
+    # Epinglé (au lieu de windows-latest) : ce label a basculé vers une image avec un
+    # MSVC trop récent qui rejette le <experimental/coroutine> historique utilisé par
+    # le backend Windows de SimpleBLE (voir échec du run 29804850880).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
         with:
