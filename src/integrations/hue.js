@@ -241,12 +241,22 @@ export function createHueIntegration(hueConfig = {}) {
     if (lightIds.length === 0) throw new Error('Aucune lampe cible (lightIds vide)');
     if (lightIds.length > maxLights) throw new Error(`Trop de lampes ciblées (${lightIds.length}, maximum ${maxLights})`);
 
+    const transitionMs = clamp(payload.transitionMs ?? payload.hueTransitionMs, 0, 10000, DEFAULTS.transitionMs);
+
+    // Extinction steady (lampe hors du thème courant, cf. resolveThemeLightColors
+    // côté Klixa) : pas de couleur à valider, juste on:false — distinct du blink
+    // (mode:'simple'), qui pulse puis restaure l'état d'avant l'alerte.
+    if (payload.on === false) {
+      await forEachLight(lightIds, (id) => setLightOn(creds, id, false, transitionMs));
+      log.info('Lampes éteintes', { lights: lightIds.length });
+      return { lights: lightIds.length, on: false };
+    }
+
     const hex = String(payload.color || payload.hueColor || '').trim().toUpperCase();
     if (!isHexColor(hex)) throw new Error(`Couleur invalide: ${hex}`);
 
     const xy = hexToXy(hex);
     const brightness = clamp(payload.brightness ?? payload.hueBrightness, 1, 100, DEFAULTS.brightness);
-    const transitionMs = clamp(payload.transitionMs ?? payload.hueTransitionMs, 0, 10000, DEFAULTS.transitionMs);
     const durationMs = clamp(payload.durationMs ?? payload.hueDurationMs, 100, 60000, DEFAULTS.durationMs);
     const mode = String(payload.mode || payload.hueMode || '').trim().toLowerCase();
 
