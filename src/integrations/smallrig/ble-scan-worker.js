@@ -56,7 +56,7 @@ process.on('message', async (msg) => {
   if (!msg || msg.type !== 'scan') return;
   try {
     const found = await scanWithRejectionGuard(msg.timeoutMs);
-    const lamps = found.map(({ device, deviceUuid, networkId, ...rest }) => ({
+    const lamps = found.map(({ device: _device, deviceUuid, networkId, ...rest }) => ({
       ...rest,
       deviceUuid: deviceUuid ? deviceUuid.toString('hex') : undefined,
       networkId: networkId ? networkId.toString('hex') : undefined

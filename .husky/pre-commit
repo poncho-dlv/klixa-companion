@@ -1,0 +1,8 @@
+echo "[pre-commit] node --check src/index.js"
+node --check src/index.js || exit 1
+
+echo "[pre-commit] npm run lint"
+npm run lint || exit 1
+
+echo "[pre-commit] npm test"
+npm test || exit 1

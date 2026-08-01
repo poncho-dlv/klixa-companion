@@ -1,0 +1,18 @@
+{
+  "threshold": 2,
+  "reporters": ["console"],
+  "ignore": [
+    "node_modules/**",
+    "coverage/**",
+    "build/**",
+    "release/**",
+    "tests/**",
+    "docs/**",
+    "patches/**",
+    ".github/**",
+    "**/*.json",
+    "**/*.md"
+  ],
+  "absolute": false,
+  "gitignore": true
+}

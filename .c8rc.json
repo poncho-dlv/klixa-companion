@@ -1,0 +1,15 @@
+{
+  "reporter": ["text", "text-summary", "lcov"],
+  "exclude": [
+    "coverage/**",
+    "tests/**",
+    "scripts/**",
+    "desktop/renderer/**",
+    "node_modules/**"
+  ],
+  "check-coverage": true,
+  "clean": true,
+  "lines": 72,
+  "functions": 78,
+  "branches": 72
+}

@@ -1,0 +1,5 @@
+# Faux positifs vérifiés (triage du 2026-08-01, cf. gitleaks.exe detect -v) :
+# valeur d'exemple dans .env.example et token placeholder dans un exemple de
+# commande curl du README rpi/ — ni l'un ni l'autre n'est un secret réel.
+b914515f0d529ec610414f719f49ddb17eec2d6e:.env.example:generic-api-key:19
+b914515f0d529ec610414f719f49ddb17eec2d6e:rpi/README.md:curl-auth-header:45

@@ -17,7 +17,7 @@ import {
 import { createProxyPduReassembler, encodeProxyPdus, PROXY_PDU_TYPE } from '../src/integrations/smallrig/proxy-pdu.js';
 import { simulateDeviceSide } from '../src/integrations/smallrig/provisioning.js';
 import { decodeAccessOpcode, CONFIG_OPCODE, encodeConfigOpcode } from '../src/integrations/smallrig/config-messages.js';
-import { VENDOR_CID, VENDOR_SUBOPCODE_DATA } from '../src/integrations/smallrig/lq-protocol.js';
+import { VENDOR_SUBOPCODE_DATA } from '../src/integrations/smallrig/lq-protocol.js';
 
 // Simulateur minimal de firmware RM75 : implémente le rôle "device" du provisioning
 // (déjà couvert par simulateDeviceSide) PUIS le rôle "nœud mesh" côté Proxy — répond

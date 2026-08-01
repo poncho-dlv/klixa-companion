@@ -1,0 +1,39 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "scripts/*.mjs",
+    "tests/**/*.test.js",
+    "desktop/renderer/renderer.js",
+    "desktop/preload.cjs",
+    // Lancés via child_process.fork() avec un chemin construit dynamiquement
+    // (path.join, cf. ble-transport.js) : jamais importés statiquement, donc
+    // invisibles au graphe de knip sans être déclarés comme point d'entrée.
+    "src/integrations/smallrig/ble-scan-worker.js",
+    "src/integrations/smallrig/ble-session-worker.js"
+  ],
+  "project": [
+    "src/**/*.js",
+    "desktop/**/*.js",
+    "desktop/**/*.cjs",
+    "scripts/**/*.mjs",
+    "tests/**/*.js"
+  ],
+  "ignoreBinaries": ["where.exe"],
+  "rules": {
+    "files": "error",
+    "unresolved": "error",
+    "dependencies": "error",
+    "devDependencies": "error",
+    "unlisted": "error",
+    "exports": "warn",
+    "types": "warn",
+    "duplicates": "warn"
+  }
+  // exports/duplicates en warn (pas error) : triage du 2026-08-01, 19 des 20 "exports
+  // inutilisés" trouvés au premier run sont des primitives protocolaires (lq-protocol,
+  // provisioning, transport-layer, mesh-store — cf. RM75_protocole.md/RM75_SPEC_DEV.md)
+  // exportées comme surface d'API cohérente d'un module dont les fonctions sœurs SONT
+  // utilisées ailleurs (ex. decodeStatus/decodeCapacity utilisés à côté de clampInt/
+  // encodeControlFrame non importés) — volontairement gardées, pas du code mort. Le
+  // seul vrai cas mort (import VENDOR_CID non utilisé dans un test) a été corrigé.
+}

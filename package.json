@@ -20,9 +20,14 @@
     "build:webbluetooth:win": "node scripts/build-webbluetooth-win.mjs",
     "diagnose:smallrig:gatt": "node scripts/diagnose-smallrig-gatt.mjs",
     "test": "node --test",
+    "test:coverage": "c8 node --test",
+    "lint": "eslint .",
+    "knip": "knip",
+    "dup": "jscpd .",
     "smoke:webbluetooth": "node scripts/smoke-webbluetooth.mjs",
     "smoke:webbluetooth:packaged": "node scripts/smoke-packaged-webbluetooth.mjs",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "prepare": "husky"
   },
   "dependencies": {
     "@streamerbot/client": "^1.12.2",
@@ -34,8 +39,16 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "c8": "^12.0.0",
     "electron": "^39.8.5",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "eslint": "^10.8.0",
+    "eslint-plugin-no-unsanitized": "^4.1.5",
+    "eslint-plugin-sonarjs": "^4.2.0",
+    "globals": "^17.8.0",
+    "husky": "^9.1.7",
+    "jscpd": "^5.0.14",
+    "knip": "^6.31.0"
   },
   "build": {
     "appId": "live.klixa.companion",

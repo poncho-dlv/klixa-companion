@@ -94,10 +94,6 @@ test('provisioning: le Provisioner et le device dérivent la même DeviceKey et 
 test('provisioning No-OOB: une Confirmation corrompue est rejetée, sans revendiquer de protection MITM', async () => {
   const { provisionerTransport, deviceTransport } = createLinkedTransports();
   const netKey = Buffer.alloc(16, 0x42);
-  const capabilities = {
-    numElements: 1, algorithms: 0x0001, publicKeyType: 0x00, staticOobType: 0x00,
-    outputOobSize: 0x00, outputOobAction: 0x0000, inputOobSize: 0x00, inputOobAction: 0x0000
-  };
 
   // Device malveillant : répond avec une Confirmation aléatoire au lieu du vrai calcul.
   async function maliciousDeviceSide() {

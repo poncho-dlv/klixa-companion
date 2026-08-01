@@ -447,7 +447,7 @@ function createProxySession({ conn, netKeys, ivIndex, provisionerAddress, seqAll
           if ((tracker.blockAck & fullMask) === fullMask) return;
           try {
             await waitForSegmentAck(tracker, SEGMENT_ACK_TIMEOUT_MS);
-          } catch (err) {
+          } catch (_err) {
             if (attempt === SEGMENT_SEND_ATTEMPTS) {
               throw new Error(`Message mesh segmenté non acquitté après ${SEGMENT_SEND_ATTEMPTS} essais`);
             }

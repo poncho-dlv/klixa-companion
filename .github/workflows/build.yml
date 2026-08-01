@@ -13,14 +13,60 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 (historique complet) requis par gitleaks-action ci-dessous
+      # pour déterminer la plage de commits à scanner.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Secrets committés (clés API, tokens...). Scanne uniquement les commits
+      # ajoutés par ce push/PR (pas tout l'historique à chaque run) — gratuit pour
+      # un compte personnel, une licence n'est requise que pour un compte
+      # organisation GitHub (cf. README gitleaks-action).
+      - name: Secrets committés (gitleaks)
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+
+      # eslint-plugin-sonarjs (bugs probables : identifiants non définis, arité
+      # d'appel incorrecte, ReDoS...) + no-unsanitized sur le renderer Electron
+      # (contexte navigateur, pas de bundler). Voir eslint.config.js.
+      - name: Lint (ESLint + sonarjs)
+        run: npm run lint
+
+      # Remplace `npm test` : mêmes tests (node --test), + couverture de lignes/
+      # fonctions/branches gardée au-dessus d'un plancher (.c8rc.json), fixé sous
+      # la couverture actuelle pour attraper une régression nette plutôt qu'imposer
+      # un seuil arbitraire.
+      - name: Lancer les tests (+ couverture)
+        run: npm run test:coverage
+
       - run: npm run smoke:webbluetooth -- --node-only
+
+      # Fichiers/exports/dépendances jamais utilisés. "files"/"dependencies"/
+      # "unlisted" bloquent (peu de bruit, quasi toujours un vrai oubli) ;
+      # "exports"/"duplicates" restent en warn (cf. knip.json — surface d'API
+      # protocolaire volontairement gardée).
+      - name: Code mort (knip)
+        run: npm run knip
+
+      # Duplication de code. Seuil légèrement au-dessus de la baseline mesurée
+      # (~0.7%) pour attraper une dérive, pas les similitudes structurelles
+      # normales entre pages de config similaires (cf. .jscpd.json).
+      - name: Duplication de code (jscpd)
+        run: npm run dup
+
+      # Vulnérabilités des dépendances de prod uniquement (les dev deps, ex.
+      # electron-builder/webbluetooth build tooling, ne sont pas embarquées
+      # dans l'app packagée).
+      - name: Audit des dépendances (high+)
+        run: npm audit --omit=dev --audit-level=high
 
   windows-installer:
     needs: test
