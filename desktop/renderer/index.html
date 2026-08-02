@@ -178,6 +178,16 @@
                 <option value="en" data-i18n="settings.languageEn">English</option>
               </select>
             </label>
+
+            <h3 data-i18n="network.heading">Réseau local</h3>
+            <p class="field-hint" data-i18n="network.hint">À configurer UNIQUEMENT si un appareil LAN (page « Appareils LAN ») doit joindre ce compagnon depuis une autre machine — sinon laisse en 127.0.0.1.</p>
+            <div class="row">
+              <label><span data-i18n="network.hostLabel">Adresse d'écoute</span><input name="COMPANION_HOST" placeholder="127.0.0.1"></label>
+              <label><span data-i18n="common.port">Port</span><input name="PORT" type="number" min="1" max="65535" placeholder="8786"></label>
+            </div>
+            <label><span data-i18n="network.tokenLabel">Token d'accès local</span><input name="COMPANION_LOCAL_TOKEN" id="companionLocalToken" type="password" autocomplete="new-password"></label>
+            <p class="field-hint" data-i18n="network.tokenHint">Obligatoire dès que l'adresse d'écoute n'est plus 127.0.0.1 : sans lui, tout appareil du LAN pourrait piloter le compagnon.</p>
+            <button type="submit" class="primary page-save-btn" data-integration="network" data-i18n="common.save">Enregistrer</button>
           </section>
         </div>
       </form>

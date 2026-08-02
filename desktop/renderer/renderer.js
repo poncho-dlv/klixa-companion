@@ -82,7 +82,11 @@ const SECRET_MASK = '••••••••';
 const secretFields = [
   { input: document.querySelector('#obsWsPassword'), configuredKey: 'OBS_WS_PASSWORD_CONFIGURED', statusId: 'obs' },
   { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED', statusId: 'streamerbot' },
-  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED', statusId: 'smoke' }
+  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED', statusId: 'smoke' },
+  // Pas de statusId : ce n'est pas une intégration avec un statut connecté/déconnecté
+  // suivi par polling, juste un secret de config réseau — jamais reverrouillé
+  // automatiquement en dehors du rechargement de la config après sauvegarde.
+  { input: document.querySelector('#companionLocalToken'), configuredKey: 'COMPANION_LOCAL_TOKEN_CONFIGURED' }
 ];
 
 // Chemins FontAwesome (circle-check / triangle-exclamation) inlines en SVG : la CSP
@@ -1201,6 +1205,7 @@ form.addEventListener('submit', async (event) => {
   if (data.SB_PORT) data.SB_PORT = String(Number(data.SB_PORT));
   if (data.OBS_WS_PORT) data.OBS_WS_PORT = String(Number(data.OBS_WS_PORT));
   if (data.SMOKE_SERVICE_PORT) data.SMOKE_SERVICE_PORT = String(Number(data.SMOKE_SERVICE_PORT));
+  if (data.PORT) data.PORT = String(Number(data.PORT));
   // Un champ secret encore verrouille (masque) n'a pas ete modifie : ne pas envoyer
   // le masque factice, sinon il ecraserait le vrai secret stocke.
   for (const field of secretFields) {

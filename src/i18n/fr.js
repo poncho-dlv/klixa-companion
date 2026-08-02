@@ -179,6 +179,13 @@ export default {
     languageFr: 'Français',
     languageEn: 'English'
   },
+  network: {
+    heading: 'Réseau local',
+    hint: 'À configurer UNIQUEMENT si un appareil LAN (page « Appareils LAN ») doit joindre ce compagnon depuis une autre machine — sinon laisse en 127.0.0.1.',
+    hostLabel: 'Adresse d\'écoute',
+    tokenLabel: 'Token d\'accès local',
+    tokenHint: 'Obligatoire dès que l\'adresse d\'écoute n\'est plus 127.0.0.1 : sans lui, tout appareil du LAN pourrait piloter le compagnon.'
+  },
   update: {
     installButton: 'Redémarrer et installer',
     downloading: 'Téléchargement de la mise à jour %version%...',

@@ -214,7 +214,7 @@ async function pollPairingOnce() {
 // Secrets : jamais renvoyes en clair au renderer (remplaces par un booleen *_CONFIGURED)
 // et jamais ecrases par une valeur vide a la sauvegarde. Doit rester aligne avec
 // `secretKeys` de config-store.js (qui les chiffre au repos via safeStorage).
-const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN', 'SMALLRIG_MESH_STATE'];
+const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN'];
 
 function publicConfig(values) {
   const result = { ...values };

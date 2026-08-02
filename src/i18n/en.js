@@ -179,6 +179,13 @@ export default {
     languageFr: 'Français',
     languageEn: 'English'
   },
+  network: {
+    heading: 'Local network',
+    hint: 'Only needed if a LAN device (see the "LAN devices" page) must reach this companion from another machine — otherwise leave it at 127.0.0.1.',
+    hostLabel: 'Listen address',
+    tokenLabel: 'Local access token',
+    tokenHint: 'Required as soon as the listen address is no longer 127.0.0.1: without it, any device on the LAN could control the companion.'
+  },
   update: {
     installButton: 'Restart and install',
     downloading: 'Downloading update %version%...',

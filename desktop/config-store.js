@@ -5,7 +5,7 @@ import electron from 'electron';
 
 const { safeStorage } = electron;
 
-const secretKeys = new Set(['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN', 'SMALLRIG_MESH_STATE']);
+const secretKeys = new Set(['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN']);
 
 function fsyncDirectory(directory) {
   if (process.platform === 'win32') return;
