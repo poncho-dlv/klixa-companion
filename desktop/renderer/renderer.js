@@ -834,10 +834,15 @@ deviceGenerateBtn.addEventListener('click', async () => {
   }
 });
 
-// Rafraîchit la liste des devices connectés à chaque visite de la page (en plus du
-// chargement initial ci-dessous) : c'est la seule donnée de cette page qui change sans
-// action de l'utilisateur (un script peut se connecter/déconnecter à tout moment).
+// Rafraîchit la liste des devices connectés à chaque visite de la page ET en continu
+// tant qu'elle reste affichée (un script peut se connecter/déconnecter à tout moment,
+// sans action de l'utilisateur — contrairement au clic seul, ça couvre le cas où le
+// streamer reste sur cette page en attendant que son appareil se connecte).
 navButtons.get('devices')?.addEventListener('click', refreshConnectedDevices);
+const devicesConnectedPoll = setInterval(() => {
+  if (activePage === 'devices') refreshConnectedDevices();
+}, 5000);
+devicesConnectedPoll.unref?.();
 
 refreshDeviceTokens();
 refreshConnectedDevices();
