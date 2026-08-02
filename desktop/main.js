@@ -1,9 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { writeFile, unlink } from 'node:fs/promises';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import electron from 'electron';
 import { createConfig } from '../src/config.js';
 import { startCompanion } from '../src/runtime.js';
 import { registerHueBridge } from '../src/integrations/hue.js';
+import { isLoopbackHost } from '../src/local-server.js';
 import { ConfigStore } from './config-store.js';
 import electronUpdaterPkg from 'electron-updater';
 import { createLogger, setLogFile } from '../src/logger.js';
@@ -107,6 +112,42 @@ function updateIntegrationStatus(next) {
 function pushUpdateState(next) {
   updateState = next;
   window?.webContents.send('update:status', updateState);
+}
+
+// Nom fixe de la regle : permet de la retrouver/remplacer (port change) sans jamais en
+// accumuler plusieurs au fil des sauvegardes de la page Reseau local.
+const FIREWALL_RULE_NAME = 'Klixa Companion (Appareils LAN)';
+
+// Ouvre le port du compagnon dans le pare-feu Windows a la place du streamer (sinon un
+// appareil LAN ne peut jamais joindre le compagnon des que son ecoute passe hors
+// loopback - Windows bloque l'entrant par defaut et ne previent meme pas sur un reseau
+// classe "Public"). Ecrit les commandes dans un .ps1 temporaire plutot que de les
+// passer en ligne pour eviter tout probleme d'echappement de guillemets a travers
+// PowerShell -> Start-Process -> PowerShell elance -> netsh. Necessite UNE elevation
+// UAC (le clic natif "Autoriser ?"), jamais une manip du streamer dans les parametres
+// Windows. Best-effort : un refus/echec ne doit jamais empecher la sauvegarde de la
+// config (cf. appelant), juste etre remonte clairement.
+async function ensureFirewallRule(port) {
+  const scriptPath = path.join(os.tmpdir(), `klixa-firewall-${randomUUID()}.ps1`);
+  const script = [
+    `netsh advfirewall firewall delete rule name="${FIREWALL_RULE_NAME}" | Out-Null`,
+    `netsh advfirewall firewall add rule name="${FIREWALL_RULE_NAME}" dir=in action=allow protocol=TCP localport=${port}`
+  ].join('\r\n');
+  await writeFile(scriptPath, script, 'utf8');
+  try {
+    await new Promise((resolve, reject) => {
+      execFile('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"'`
+      ], (error, stdout, stderr) => {
+        if (error) reject(new Error(stderr?.trim() || error.message));
+        else resolve();
+      });
+    });
+  } finally {
+    unlink(scriptPath).catch(() => { /* fichier temporaire, echec sans consequence */ });
+  }
 }
 
 // Construit la config runtime et y branche la persistance de l'etat mesh SmallRig
@@ -294,6 +335,28 @@ function registerIpc() {
       if (!normalizedSubmitted[key]) next[key] = current[key] || '';
     }
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error(t('errors.cloudUrlInvalid'));
+
+    // Ouvre le pare-feu Windows automatiquement dès que l'écoute passe hors loopback
+    // (page Réseau local) — uniquement quand host/port changent vraiment, pour ne
+    // jamais redéclencher l'élévation UAC sur une sauvegarde qui ne touche que le
+    // token. Best-effort : un échec/refus ne bloque jamais la sauvegarde elle-même,
+    // juste remonté via firewallWarning pour affichage côté renderer.
+    let firewallWarning = null;
+    if (integrationId === 'network') {
+      const previousHost = current.COMPANION_HOST || '127.0.0.1';
+      const previousPort = String(current.PORT || 8786);
+      const nextHost = next.COMPANION_HOST || '127.0.0.1';
+      const nextPort = String(next.PORT || 8786);
+      if (!isLoopbackHost(nextHost) && (nextHost !== previousHost || nextPort !== previousPort)) {
+        try {
+          await ensureFirewallRule(nextPort);
+        } catch (error) {
+          log.error('Configuration pare-feu echouee', error.message);
+          firewallWarning = t('errors.firewallRuleFailed', { message: error.message });
+        }
+      }
+    }
+
     store.save(next);
     // Chaque page a son propre bouton "Enregistrer" cible sur SON integration (cf.
     // data-integration cote renderer) : un redemarrage complet du runtime n'est donc
@@ -305,7 +368,7 @@ function registerIpc() {
     } else {
       await restartRuntime(next);
     }
-    return publicConfig(next);
+    return { ...publicConfig(next), firewallWarning };
   });
   // Appairage Hue déclenché LOCALEMENT (bouton dans l'UI desktop) : appelle le bridge
   // directement (aucun aller-retour cloud), persiste bridgeIp/appKey via le ConfigStore

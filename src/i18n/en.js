@@ -184,7 +184,8 @@ export default {
     hint: 'Only needed if a LAN device (see the "LAN devices" page) must reach this companion from another machine — otherwise leave it at 127.0.0.1.',
     hostLabel: 'Listen address',
     tokenLabel: 'Local access token',
-    tokenHint: 'Required as soon as the listen address is no longer 127.0.0.1: without it, any device on the LAN could control the companion.'
+    tokenHint: 'Required as soon as the listen address is no longer 127.0.0.1: without it, any device on the LAN could control the companion.',
+    firewallHint: 'Windows will ask for permission (native dialog) when you save: this opens the port in the firewall automatically, nothing else to configure yourself.'
   },
   update: {
     installButton: 'Restart and install',
@@ -222,6 +223,7 @@ export default {
     smokePortInvalid: 'Invalid smoke machine port',
     huePortInvalid: 'Invalid Hue port',
     cloudUrlInvalid: 'Invalid cloud URL (ws:// or wss:// expected)',
+    firewallRuleFailed: 'Settings saved, but the firewall could not be configured automatically (%message%). Allow the port manually in Windows Firewall if LAN devices can\'t connect.',
     hueBridgeIpRequired: 'Bridge IP required',
     companionStarting: 'Companion is starting, try again in a moment',
     pairInstanceUrlInvalid: 'Invalid instance URL (http:// or https:// expected)',

@@ -1213,12 +1213,21 @@ form.addEventListener('submit', async (event) => {
   }
   const integrationId = button?.dataset.integration || (pendingConnections.size === 1 ? [...pendingConnections][0] : undefined);
   try {
-    setForm(await window.klixa.saveConfig(data, integrationId));
+    const result = await window.klixa.saveConfig(data, integrationId);
+    setForm(result);
     if (!obsEnabled.checked) pendingConnections.delete('obs');
     if (!streamerbotEnabled.checked) pendingConnections.delete('streamerbot');
     if (!smokeEnabled.checked) pendingConnections.delete('smoke');
-    message.className = 'ok';
-    message.textContent = t('common.saved');
+    // Pare-feu pas configurable automatiquement (refus UAC, etc.) : la config est
+    // quand même enregistrée (cf. main.js), mais le streamer doit le savoir plutôt
+    // qu'un "Enregistré" silencieux qui masquerait un appareil LAN injoignable.
+    if (result.firewallWarning) {
+      message.className = 'error';
+      message.textContent = result.firewallWarning;
+    } else {
+      message.className = 'ok';
+      message.textContent = t('common.saved');
+    }
   } catch (error) {
     pendingConnections.clear();
     renderIntegrationStatus();

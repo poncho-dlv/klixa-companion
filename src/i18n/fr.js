@@ -184,7 +184,8 @@ export default {
     hint: 'À configurer UNIQUEMENT si un appareil LAN (page « Appareils LAN ») doit joindre ce compagnon depuis une autre machine — sinon laisse en 127.0.0.1.',
     hostLabel: 'Adresse d\'écoute',
     tokenLabel: 'Token d\'accès local',
-    tokenHint: 'Obligatoire dès que l\'adresse d\'écoute n\'est plus 127.0.0.1 : sans lui, tout appareil du LAN pourrait piloter le compagnon.'
+    tokenHint: 'Obligatoire dès que l\'adresse d\'écoute n\'est plus 127.0.0.1 : sans lui, tout appareil du LAN pourrait piloter le compagnon.',
+    firewallHint: 'Windows te demandera une autorisation (fenêtre native) à l\'enregistrement : c\'est pour ouvrir automatiquement le port dans le pare-feu, tu n\'as rien d\'autre à configurer toi-même.'
   },
   update: {
     installButton: 'Redémarrer et installer',
@@ -222,6 +223,7 @@ export default {
     smokePortInvalid: 'Port machine à fumée invalide',
     huePortInvalid: 'Port Hue invalide',
     cloudUrlInvalid: 'URL cloud invalide (ws:// ou wss:// attendu)',
+    firewallRuleFailed: 'Config enregistrée, mais le pare-feu n’a pas pu être configuré automatiquement (%message%). Autorise le port manuellement dans le pare-feu Windows si les appareils LAN n’arrivent pas à se connecter.',
     hueBridgeIpRequired: 'IP du bridge requise',
     companionStarting: 'Compagnon en cours de démarrage, réessaie dans un instant',
     pairInstanceUrlInvalid: 'URL d’instance invalide (http:// ou https:// attendu)',
