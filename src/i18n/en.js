@@ -174,6 +174,8 @@ export default {
   },
   settings: {
     autoLaunch: 'Launch automatically with Windows',
+    heading: 'Localization',
+    languageHint: 'Language of the companion interface (window and tray menu).',
     language: 'Language',
     languageSystem: 'System',
     languageFr: 'Français',

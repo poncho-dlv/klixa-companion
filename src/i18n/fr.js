@@ -174,6 +174,8 @@ export default {
   },
   settings: {
     autoLaunch: 'Lancer automatiquement avec Windows',
+    heading: 'Localisation',
+    languageHint: 'Langue de l\'interface du compagnon (fenêtre et menu de la barre système).',
     language: 'Langue',
     languageSystem: 'Système',
     languageFr: 'Français',
