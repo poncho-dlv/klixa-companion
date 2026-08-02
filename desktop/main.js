@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { writeFile, unlink } from 'node:fs/promises';
 import os from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import electron from 'electron';
 import { createConfig } from '../src/config.js';
 import { startCompanion } from '../src/runtime.js';
@@ -278,6 +278,12 @@ function publicConfig(values) {
   }
   delete result.SMOKE_SERVICE_URL;
   result.HUE_BRIDGE_PORT = String(result.HUE_BRIDGE_PORT || 443);
+  // Case à cocher unique de la page Réseau local : dérivée de COMPANION_HOST à chaque
+  // lecture (pas un champ stocké séparément) — une seule source de vérité, jamais de
+  // risque de désync entre les deux. Pas de champ HOST/PORT/TOKEN exposé au renderer :
+  // trop technique pour un streamer lambda (cf. commit precedent), tout est géré par
+  // l'app (voir config:save).
+  result.LAN_DEVICES_ENABLED = !isLoopbackHost(result.COMPANION_HOST || '127.0.0.1');
   for (const key of SECRET_KEYS) {
     result[`${key}_CONFIGURED`] = Boolean(result[key]);
     delete result[key];
@@ -334,26 +340,34 @@ function registerIpc() {
     for (const key of SECRET_KEYS) {
       if (!normalizedSubmitted[key]) next[key] = current[key] || '';
     }
+
+    // Réseau local : un seul interrupteur ("Autoriser les appareils LAN"), jamais de
+    // champ host/port/token exposé au streamer — trop technique pour un utilisateur
+    // lambda (retour direct de Poncho). COMPANION_HOST est dérivé du toggle ;
+    // COMPANION_LOCAL_TOKEN est généré ici si besoin, jamais montré ni demandé. Dérivé
+    // à CHAQUE sauvegarde (formulaire unique, la case reflète toujours l'état voulu),
+    // donc idempotent quelle que soit la page depuis laquelle "Enregistrer" est cliqué.
+    const lanDevicesEnabled = submitted.LAN_DEVICES_ENABLED === true || submitted.LAN_DEVICES_ENABLED === 'true';
+    const wasLoopback = isLoopbackHost(current.COMPANION_HOST || '127.0.0.1');
+    next.COMPANION_HOST = lanDevicesEnabled ? '0.0.0.0' : '127.0.0.1';
+    if (lanDevicesEnabled && !next.COMPANION_LOCAL_TOKEN) {
+      next.COMPANION_LOCAL_TOKEN = randomBytes(32).toString('hex');
+    }
+
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error(t('errors.cloudUrlInvalid'));
 
-    // Ouvre le pare-feu Windows automatiquement dès que l'écoute passe hors loopback
-    // (page Réseau local) — uniquement quand host/port changent vraiment, pour ne
-    // jamais redéclencher l'élévation UAC sur une sauvegarde qui ne touche que le
-    // token. Best-effort : un échec/refus ne bloque jamais la sauvegarde elle-même,
-    // juste remonté via firewallWarning pour affichage côté renderer.
+    // Ouvre le pare-feu Windows automatiquement UNIQUEMENT quand on bascule réellement
+    // le toggle de loopback vers LAN — jamais sur une sauvegarde qui le laisse
+    // inchangé, sinon l'invite d'élévation UAC réapparaîtrait à chaque enregistrement
+    // d'une page qui n'a rien à voir. Best-effort : un échec/refus ne bloque jamais la
+    // sauvegarde elle-même, juste remonté via firewallWarning pour affichage renderer.
     let firewallWarning = null;
-    if (integrationId === 'network') {
-      const previousHost = current.COMPANION_HOST || '127.0.0.1';
-      const previousPort = String(current.PORT || 8786);
-      const nextHost = next.COMPANION_HOST || '127.0.0.1';
-      const nextPort = String(next.PORT || 8786);
-      if (!isLoopbackHost(nextHost) && (nextHost !== previousHost || nextPort !== previousPort)) {
-        try {
-          await ensureFirewallRule(nextPort);
-        } catch (error) {
-          log.error('Configuration pare-feu echouee', error.message);
-          firewallWarning = t('errors.firewallRuleFailed', { message: error.message });
-        }
+    if (lanDevicesEnabled && wasLoopback) {
+      try {
+        await ensureFirewallRule(next.PORT || 8786);
+      } catch (error) {
+        log.error('Configuration pare-feu echouee', error.message);
+        firewallWarning = t('errors.firewallRuleFailed', { message: error.message });
       }
     }
 

@@ -181,11 +181,9 @@ export default {
   },
   network: {
     heading: 'Réseau local',
-    hint: 'À configurer UNIQUEMENT si un appareil LAN (page « Appareils LAN ») doit joindre ce compagnon depuis une autre machine — sinon laisse en 127.0.0.1.',
-    hostLabel: 'Adresse d\'écoute',
-    tokenLabel: 'Token d\'accès local',
-    tokenHint: 'Obligatoire dès que l\'adresse d\'écoute n\'est plus 127.0.0.1 : sans lui, tout appareil du LAN pourrait piloter le compagnon.',
-    firewallHint: 'Windows te demandera une autorisation (fenêtre native) à l\'enregistrement : c\'est pour ouvrir automatiquement le port dans le pare-feu, tu n\'as rien d\'autre à configurer toi-même.'
+    hint: 'Active ceci pour connecter des appareils LAN (Raspberry Pi, ESP...) au compagnon — page « Appareils LAN ». Rien d\'autre à configurer : la sécurisation de l\'accès et le pare-feu Windows sont gérés automatiquement.',
+    enableLabel: 'Autoriser les appareils LAN à se connecter',
+    firewallHint: 'Windows te demandera une autorisation (fenêtre native) à l\'enregistrement : c\'est pour ouvrir automatiquement le port dans le pare-feu.'
   },
   update: {
     installButton: 'Redémarrer et installer',

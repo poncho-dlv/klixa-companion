@@ -181,11 +181,9 @@ export default {
   },
   network: {
     heading: 'Local network',
-    hint: 'Only needed if a LAN device (see the "LAN devices" page) must reach this companion from another machine — otherwise leave it at 127.0.0.1.',
-    hostLabel: 'Listen address',
-    tokenLabel: 'Local access token',
-    tokenHint: 'Required as soon as the listen address is no longer 127.0.0.1: without it, any device on the LAN could control the companion.',
-    firewallHint: 'Windows will ask for permission (native dialog) when you save: this opens the port in the firewall automatically, nothing else to configure yourself.'
+    hint: 'Enable this to connect LAN devices (Raspberry Pi, ESP...) to the companion — see the "LAN devices" page. Nothing else to configure: access security and the Windows firewall are handled automatically.',
+    enableLabel: 'Allow LAN devices to connect',
+    firewallHint: 'Windows will ask for permission (native dialog) when you save: this opens the port in the firewall automatically.'
   },
   update: {
     installButton: 'Restart and install',
