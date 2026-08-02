@@ -203,6 +203,8 @@ export default {
     obsMissingOverlayToken: 'overlayToken missing',
     obsMissingOverlayBase: 'overlayBase missing (provided by the server)',
     obsMissingSceneName: 'sceneName missing',
+    obsMissingSourceName: 'sourceName missing',
+    obsMissingFilterName: 'filterName missing',
     smokeUrlMissing: 'SMOKE_SERVICE_URL missing (GPIO service URL on the Raspberry Pi)',
     smokeHttpError: 'Smoke service HTTP %status%: %text%',
     smokeTokenInvalid: 'Invalid smoke service token (SMOKE_SERVICE_TOKEN)',

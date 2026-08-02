@@ -205,6 +205,61 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     return { sceneName };
   }
 
+  // obs.get-sources — liste des sources filtrables (inputs + scènes, un filtre OBS
+  // pouvant être posé sur l'un ou l'autre), consommée par la page admin
+  // « Automatisations » pour le picker source→filtre de l'action `obsFilter`.
+  // GetInputList ne renvoie PAS les scènes (contrairement à syncOverlayToken qui n'en
+  // a pas besoin, limité aux browser_source) — on fusionne donc avec GetSceneList.
+  async function getSources() {
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
+
+    const [{ inputs }, { scenes }] = await Promise.all([
+      obs.call('GetInputList'),
+      obs.call('GetSceneList')
+    ]);
+
+    const names = new Set();
+    for (const input of inputs || []) { if (input?.inputName) names.add(input.inputName); }
+    for (const scene of scenes || []) { if (scene?.sceneName) names.add(scene.sceneName); }
+
+    return { sources: [...names].sort((a, b) => a.localeCompare(b)) };
+  }
+
+  // obs.get-source-filters — liste des filtres posés sur une source précise (nom +
+  // état actuel), consommée par le même picker pour peupler le combobox filtre une
+  // fois la source choisie.
+  async function getSourceFilters(payload = {}) {
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
+
+    const sourceName = String(payload.sourceName || '').trim();
+    if (!sourceName) throw new Error(t('errors.obsMissingSourceName'));
+
+    const { filters } = await obs.call('GetSourceFilterList', { sourceName });
+    return {
+      filters: (filters || []).map((filter) => ({
+        name: filter?.filterName || '',
+        enabled: filter?.filterEnabled !== false,
+        kind: filter?.filterKind || ''
+      })).filter((filter) => filter.name)
+    };
+  }
+
+  // obs.set-source-filter-enabled — active/désactive un filtre d'une source, consommé
+  // par l'action `obsFilter` de la page « Automatisations » (server/automations-service.js).
+  async function setSourceFilterEnabled(payload = {}) {
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
+
+    const sourceName = String(payload.sourceName || '').trim();
+    if (!sourceName) throw new Error(t('errors.obsMissingSourceName'));
+
+    const filterName = String(payload.filterName || '').trim();
+    if (!filterName) throw new Error(t('errors.obsMissingFilterName'));
+
+    const filterEnabled = payload.enabled !== false;
+    await obs.call('SetSourceFilterEnabled', { sourceName, filterName, filterEnabled });
+    return { sourceName, filterName, enabled: filterEnabled };
+  }
+
   async function healthcheck() {
     if (!connected) throw new Error(t('errors.obsNotConnected'));
     return { url, connected };
@@ -215,7 +270,10 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     commands: {
       'obs.sync-overlay-token': syncOverlayToken,
       'obs.get-scenes': getScenes,
-      'obs.set-scene': setScene
+      'obs.set-scene': setScene,
+      'obs.get-sources': getSources,
+      'obs.get-source-filters': getSourceFilters,
+      'obs.set-source-filter-enabled': setSourceFilterEnabled
     },
     healthcheck,
     stop() { stopped = true; clearTimeout(reconnectTimer); obs.disconnect().catch(() => {}); }
