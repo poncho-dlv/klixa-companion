@@ -348,7 +348,6 @@ function registerIpc() {
     // à CHAQUE sauvegarde (formulaire unique, la case reflète toujours l'état voulu),
     // donc idempotent quelle que soit la page depuis laquelle "Enregistrer" est cliqué.
     const lanDevicesEnabled = submitted.LAN_DEVICES_ENABLED === true || submitted.LAN_DEVICES_ENABLED === 'true';
-    const wasLoopback = isLoopbackHost(current.COMPANION_HOST || '127.0.0.1');
     next.COMPANION_HOST = lanDevicesEnabled ? '0.0.0.0' : '127.0.0.1';
     if (lanDevicesEnabled && !next.COMPANION_LOCAL_TOKEN) {
       next.COMPANION_LOCAL_TOKEN = randomBytes(32).toString('hex');
@@ -356,15 +355,19 @@ function registerIpc() {
 
     if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error(t('errors.cloudUrlInvalid'));
 
-    // Ouvre le pare-feu Windows automatiquement UNIQUEMENT quand on bascule réellement
-    // le toggle de loopback vers LAN — jamais sur une sauvegarde qui le laisse
-    // inchangé, sinon l'invite d'élévation UAC réapparaîtrait à chaque enregistrement
-    // d'une page qui n'a rien à voir. Best-effort : un échec/refus ne bloque jamais la
-    // sauvegarde elle-même, juste remonté via firewallWarning pour affichage renderer.
+    // Ouvre le pare-feu Windows automatiquement tant que ce n'est pas confirmé fait
+    // (FIREWALL_RULE_CONFIGURED persisté, PAS une détection de transition loopback->LAN :
+    // un streamer qui avait déjà mis COMPANION_HOST=0.0.0.0 à la main AVANT cette
+    // fonctionnalité — cas réel de Poncho — ne "change" rien en cochant la case sur une
+    // version à jour, donc une détection par transition ne se déclenche jamais pour lui.
+    // Un flag dédié re-tente à chaque sauvegarde tant que la règle n'a jamais été créée
+    // avec succès, quel que soit l'état précédent de COMPANION_HOST). Best-effort : un
+    // échec/refus ne bloque jamais la sauvegarde, juste remonté via firewallWarning.
     let firewallWarning = null;
-    if (lanDevicesEnabled && wasLoopback) {
+    if (lanDevicesEnabled && !next.FIREWALL_RULE_CONFIGURED) {
       try {
         await ensureFirewallRule(next.PORT || 8786);
+        next.FIREWALL_RULE_CONFIGURED = true;
       } catch (error) {
         log.error('Configuration pare-feu echouee', error.message);
         firewallWarning = t('errors.firewallRuleFailed', { message: error.message });
