@@ -2,3 +2,6 @@ gpiozero
 # Backend GPIO recommandé sur Raspberry Pi OS récent (Bookworm). Sur ancien OS,
 # gpiozero retombe sur RPi.GPIO automatiquement.
 lgpio
+# Dépendance de klixa_device_agent.py (connexion WS sortante vers le compagnon) —
+# examples/smoke_relay.py en a besoin, smoke_service.py (legacy) pas encore retiré non.
+websockets>=13

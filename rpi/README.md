@@ -1,74 +1,123 @@
-# Service GPIO machine à fumée (Raspberry Pi)
+# Appareils LAN Klixa (Raspberry Pi, ESP...)
 
-Micro-service HTTP en réception seule qui déclenche le relais de la machine à
-fumée. Piloté par le compagnon Klixa (sur le NAS) via le réseau local.
+Ce dossier contient le SDK de référence permettant à n'importe quel script/appareil du
+LAN (Raspberry Pi, ESP32...) de se connecter au compagnon Klixa et de s'annoncer avec
+ses **éléments pilotables** (un relais on/off, dans le cas de la machine à fumée — mais
+le mécanisme est générique, à toi de piloter ce que tu veux). Protocole complet :
+[`../protocol/devices-messages.md`](../protocol/devices-messages.md).
 
-## Câblage
+**C'est CE script qui se connecte au compagnon**, jamais l'inverse (comme le compagnon
+lui-même se connecte au cloud Klixa) : pas de port à ouvrir sur le Raspberry Pi, pas
+besoin que le compagnon connaisse son IP à l'avance.
 
-Relais sur **GPIO 17** (BCM), comme le script de test initial
-(`OutputDevice(17, active_high=True, initial_value=False)`).
+## Machine à fumée (exemple de référence)
 
-## Installation
+- `klixa_device_agent.py` — le SDK (générique, une seule dépendance : `websockets`).
+- `examples/smoke_relay.py` — pilote le relais GPIO de la machine à fumée. Câblage sur
+  **GPIO 17** (BCM), comme le script d'origine.
+- `examples/smoke_relay.env.example`, `examples/klixa-smoke-relay.service`.
+
+### Installation
 
 ```bash
 sudo apt update && sudo apt install -y python3 python3-pip
-mkdir -p /home/rpi_user/klixa-smoke && cd /home/rpi_user/klixa-smoke
-# Copier smoke_service.py et requirements.txt ici
+mkdir -p /home/rpi_user/klixa-device-agent && cd /home/rpi_user/klixa-device-agent
+# Copier klixa_device_agent.py, examples/smoke_relay.py et requirements.txt ici
+# (les deux scripts .py doivent être dans le MÊME dossier)
 pip3 install -r requirements.txt --break-system-packages
 ```
 
-Générer le secret partagé :
+### Générer un token
+
+Contrairement à l'ancien modèle (secret partagé choisi à la main), le token se génère
+**depuis l'IHM du compagnon** (app Klixa Companion → page « Appareils LAN » → Générer un
+token) : donne-lui l'identifiant que tu vas mettre dans `DEVICE_ID` (ex.
+`smoke-machine`), le token n'est affiché qu'une seule fois, à copier immédiatement.
+
+### Configuration
+
+Créer `/home/rpi_user/klixa-device-agent/.env` (voir
+`examples/smoke_relay.env.example`) :
 
 ```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Créer `/home/rpi_user/klixa-smoke/.env` :
-
-```bash
+COMPANION_URL=ws://<ip-du-compagnon>:8786/devices/ws
+DEVICE_TOKEN=le-token-genere-ci-dessus
+DEVICE_ID=smoke-machine
+DEVICE_NAME=Machine à fumée
 SMOKE_GPIO_PIN=17
-SMOKE_PORT=8787
-SMOKE_BIND=0.0.0.0
-# Le même secret doit être saisi côté compagnon (app Klixa Companion → Machine à
-# fumée → Token du service, ou SMOKE_SERVICE_TOKEN dans le .env du hub).
-SMOKE_TOKEN=le-secret-genere-ci-dessus
 SMOKE_MIN_MS=50
 SMOKE_MAX_MS=1500
 SMOKE_DEFAULT_MS=300
 ```
 
-## Lancer en service (systemd)
+### Lancer en service (systemd)
 
 ```bash
-sudo cp klixa-smoke.service /etc/systemd/system/
+sudo cp examples/klixa-smoke-relay.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now klixa-smoke
-journalctl -u klixa-smoke -f
+sudo systemctl enable --now klixa-smoke-relay
+journalctl -u klixa-smoke-relay -f
 ```
 
-## Tester
+Pas de `curl` de test ici : ce script n'écoute plus rien (il ne fait que se connecter
+au compagnon), donc « ça marche » se vérifie dans les logs (`Connecté et enregistré
+auprès du compagnon.`) et dans l'IHM du compagnon (le device apparaît dans la liste
+« connectés »).
 
-Le token se présente dans le header `X-Smoke-Token` :
+## Écrire son propre agent (autre matériel)
 
-```bash
-curl -H "x-smoke-token: $SMOKE_TOKEN" http://localhost:8787/health
-curl -X POST http://localhost:8787/smoke/trigger \
-  -H "x-smoke-token: $SMOKE_TOKEN" \
-  -H "content-type: application/json" \
-  -d '{"durationMs":300}'
+Copie `klixa_device_agent.py` à côté de ton script, puis :
+
+```python
+from klixa_device_agent import DeviceAgent
+
+agent = DeviceAgent(
+    companion_url="ws://<ip-du-compagnon>:8786/devices/ws",
+    token="kxd_...",       # généré depuis l'IHM du compagnon
+    device_id="mon-appareil",
+    name="Mon appareil",
+)
+
+@agent.action("relay", "on")
+def turn_on(payload, data):
+    ...  # ton code (GPIO, HTTP local, ce que tu veux)
+
+@agent.action("relay", "off")
+def turn_off(payload, data):
+    ...
+
+agent.run()
 ```
 
-Sans token (ou avec un token erroné) : `401`.
+Un handler peut être une fonction normale (exécutée dans un thread — ne bloque jamais la
+connexion, même s'il fait un `sleep()`) ou une coroutine `async def`. `payload` est
+structuré (construit par Klixa depuis le schéma `params`, optionnel) ; `data` est un
+champ JSON libre jamais interprété ni par Klixa ni par le compagnon — sa forme
+t'appartient entièrement. Voir la docstring de `klixa_device_agent.py` pour le détail.
+
+## Ancien service HTTP (`smoke_service.py`) — legacy, en cours de retrait
+
+`smoke_service.py`/`.env.example`/`klixa-smoke.service` à la racine de ce dossier sont
+l'**ancien** modèle (le compagnon appelait ce service en HTTP sortant, ce script était
+serveur). Encore fonctionnel aujourd'hui (le compagnon peut encore s'y connecter via
+`src/integrations/smoke.js`), mais remplacé par `examples/smoke_relay.py` ci-dessus —
+gardé en parallèle le temps de valider ce dernier sur le matériel réel, sera retiré une
+fois la bascule confirmée (cf. `docs/local-device-agent-plan.md`, repo Klixa, phase 3).
+Ne pas utiliser pour un nouveau déploiement.
 
 ## Garde-fous
 
-- **Authentification par secret partagé** (`SMOKE_TOKEN`, header `X-Smoke-Token`,
-  comparaison à temps constant) : sans elle, tout appareil du LAN pourrait
-  déclencher la machine.
-- **Fail-closed** : le service refuse de démarrer si `SMOKE_BIND` n'est pas une
-  adresse loopback alors que `SMOKE_TOKEN` est vide.
-- Durée bornée à `[SMOKE_MIN_MS, SMOKE_MAX_MS]` (défaut 50–1500 ms) — le relais
-  ne peut pas rester bloqué « on » via une commande.
-- Impulsion unique : une requête pendant une impulsion en cours reçoit `409`.
-- Le relais est remis à `off` à l'arrêt du service.
-- Le service doit rester accessible uniquement sur le LAN et ne jamais être exposé à Internet.
+- **Token par appareil** (généré depuis l'IHM du compagnon, jamais un secret choisi à la
+  main) : un token compromis ne permet de se faire passer que pour CET appareil précis,
+  jamais de piloter le reste du compagnon. Révoquer un token coupe la connexion
+  **immédiatement**, pas seulement sa prochaine tentative de reconnexion.
+- Durée bornée à `[SMOKE_MIN_MS, SMOKE_MAX_MS]` (défaut 50–1500 ms) dans
+  `examples/smoke_relay.py` — le relais ne peut pas rester bloqué « on » via une
+  commande.
+- Impulsion unique : une commande reçue pendant une impulsion en cours échoue clairement
+  (`"Impulsion déjà en cours"`) plutôt que de mettre en file ou d'ignorer.
+- Le relais repasse à `off` dans le `finally` de chaque impulsion (même en cas d'erreur
+  pendant le `sleep`) — pas de garde supplémentaire sur un arrêt brutal du process
+  (`kill -9`), identique à l'ancien service sur ce point précis.
+- Ce script/ce matériel doit rester accessible uniquement sur le LAN et ne jamais être
+  exposé à Internet.

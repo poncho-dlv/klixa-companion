@@ -29,8 +29,10 @@ le script/firmware qui se connecte AU compagnon, pas le contraire — même logi
   (`device-hub.js`, path `/devices/ws`). Se déploie en app Windows (Electron).
 - **Application desktop** (`desktop/`) — enrobage Electron du compagnon, avec
   écran de configuration et pairing. Voir [desktop/README.md](desktop/README.md).
-- **Service GPIO** (`rpi/`) — micro-service Python sur Raspberry Pi qui pilote
-  le relais de la machine à fumée. Voir [rpi/README.md](rpi/README.md).
+- **SDK appareils LAN** (`rpi/klixa_device_agent.py`) — module Python de référence pour
+  connecter un script/appareil tiers (Raspberry Pi, ESP...) au compagnon, avec
+  `rpi/examples/smoke_relay.py` (machine à fumée) comme exemple concret. Voir
+  [rpi/README.md](rpi/README.md).
 - **Protocole compagnon ↔ cloud** (`protocol/messages.md`) — contrat des messages
   entre le compagnon et le cloud.
 - **Protocole compagnon ↔ appareils LAN** (`protocol/devices-messages.md`) — contrat
