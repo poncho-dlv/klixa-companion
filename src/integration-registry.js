@@ -1,4 +1,5 @@
 import { createLogger } from './logger.js';
+import { t } from './i18n/core.js';
 
 const log = createLogger('registry');
 
@@ -47,12 +48,12 @@ export function createIntegrationRegistry({ healthcheckTimeoutMs = 5000 } = {}) 
     validateSource(source);
     const entry = commands.get(name);
     if (!entry) {
-      const error = new Error(`Commande inconnue : ${name}`);
+      const error = new Error(t('errors.unknownCommand', { name }));
       error.code = 'UNKNOWN_COMMAND';
       throw error;
     }
     if (source === 'cloud' && entry.scope === 'local') {
-      const error = new Error(`Commande réservée au compagnon local : ${name}`);
+      const error = new Error(t('errors.commandNotAllowed', { name }));
       error.code = 'COMMAND_NOT_ALLOWED';
       throw error;
     }
@@ -74,7 +75,7 @@ export function createIntegrationRegistry({ healthcheckTimeoutMs = 5000 } = {}) 
       let timer;
       try {
         const timeout = new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`Healthcheck expiré après ${healthcheckTimeoutMs} ms`)), healthcheckTimeoutMs);
+          timer = setTimeout(() => reject(new Error(t('errors.healthcheckTimeout', { timeoutMs: healthcheckTimeoutMs }))), healthcheckTimeoutMs);
         });
         const details = await Promise.race([integration.healthcheck(), timeout]);
         return [id, { ok: true, ...details }];

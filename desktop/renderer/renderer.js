@@ -1,9 +1,12 @@
+import { t, getLanguage, setLanguage, resolveLanguage } from '../../src/i18n/core.js';
+
 const form = document.querySelector('#config');
 const message = document.querySelector('#message');
 const statusLine = document.querySelector('#status');
 const statusIcon = document.querySelector('#statusIcon');
 const statusMessage = document.querySelector('#statusMessage');
 const autoLaunch = document.querySelector('#autoLaunch');
+const languageSelect = document.querySelector('#languageSelect');
 const pairBtn = document.querySelector('#pairBtn');
 const pairCode = document.querySelector('#pairCode');
 const pairCodeValue = document.querySelector('#pairCodeValue');
@@ -35,6 +38,17 @@ const smokeConnectionBtn = document.querySelector('#smokeConnectionBtn');
 const integrationStatusEls = new Map(
   [...document.querySelectorAll('.integration-status[data-integration]')].map((el) => [el.dataset.integration, el])
 );
+
+// Applique les traductions statiques (attributs data-i18n posés dans index.html) et la
+// langue du document. Appelé au chargement puis à chaque changement de langue (cf.
+// languageSelect ci-dessous) : les libellés purement statiques (labels, boutons
+// "Enregistrer", nav...) sont couverts ici, le reste (statuts, messages dynamiques,
+// panneaux générés en JS) est re-rendu séparément par applyLanguage().
+function applyStaticTranslations() {
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
+  document.documentElement.lang = getLanguage();
+}
 
 // Champs non-secrets (URL/hôte/port) verrouillés tant que l'intégration correspondante
 // répond — même intention que le verrouillage des secrets ci-dessous : éviter une
@@ -84,15 +98,6 @@ const navButtons = new Map(
 const pageSections = new Map(
   [...document.querySelectorAll('.page[data-page]')].map((el) => [el.dataset.page, el])
 );
-const PAGE_META = {
-  connexion: { title: 'Connexion Klixa', description: 'Lie ce compagnon à ta console Klixa.' },
-  obs: { title: 'OBS', description: 'Contrôle OBS Studio via obs-websocket.' },
-  streamerbot: { title: 'Streamer.bot', description: 'Déclenche des actions Streamer.bot.' },
-  smoke: { title: 'Machine à fumée', description: 'Pilote la machine à fumée de la régie.' },
-  hue: { title: 'Philips Hue', description: 'Contrôle les lumières via le bridge Hue.' },
-  smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' },
-  settings: { title: 'Paramètres', description: 'Réglages généraux du compagnon.' }
-};
 let activePage = 'connexion';
 
 function setActivePage(id) {
@@ -100,9 +105,8 @@ function setActivePage(id) {
   activePage = id;
   for (const [pid, section] of pageSections) section.hidden = pid !== id;
   for (const [pid, btn] of navButtons) btn.classList.toggle('active', pid === id);
-  const meta = PAGE_META[id];
-  pageTitle.textContent = meta.title;
-  pageDescription.textContent = meta.description;
+  pageTitle.textContent = t(`pages.${id}.title`);
+  pageDescription.textContent = t(`pages.${id}.description`);
 }
 
 // Tant que le compagnon n'est pas lie a une console Klixa, les pages d'integration
@@ -123,7 +127,7 @@ for (const [pid, btn] of navButtons) {
 
 setActivePage('connexion');
 
-let lastStatus = { running: false, message: 'Démarrage...' };
+let lastStatus = { running: false, message: t('status.starting') };
 let lastCloudStatus = { connected: false, features: {} };
 let lastConfig = {};
 let lastIntegrationStatus = null;
@@ -134,7 +138,7 @@ const pendingConnections = new Set();
 function renderHeaderStatus() {
   const connected = Boolean(lastCloudStatus.connected);
   const ok = connected && lastStatus.running;
-  statusMessage.textContent = connected ? 'Compagnon connecté' : lastStatus.message;
+  statusMessage.textContent = connected ? t('status.connected') : lastStatus.message;
   statusLine.className = `status-line ${ok ? 'ok' : 'error'}`;
   statusIcon.querySelector('path').setAttribute('d', ok ? ICON_CHECK : ICON_WARNING);
 }
@@ -173,11 +177,11 @@ function renderHueUi() {
   if (!enabled) {
     hueStatus.className = 'integration-status status-line';
     icon.setAttribute('d', '');
-    span.textContent = 'Désactivé';
+    span.textContent = t('common.disabled');
   } else {
     hueStatus.className = `integration-status status-line ${connected ? 'ok' : 'error'}`;
     icon.setAttribute('d', connected ? ICON_CHECK : ICON_WARNING);
-    span.textContent = connected ? 'Connecté' : 'Non connecté';
+    span.textContent = connected ? t('common.connected') : t('common.notConnected');
   }
 }
 
@@ -196,25 +200,23 @@ function renderSmallrigStatus() {
   if (!enabled) {
     smallrigStatus.className = 'integration-status status-line';
     icon.setAttribute('d', '');
-    span.textContent = 'Désactivé';
+    span.textContent = t('common.disabled');
   } else if (!entry) {
     smallrigStatus.className = 'integration-status status-line';
     icon.setAttribute('d', '');
-    span.textContent = 'Vérification...';
+    span.textContent = t('smallrig.verifying');
   } else if (entry.ok === false) {
     smallrigStatus.className = 'integration-status status-line error';
     icon.setAttribute('d', ICON_WARNING);
-    span.textContent = entry.error || 'Bluetooth indisponible';
+    span.textContent = entry.error || t('common.notConnected');
   } else {
     const paired = Boolean(entry.paired ?? entry.lamps > 0);
     const proxyConnected = entry.proxyConnected === true;
     smallrigStatus.className = `integration-status status-line${proxyConnected ? ' ok' : ''}`;
     icon.setAttribute('d', proxyConnected ? ICON_CHECK : '');
     span.textContent = !paired
-      ? 'Aucune lampe appairée'
-      : proxyConnected
-        ? `${entry.lamps} lampe(s) appairée(s) · proxy connecté`
-        : `${entry.lamps} lampe(s) appairée(s) · connexion à la demande`;
+      ? t('smallrig.notPaired')
+      : t(proxyConnected ? 'smallrig.pairedProxyConnected' : 'smallrig.pairedOnDemand', { count: entry.lamps });
   }
 }
 
@@ -254,26 +256,26 @@ function renderSmallrigFound() {
   if (unprovisioned.length === 0) {
     const li = document.createElement('li');
     li.className = 'lamp-empty';
-    li.textContent = smallrigScanning ? 'Scan en cours...' : 'Aucune nouvelle lampe détectée. Lance un scan.';
+    li.textContent = smallrigScanning ? t('smallrig.scanning') : t('smallrig.noNewLampFound');
     smallrigFound.appendChild(li);
     return;
   }
   for (const lamp of unprovisioned) {
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
-    nameInput.placeholder = 'Nom (optionnel)';
+    nameInput.placeholder = t('smallrig.namePlaceholder');
     nameInput.value = lamp.name || '';
     const row = lampRow({
-      title: `Lampe détectée (${lamp.bleDeviceId})`,
-      meta: Number.isFinite(lamp.rssi) ? `Signal ${lamp.rssi} dBm` : '',
-      buttonLabel: 'Appairer',
+      title: t('smallrig.lampDetected', { id: lamp.bleDeviceId }),
+      meta: Number.isFinite(lamp.rssi) ? t('smallrig.signal', { rssi: lamp.rssi }) : '',
+      buttonLabel: t('smallrig.pairAction'),
       extraNode: nameInput,
       onClick: async (event) => {
         const button = event.currentTarget;
         button.disabled = true;
-        button.textContent = 'Appairage en cours…';
+        button.textContent = t('smallrig.pairingInProgress');
         smallrigMessage.className = '';
-        smallrigMessage.textContent = 'Appairage en cours (peut prendre quelques secondes)...';
+        smallrigMessage.textContent = t('smallrig.pairingWait');
         try {
           const result = await window.klixa.smallrigProvision(
             lamp.bleDeviceId,
@@ -285,10 +287,10 @@ function renderSmallrigFound() {
           renderSmallrigFound();
           if (result?.configured === false) {
             smallrigMessage.className = 'error';
-            smallrigMessage.textContent = 'Lampe appairée, mais configuration incomplète. Utilise « Reconfigurer ».';
+            smallrigMessage.textContent = t('smallrig.pairedIncomplete');
           } else {
             smallrigMessage.className = 'ok';
-            smallrigMessage.textContent = 'Lampe appairée et configurée.';
+            smallrigMessage.textContent = t('smallrig.pairedOk');
           }
         } catch (error) {
           // Le provisioning peut avoir réussi côté lampe avant une erreur de
@@ -298,7 +300,7 @@ function renderSmallrigFound() {
           smallrigMessage.className = 'error';
           smallrigMessage.textContent = error.message;
           button.disabled = false;
-          button.textContent = 'Appairer';
+          button.textContent = t('smallrig.pairAction');
         }
       }
     });
@@ -310,42 +312,44 @@ function renderSmallrigFound() {
 // RM75_SPEC_DEV.md §9.4 / RM75_protocole.md §4. Reverse-engineered depuis la classe
 // LqFx de SmallGoGo, PAS encore validé sur lampe reelle (§12 point 5 du spec : "Formats
 // confirmés dans LqFx de SmallGoGo ; validation radio encore requise").
-const FX_COMMAND_MODE_LABELS = {
-  1: 'Paparazzi', 2: 'Cycle', 3: 'Éclair', 4: 'Pulsation', 5: 'SOS', 6: 'Soudure',
-  7: 'Alarme', 8: 'Feu d’artifice', 9: 'Aléatoire', 10: 'Feu', 11: 'TV', 12: 'Ampoule défectueuse'
-};
+function fxCommandModeLabel(mode) {
+  return t(`smallrig.fxModesCommand.${mode}`) || String(mode);
+}
 
 // Numérotation "device" (MODE_DEV_*, valeur `mode` renvoyée par LqCStatus) — DIFFERENTE
 // de la numerotation commande ci-dessus (cf. memes docs). Utilisee uniquement pour
 // interpreter smallrig.status, jamais pour construire une commande FX.
-const FX_STATUS_MODE_LABELS = {
-  1: 'RGB', 2: 'Paparazzi', 3: 'Party', 4: 'Éclair', 5: 'Ampoule défectueuse', 6: 'TV',
-  7: 'Bougie', 8: 'Aléatoire', 9: 'Feu d’artifice', 10: 'Police', 11: 'Camion de pompiers',
-  12: 'Ambulance', 13: 'Soudure', 14: 'SOS', 15: 'Pulsation'
-};
+function fxStatusModeLabel(mode) {
+  return t(`smallrig.fxModesStatus.${mode}`) || String(mode);
+}
 
 // Traduit la réponse brute de smallrig.status (cf. lq-protocol.js#decodeStatus/
 // decodeCapacity) en une ligne lisible pour le panneau de pilotage.
 function describeSmallrigStatus(state, capacity) {
   const parts = [];
   if (state?.error) {
-    parts.push(`Mode : lecture impossible (${state.error})`);
+    parts.push(t('smallrig.statusReadImpossible', { error: state.error }));
   } else if (state) {
     switch (state.type) {
-      case 'hsi': parts.push(`Couleur · teinte ${state.hue}° · saturation ${state.sat}% · luminosité ${state.intensity}%`); break;
-      case 'cct': parts.push(`Température · ${state.kelvin}K · luminosité ${state.intensity}% · teinte ${state.gm >= 0 ? '+' : ''}${state.gm}`); break;
-      case 'rgbw': parts.push(`RGBW · R${state.r} V${state.g} B${state.b} · blanc ${state.w}`); break;
-      case 'fx': parts.push(`Effet ${FX_STATUS_MODE_LABELS[state.mode] || state.mode} · vitesse ${state.freq} · luminosité ${state.intensity}%`); break;
-      default: parts.push(`Mode ${state.type}`);
+      case 'hsi': parts.push(t('smallrig.statusHsi', { hue: state.hue, sat: state.sat, intensity: state.intensity })); break;
+      case 'cct': parts.push(t('smallrig.statusCct', { kelvin: state.kelvin, intensity: state.intensity, gm: `${state.gm >= 0 ? '+' : ''}${state.gm}` })); break;
+      case 'rgbw': parts.push(t('smallrig.statusRgbw', { r: state.r, g: state.g, b: state.b, w: state.w })); break;
+      case 'fx': parts.push(t('smallrig.statusFx', { mode: fxStatusModeLabel(state.mode), freq: state.freq, intensity: state.intensity })); break;
+      default: parts.push(t('smallrig.statusModeFallback', { type: state.type }));
     }
   }
   if (capacity?.error) {
-    parts.push(`Batterie : lecture impossible (${capacity.error})`);
+    parts.push(t('smallrig.batteryReadImpossible', { error: capacity.error }));
   } else if (capacity) {
-    const chargeLabel = { discharged: 'sur batterie', charging: 'en charge', full: 'chargée' }[capacity.chargeState] || capacity.chargeState;
-    parts.push(`${capacity.poweredOn ? 'Allumée' : 'Éteinte'} · batterie ${capacity.battery}% (${chargeLabel}) · autonomie ${capacity.autonomyHours}h`);
+    const chargeLabel = t(`smallrig.chargeState.${capacity.chargeState}`) || capacity.chargeState;
+    parts.push(t('smallrig.powerBattery', {
+      power: t(capacity.poweredOn ? 'smallrig.poweredOn' : 'smallrig.poweredOff'),
+      battery: capacity.battery,
+      chargeState: chargeLabel,
+      hours: capacity.autonomyHours
+    }));
   }
-  return parts.join(' — ') || 'Aucune information disponible.';
+  return parts.join(' — ') || t('smallrig.noInfoAvailable');
 }
 
 // Panneau de pilotage direct d'une lampe appairée : actions immédiates (comme
@@ -371,11 +375,11 @@ function buildLampControlPanel(lamp) {
 
   async function runCommand(action) {
     panelMessage.className = '';
-    panelMessage.textContent = 'Envoi…';
+    panelMessage.textContent = t('smallrig.sending');
     try {
       await action();
       panelMessage.className = 'ok';
-      panelMessage.textContent = 'Envoyé.';
+      panelMessage.textContent = t('smallrig.sent');
     } catch (error) {
       panelMessage.className = 'error';
       panelMessage.textContent = error.message;
@@ -391,10 +395,10 @@ function buildLampControlPanel(lamp) {
   powerToggle.checked = true;
   const powerToggleText = document.createElement('span');
   powerToggleText.className = 'switch-label-text';
-  powerToggleText.textContent = 'Allumée';
+  powerToggleText.textContent = t('smallrig.poweredOn');
   powerToggleLabel.append(powerToggle, powerToggleText);
   const brightnessLabel = document.createElement('label');
-  brightnessLabel.textContent = 'Luminosité';
+  brightnessLabel.textContent = t('smallrig.brightness');
   const brightnessInput = document.createElement('input');
   brightnessInput.type = 'range';
   brightnessInput.min = '1';
@@ -405,29 +409,29 @@ function buildLampControlPanel(lamp) {
   body.appendChild(powerRow);
 
   powerToggle.addEventListener('change', () => {
-    powerToggleText.textContent = powerToggle.checked ? 'Allumée' : 'Éteinte';
+    powerToggleText.textContent = t(powerToggle.checked ? 'smallrig.poweredOn' : 'smallrig.poweredOff');
     runCommand(() => window.klixa.smallrigPower([lamp.uuid], powerToggle.checked, powerToggle.checked ? Number(brightnessInput.value) : undefined));
   });
   brightnessInput.addEventListener('change', () => {
     powerToggle.checked = true;
-    powerToggleText.textContent = 'Allumée';
+    powerToggleText.textContent = t('smallrig.poweredOn');
     runCommand(() => window.klixa.smallrigPower([lamp.uuid], true, Number(brightnessInput.value)));
   });
 
   const modeLabel = document.createElement('label');
-  modeLabel.textContent = 'Mode';
+  modeLabel.textContent = t('smallrig.mode');
   const modeSelect = document.createElement('select');
-  for (const [value, label] of [['hsi', 'Couleur'], ['cct', 'Température'], ['rgbw', 'RGBW'], ['fx', 'Effet']]) {
+  for (const [value, labelKey] of [['hsi', 'smallrig.modeHsi'], ['cct', 'smallrig.modeCct'], ['rgbw', 'smallrig.modeRgbw'], ['fx', 'smallrig.modeFx']]) {
     const option = document.createElement('option');
     option.value = value;
-    option.textContent = label;
+    option.textContent = t(labelKey);
     modeSelect.appendChild(option);
   }
   modeLabel.appendChild(modeSelect);
   body.appendChild(modeLabel);
 
   const hsiFields = document.createElement('label');
-  hsiFields.textContent = 'Couleur';
+  hsiFields.textContent = t('smallrig.color');
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
   colorInput.value = '#ffffff';
@@ -437,7 +441,7 @@ function buildLampControlPanel(lamp) {
   const cctFields = document.createElement('div');
   cctFields.className = 'lamp-panel-row';
   const kelvinLabel = document.createElement('label');
-  const kelvinText = document.createTextNode('Température (5600K)');
+  const kelvinText = document.createTextNode(t('smallrig.temperatureKelvin', { kelvin: 5600 }));
   kelvinLabel.appendChild(kelvinText);
   const kelvinInput = document.createElement('input');
   kelvinInput.type = 'range';
@@ -445,10 +449,10 @@ function buildLampControlPanel(lamp) {
   kelvinInput.max = '10000';
   kelvinInput.step = '100';
   kelvinInput.value = '5600';
-  kelvinInput.addEventListener('input', () => { kelvinText.textContent = `Température (${kelvinInput.value}K)`; });
+  kelvinInput.addEventListener('input', () => { kelvinText.textContent = t('smallrig.temperatureKelvin', { kelvin: kelvinInput.value }); });
   kelvinLabel.appendChild(kelvinInput);
   const gmLabel = document.createElement('label');
-  gmLabel.textContent = 'Teinte vert/magenta';
+  gmLabel.textContent = t('smallrig.greenMagentaTint');
   const gmInput = document.createElement('input');
   gmInput.type = 'range';
   gmInput.min = '-10';
@@ -460,9 +464,9 @@ function buildLampControlPanel(lamp) {
 
   const rgbwFields = document.createElement('div');
   rgbwFields.className = 'lamp-panel-row';
-  function channelControl(label, defaultValue) {
+  function channelControl(labelKey, defaultValue) {
     const l = document.createElement('label');
-    l.textContent = label;
+    l.textContent = t(labelKey);
     const i = document.createElement('input');
     i.type = 'range';
     i.min = '0';
@@ -472,21 +476,21 @@ function buildLampControlPanel(lamp) {
     rgbwFields.appendChild(l);
     return i;
   }
-  const rInput = channelControl('Rouge', 255);
-  const gInput = channelControl('Vert', 255);
-  const bInput = channelControl('Bleu', 255);
-  const wInput = channelControl('Blanc', 0);
+  const rInput = channelControl('smallrig.red', 255);
+  const gInput = channelControl('smallrig.green', 255);
+  const bInput = channelControl('smallrig.blue', 255);
+  const wInput = channelControl('smallrig.white', 0);
   body.appendChild(rgbwFields);
 
   const fxFields = document.createElement('div');
   fxFields.className = 'lamp-panel-row';
   const fxModeLabel = document.createElement('label');
-  fxModeLabel.textContent = 'Effet';
+  fxModeLabel.textContent = t('smallrig.effect');
   const fxSelect = document.createElement('select');
-  for (const [value, label] of Object.entries(FX_COMMAND_MODE_LABELS)) {
+  for (let mode = 1; mode <= 12; mode++) {
     const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
+    option.value = String(mode);
+    option.textContent = fxCommandModeLabel(mode);
     fxSelect.appendChild(option);
   }
   fxModeLabel.appendChild(fxSelect);
@@ -494,7 +498,7 @@ function buildLampControlPanel(lamp) {
   // été confirmé sur matériel réel (cf. index.js#restoreLightState) et la plupart des
   // modes utilisent les deux octets de façon similaire (cadence/intensité de l'effet).
   const fxSpeedLabel = document.createElement('label');
-  fxSpeedLabel.textContent = 'Vitesse';
+  fxSpeedLabel.textContent = t('smallrig.speed');
   const fxSpeedInput = document.createElement('input');
   fxSpeedInput.type = 'range';
   fxSpeedInput.min = '0';
@@ -516,7 +520,7 @@ function buildLampControlPanel(lamp) {
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
   applyBtn.className = 'primary';
-  applyBtn.textContent = 'Appliquer';
+  applyBtn.textContent = t('smallrig.apply');
   applyBtn.addEventListener('click', () => runCommand(async () => {
     switch (modeSelect.value) {
       case 'hsi':
@@ -538,14 +542,14 @@ function buildLampControlPanel(lamp) {
   const statusBtn = document.createElement('button');
   statusBtn.type = 'button';
   statusBtn.className = 'secondary-button';
-  statusBtn.textContent = 'Lire l’état actuel';
+  statusBtn.textContent = t('smallrig.readCurrentState');
   const statusOutput = document.createElement('p');
   statusOutput.className = 'lamp-panel-message';
   statusOutput.setAttribute('role', 'status');
   statusBtn.addEventListener('click', async () => {
     statusBtn.disabled = true;
     statusOutput.className = '';
-    statusOutput.textContent = 'Lecture…';
+    statusOutput.textContent = t('smallrig.reading');
     try {
       const { state, capacity } = await window.klixa.smallrigStatus(lamp.uuid);
       statusOutput.className = '';
@@ -567,7 +571,7 @@ function renderSmallrigPaired() {
   if (lastPairedLamps.length === 0) {
     const li = document.createElement('li');
     li.className = 'lamp-empty';
-    li.textContent = 'Aucune lampe appairée pour le moment.';
+    li.textContent = t('smallrig.noPairedLampYet');
     smallrigPaired.appendChild(li);
     return;
   }
@@ -576,29 +580,29 @@ function renderSmallrigPaired() {
       || lamp.configurationStatus === 'pending'
       || lamp.configured === false;
     const row = lampRow({
-      title: lamp.name || `Lampe ${lamp.uuid.slice(0, 8)}…`,
-      meta: `Adresse mesh 0x${lamp.unicastAddress.toString(16).padStart(4, '0')}${configurationPending ? ' · configuration en attente' : ''}`,
-      buttonLabel: 'Oublier',
+      title: lamp.name || t('smallrig.lampFallback', { uuid: lamp.uuid.slice(0, 8) }),
+      meta: t('smallrig.meshAddress', { address: lamp.unicastAddress.toString(16).padStart(4, '0') }) + (configurationPending ? t('smallrig.configPending') : ''),
+      buttonLabel: t('smallrig.forgetAction'),
       onClick: async (event) => {
-        if (!window.confirm('La lampe va recevoir un Node Reset avant la suppression locale. Continuer ?')) return;
+        if (!window.confirm(t('smallrig.forgetConfirm'))) return;
         const button = event.currentTarget;
         button.disabled = true;
-        button.textContent = 'Réinitialisation…';
+        button.textContent = t('smallrig.forgetting');
         try {
           await window.klixa.smallrigForget(lamp.uuid, false);
           smallrigMessage.className = 'ok';
-          smallrigMessage.textContent = 'Lampe réinitialisée et oubliée.';
+          smallrigMessage.textContent = t('smallrig.forgotten');
           await refreshSmallrigPaired();
         } catch (error) {
           smallrigMessage.className = 'error';
           smallrigMessage.textContent = error.message;
           button.disabled = false;
-          button.textContent = 'Oublier';
-          if (window.confirm('L’oubli avec Node Reset a échoué. Oublier uniquement la clé locale ? Fais-le seulement si la lampe a déjà été réinitialisée en usine ou est définitivement perdue.')) {
+          button.textContent = t('smallrig.forgetAction');
+          if (window.confirm(t('smallrig.forgetFailedConfirm'))) {
             try {
               await window.klixa.smallrigForget(lamp.uuid, true);
               smallrigMessage.className = 'ok';
-              smallrigMessage.textContent = 'Clé locale supprimée. Un reset usine est requis avant tout nouvel appairage.';
+              smallrigMessage.textContent = t('smallrig.localKeyRemoved');
               await refreshSmallrigPaired();
             } catch (forceError) {
               smallrigMessage.textContent = forceError.message;
@@ -610,15 +614,15 @@ function renderSmallrigPaired() {
     const actions = row.querySelector('.lamp-actions');
     const reconfigureButton = document.createElement('button');
     reconfigureButton.type = 'button';
-    reconfigureButton.textContent = configurationPending ? 'Terminer la configuration' : 'Reconfigurer';
+    reconfigureButton.textContent = t(configurationPending ? 'smallrig.finishConfig' : 'smallrig.reconfigure');
     reconfigureButton.addEventListener('click', async () => {
       reconfigureButton.disabled = true;
       smallrigMessage.className = '';
-      smallrigMessage.textContent = 'Configuration Mesh en cours…';
+      smallrigMessage.textContent = t('smallrig.reconfiguring');
       try {
         await window.klixa.smallrigReconfigure(lamp.uuid);
         smallrigMessage.className = 'ok';
-        smallrigMessage.textContent = 'Configuration Mesh terminée.';
+        smallrigMessage.textContent = t('smallrig.reconfigured');
         await refreshSmallrigPaired();
       } catch (error) {
         smallrigMessage.className = 'error';
@@ -630,12 +634,12 @@ function renderSmallrigPaired() {
 
     const controlButton = document.createElement('button');
     controlButton.type = 'button';
-    controlButton.textContent = 'Piloter';
+    controlButton.textContent = t('smallrig.control');
     controlButton.disabled = configurationPending;
     const panel = buildLampControlPanel(lamp);
     const setOpen = (open) => {
       row.classList.toggle('lamp-row--open', open);
-      controlButton.textContent = open ? 'Masquer le pilotage' : 'Piloter';
+      controlButton.textContent = t(open ? 'smallrig.hideControl' : 'smallrig.control');
     };
     controlButton.addEventListener('click', () => setOpen(!row.classList.contains('lamp-row--open')));
     actions.appendChild(controlButton);
@@ -663,7 +667,7 @@ async function refreshSmallrigPaired() {
     // Ne pas transformer une panne du store/Bluetooth en liste vide : cela ferait
     // croire que les clés Mesh ont disparu. Garder la dernière vue et exposer la cause.
     smallrigMessage.className = 'error';
-    smallrigMessage.textContent = error.message || 'Impossible de charger les lampes SmallRig.';
+    smallrigMessage.textContent = error.message || t('smallrig.loadPairedFailed');
   }
   renderSmallrigPaired();
   renderSmallrigStatus();
@@ -672,7 +676,7 @@ async function refreshSmallrigPaired() {
 smallrigScanBtn.addEventListener('click', async () => {
   smallrigScanning = true;
   smallrigScanBtn.disabled = true;
-  smallrigScanBtn.textContent = 'Scan en cours…';
+  smallrigScanBtn.textContent = t('smallrig.scanning');
   smallrigMessage.className = '';
   smallrigMessage.textContent = '';
   renderSmallrigFound();
@@ -686,7 +690,7 @@ smallrigScanBtn.addEventListener('click', async () => {
   } finally {
     smallrigScanning = false;
     smallrigScanBtn.disabled = false;
-    smallrigScanBtn.textContent = 'Scanner les lampes à proximité';
+    smallrigScanBtn.textContent = t('smallrig.scanButton');
     renderSmallrigFound();
   }
 });
@@ -709,12 +713,12 @@ function renderIntegrationStatus() {
       const enabledKey = INTEGRATION_ENABLED_KEYS[id];
       const explicitlyDisabled = lastConfig[enabledKey] === false || lastConfig[enabledKey] === 'false';
       span.textContent = lastIntegrationStatus === null
-        ? 'Vérification...'
-        : (explicitlyDisabled ? 'Désactivé' : 'Non connecté');
+        ? t('common.checking')
+        : t(explicitlyDisabled ? 'common.disabled' : 'common.notConnected');
     } else {
       el.className = `integration-status status-line ${entry.ok ? 'ok' : 'error'}`;
       icon.setAttribute('d', entry.ok ? ICON_CHECK : ICON_WARNING);
-      span.textContent = entry.ok ? 'Connecté' : (entry.error || 'Non connecté');
+      span.textContent = entry.ok ? t('common.connected') : (entry.error || t('common.notConnected'));
     }
   }
 
@@ -744,8 +748,8 @@ function renderConnectionButton(id, button) {
   const connected = Boolean(lastIntegrationStatus?.[id]?.ok);
   const pending = pendingConnections.has(id);
   button.textContent = pending
-    ? (connected ? 'Déconnexion en cours…' : 'Connexion en cours…')
-    : (connected ? 'Déconnecter' : 'Connecter');
+    ? t(connected ? 'common.disconnecting' : 'common.connecting')
+    : t(connected ? 'common.disconnect' : 'common.connect');
   button.disabled = pending;
   button.classList.toggle('disconnect-btn', connected);
 }
@@ -804,16 +808,18 @@ function renderIntegrationStatusUpdate(status) {
 // silencieux (verifications frequentes, rien a signaler la plupart du temps) et
 // `error` reste dans les logs plutot que d'inquieter pour un echec transitoire
 // (prochain check dans UPDATE_CHECK_INTERVAL_MS, cf. main.js).
+let lastUpdateState = null;
 function renderUpdateStatus(update) {
+  lastUpdateState = update;
   const phase = update?.phase;
   if (phase === 'downloading') {
     updateBanner.hidden = false;
     updateInstallBtn.hidden = true;
-    updateBannerMessage.textContent = `Téléchargement de la mise à jour ${update.version}...`;
+    updateBannerMessage.textContent = t('update.downloading', { version: update.version });
   } else if (phase === 'ready') {
     updateBanner.hidden = false;
     updateInstallBtn.hidden = false;
-    updateBannerMessage.textContent = `Mise à jour ${update.version} prête.`;
+    updateBannerMessage.textContent = t('update.ready', { version: update.version });
   } else {
     updateBanner.hidden = true;
     updateInstallBtn.hidden = true;
@@ -840,11 +846,37 @@ function setForm(config) {
     else if (config[field.name] !== undefined) field.value = config[field.name];
   }
   autoLaunch.checked = Boolean(config.AUTO_LAUNCH);
+  languageSelect.value = config.LANGUAGE || 'system';
   renderPairingUi();
   renderHueUi();
   renderSmallrigStatus();
   renderSecretFields(config);
 }
+
+// Ré-applique la langue courante à TOUT ce qui est déjà rendu (déclenché au chargement
+// et à chaque changement via languageSelect, cf. plus bas) : les libellés statiques
+// (data-i18n) d'une part, et tout ce qui est généré/rendu dynamiquement en JS d'autre
+// part (statuts, pages, panneaux SmallRig...). `lang` est déjà résolu (fr/en, jamais
+// 'system') par l'appelant via resolveLanguage().
+function applyLanguage(lang) {
+  setLanguage(lang);
+  applyStaticTranslations();
+  setActivePage(activePage);
+  renderHeaderStatus();
+  renderIntegrationStatus();
+  renderHueUi();
+  renderSmallrigStatus();
+  renderSmallrigFound();
+  renderSmallrigPaired();
+  if (lastUpdateState) renderUpdateStatus(lastUpdateState);
+  if (!pairingActive) pairBtn.textContent = t('connexion.pairButton');
+}
+
+languageSelect.addEventListener('change', async () => {
+  const config = await window.klixa.setLanguage(languageSelect.value);
+  lastConfig = { ...lastConfig, LANGUAGE: config.LANGUAGE };
+  applyLanguage(resolveLanguage(config.LANGUAGE));
+});
 
 Promise.all([
   window.klixa.getConfig(),
@@ -852,6 +884,7 @@ Promise.all([
   window.klixa.getCloudStatus(),
   window.klixa.getIntegrationStatus()
 ]).then(([config, status, cloudStatus, integrationStatus]) => {
+  applyLanguage(resolveLanguage(config.LANGUAGE));
   setForm(config);
   renderStatus(status);
   renderCloudStatus(cloudStatus);
@@ -901,7 +934,7 @@ function startPairCountdown(expiresAt) {
     const remaining = Math.max(0, expiresAt - Date.now());
     const minutes = Math.floor(remaining / 60000);
     const seconds = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
-    pairCodeTimer.textContent = remaining > 0 ? `Expire dans ${minutes}:${seconds}` : 'Code expiré.';
+    pairCodeTimer.textContent = remaining > 0 ? t('connexion.expiresIn', { minutes, seconds }) : t('connexion.codeExpired');
     if (remaining <= 0) stopPairCountdown();
   };
   tick();
@@ -915,7 +948,7 @@ function resetPairingUi() {
   pairCodeTimer.textContent = '';
   stopPairCountdown();
   pairBtn.disabled = false;
-  pairBtn.textContent = 'Lier ce compagnon';
+  pairBtn.textContent = t('connexion.pairButton');
 }
 
 pairBtn.addEventListener('click', async () => {
@@ -929,7 +962,7 @@ pairBtn.addEventListener('click', async () => {
 
   pairBtn.disabled = true;
   pairMessage.className = '';
-  pairMessage.textContent = 'Génération du code...';
+  pairMessage.textContent = t('connexion.generatingCode');
   try {
     const { userCode, expiresInMs } = await window.klixa.pairingStart({});
     pairingActive = true;
@@ -937,7 +970,7 @@ pairBtn.addEventListener('click', async () => {
     pairCode.hidden = false;
     pairMessage.textContent = '';
     startPairCountdown(Date.now() + expiresInMs);
-    pairBtn.textContent = 'Annuler';
+    pairBtn.textContent = t('connexion.cancelButton');
   } catch (error) {
     pairMessage.className = 'error';
     pairMessage.textContent = error.message;
@@ -953,23 +986,23 @@ huePairBtn.addEventListener('click', async () => {
   const bridgePort = Number.parseInt(hueBridgePort.value || '443', 10);
   if (!bridgeIp) {
     hueMessage.className = 'error';
-    hueMessage.textContent = 'Renseigne l\'IP du bridge.';
+    hueMessage.textContent = t('hue.missingIp');
     return;
   }
   huePairBtn.disabled = true;
-  huePairBtn.textContent = 'Connexion en cours…';
+  huePairBtn.textContent = t('common.connecting');
   hueMessage.className = '';
-  hueMessage.textContent = 'Appairage en cours...';
+  hueMessage.textContent = t('hue.pairing');
   try {
     setForm(await window.klixa.hueRegister(bridgeIp, bridgePort));
     hueMessage.className = 'ok';
-    hueMessage.textContent = 'Bridge appairé.';
+    hueMessage.textContent = t('hue.paired');
   } catch (error) {
     hueMessage.className = 'error';
     hueMessage.textContent = error.message;
   } finally {
     huePairBtn.disabled = false;
-    huePairBtn.textContent = 'Appairer (presser le bouton du bridge avant)';
+    huePairBtn.textContent = t('hue.pairButton');
   }
 });
 
@@ -997,14 +1030,14 @@ window.klixa.onPairingStatus(async (statusUpdate) => {
   resetPairingUi();
   if (statusUpdate.phase === 'claimed') {
     pairMessage.className = 'ok';
-    pairMessage.textContent = 'Compagnon lié, connexion en cours...';
+    pairMessage.textContent = t('connexion.linkedConnecting');
     setForm(await window.klixa.getConfig());
   } else if (statusUpdate.phase === 'expired') {
     pairMessage.className = 'error';
-    pairMessage.textContent = 'Code expiré, relance le pairing.';
+    pairMessage.textContent = t('connexion.linkExpired');
   } else {
     pairMessage.className = 'error';
-    pairMessage.textContent = statusUpdate.message || 'Erreur de pairing.';
+    pairMessage.textContent = statusUpdate.message || t('connexion.pairingError');
   }
 });
 
@@ -1018,7 +1051,7 @@ form.addEventListener('submit', async (event) => {
   const button = event.submitter;
   if (button) button.disabled = true;
   message.className = '';
-  message.textContent = 'Enregistrement...';
+  message.textContent = t('common.saving');
   const data = Object.fromEntries(new FormData(form));
   for (const checkbox of form.querySelectorAll('input[name][type=checkbox]')) data[checkbox.name] = checkbox.checked;
   if (data.SB_PORT) data.SB_PORT = String(Number(data.SB_PORT));
@@ -1036,7 +1069,7 @@ form.addEventListener('submit', async (event) => {
     if (!streamerbotEnabled.checked) pendingConnections.delete('streamerbot');
     if (!smokeEnabled.checked) pendingConnections.delete('smoke');
     message.className = 'ok';
-    message.textContent = 'Configuration enregistrée.';
+    message.textContent = t('common.saved');
   } catch (error) {
     pendingConnections.clear();
     renderIntegrationStatus();

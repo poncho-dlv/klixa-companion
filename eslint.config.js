@@ -59,13 +59,15 @@ export default [
     rules: bugRiskRules,
   },
   {
-    // renderer.js : chargé en <script> classique (pas de bundler) dans la
+    // renderer.js : chargé en <script type="module"> (pas de bundler) dans la
     // fenêtre Electron, contexte navigateur. window.klixa est le pont exposé
-    // par preload.cjs via contextBridge.
+    // par preload.cjs via contextBridge. Module ES pour pouvoir importer les
+    // dictionnaires i18n partagés (src/i18n/*.js, mêmes fichiers que le process
+    // main et les intégrations).
     files: ['desktop/renderer/renderer.js'],
     languageOptions: {
       ecmaVersion: 2024,
-      sourceType: 'script',
+      sourceType: 'module',
       globals: { ...globals.browser },
     },
     plugins: { sonarjs, 'no-unsanitized': noUnsanitized },

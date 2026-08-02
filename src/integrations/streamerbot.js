@@ -1,5 +1,6 @@
 import { StreamerbotClient } from '@streamerbot/client';
 import { createLogger } from '../logger.js';
+import { t } from '../i18n/core.js';
 
 const log = createLogger('streamerbot');
 
@@ -84,8 +85,8 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
 
   async function action(payload = {}) {
     const actionId = String(payload.actionId || payload.id || '').trim();
-    if (!actionId) throw new Error('actionId manquant');
-    if (!connected || !client) throw new Error('Streamer.bot non connecte');
+    if (!actionId) throw new Error(t('errors.streamerbotMissingActionId'));
+    if (!connected || !client) throw new Error(t('errors.streamerbotNotConnected'));
 
     const args = serializeArgs(payload.args && typeof payload.args === 'object' ? payload.args : {});
     const requestId = await client.doAction({ id: actionId }, args);
@@ -96,7 +97,7 @@ export function createStreamerbotIntegration(sbConfig = {}, { emitEvent } = {}) 
     id: 'streamerbot',
     commands: { 'streamerbot.action': action },
     healthcheck: async () => {
-      if (!connected) throw new Error('Streamer.bot non connecte');
+      if (!connected) throw new Error(t('errors.streamerbotNotConnected'));
       return { connected };
     },
     stop() {

@@ -1,4 +1,5 @@
 import { createLogger } from '../../logger.js';
+import { t } from '../../i18n/core.js';
 import { hexToHueSat } from './color-convert.js';
 import { createMeshClient } from './mesh-client.js';
 import { parseMeshState, serializeMeshState } from './mesh-store.js';
@@ -15,7 +16,7 @@ function loadBleTransport() {
   if (!bleTransportPromise) {
     bleTransportPromise = import('./ble-transport.js').catch((err) => {
       bleTransportPromise = null; // permet de retenter (ex. pilote Bluetooth installé après coup)
-      throw new Error(`Bluetooth indisponible sur cette machine : ${err.message}`);
+      throw new Error(t('errors.smallrigBluetoothUnavailable', { message: err.message }));
     });
   }
   return bleTransportPromise;
@@ -62,10 +63,10 @@ export function assertLightCommandResults(command, lightIds, batches) {
   const missing = lightIds.filter((uuid) => !returnedIds.has(uuid));
   if (failures.length > 0 || missing.length > 0) {
     const details = [
-      ...failures.map((failure) => `${failure.uuid}: ${failure.error || 'échec inconnu'}`),
-      ...missing.map((uuid) => `${uuid}: aucun résultat`)
+      ...failures.map((failure) => `${failure.uuid}: ${failure.error || t('errors.smallrigUnknownFailure')}`),
+      ...missing.map((uuid) => `${uuid}: ${t('errors.smallrigNoResult')}`)
     ];
-    const error = new Error(`${command} incomplète (${details.join('; ')})`);
+    const error = new Error(t('errors.smallrigIncomplete', { command, details: details.join('; ') }));
     error.code = failures.length === lightIds.length || results.length === 0
       ? 'SMALLRIG_COMMAND_FAILED'
       : 'SMALLRIG_PARTIAL_FAILURE';
@@ -99,7 +100,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
       try {
         await smallrigConfig.onStateChange(serializeMeshState(nextState));
       } catch (err) {
-        const failure = new Error(`Échec de la persistance de l'état Mesh SmallRig : ${err.message}`, { cause: err });
+        const failure = new Error(t('errors.smallrigMeshStatePersistFailed', { message: err.message }), { cause: err });
         failure.code = 'SMALLRIG_STATE_PERSIST_FAILED';
         persistenceFailure = failure;
         log.error(failure.message);
@@ -128,8 +129,8 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   });
 
   function checkLightIds(lightIds) {
-    if (lightIds.length === 0) throw new Error('Aucune lampe cible (lightIds vide)');
-    if (lightIds.length > maxLamps) throw new Error(`Trop de lampes ciblées (${lightIds.length}, maximum ${maxLamps})`);
+    if (lightIds.length === 0) throw new Error(t('errors.smallrigNoTargetLight'));
+    if (lightIds.length > maxLamps) throw new Error(t('errors.smallrigTooManyLights', { count: lightIds.length, max: maxLamps }));
   }
 
   // Baseline logicielle par lampe : dernier état ÉCRIT par le compagnon (couleur/CCT/
@@ -186,15 +187,15 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   // Bind) — sans cette dernière étape la lampe ignorerait silencieusement les commandes.
   async function provision(payload = {}) {
     const bleDeviceId = String(payload.bleDeviceId || '').trim();
-    if (!bleDeviceId) throw new Error('bleDeviceId manquant (relancez smallrig.discover)');
+    if (!bleDeviceId) throw new Error(t('errors.smallrigMissingBleDeviceId'));
     const deviceUuid = String(payload.deviceUuid || '').trim().toLowerCase() || null;
-    if (deviceUuid && !/^[0-9a-f]{32}$/.test(deviceUuid)) throw new Error('deviceUuid SmallRig invalide');
+    if (deviceUuid && !/^[0-9a-f]{32}$/.test(deviceUuid)) throw new Error(t('errors.smallrigInvalidDeviceUuid'));
     const name = payload.name ? String(payload.name).trim().slice(0, 128) : null;
     // Une lampe qui réapparaît en beacon « unprovisioned » après un provisioning
     // interrompu doit pouvoir remplacer son entrée locale sans consommer un slot.
     const replacesExistingUuid = Boolean(deviceUuid && state.nodes.some((node) => node.uuid === deviceUuid));
     if (state.nodes.length >= maxLamps && !replacesExistingUuid) {
-      throw new Error(`Nombre maximum de lampes atteint (${maxLamps})`);
+      throw new Error(t('errors.smallrigMaxLampsReached', { max: maxLamps }));
     }
 
     try {
@@ -225,9 +226,9 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   // évite de devoir tout recommencer (et donc réinitialiser physiquement la lampe).
   async function reconfigure(payload = {}) {
     const uuid = String(payload.uuid || '').trim();
-    if (!uuid) throw new Error('uuid manquant');
+    if (!uuid) throw new Error(t('errors.smallrigMissingUuid'));
     const node = state.nodes.find((n) => n.uuid === uuid);
-    if (!node) throw new Error('Lampe inconnue (uuid non trouvé parmi les lampes provisionnées)');
+    if (!node) throw new Error(t('errors.smallrigUnknownLamp'));
     await client.configureNode(node);
     log.info('Lampe reconfigurée', { uuid });
     return { uuid, name: node.name, unicastAddress: node.unicastAddress };
@@ -237,7 +238,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   // locale. `forceLocal` est un recours explicite après reset usine/perte définitive.
   async function forget(payload = {}) {
     const uuid = String(payload.uuid || '').trim();
-    if (!uuid) throw new Error('uuid manquant');
+    if (!uuid) throw new Error(t('errors.smallrigMissingUuid'));
     const result = await client.forget({ uuid, forceLocal: payload.forceLocal === true });
     if (result.removed) baselineByUuid.delete(uuid);
     log.info('Lampe oubliée', { uuid, removed: result.removed });
@@ -258,7 +259,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     checkLightIds(lightIds);
 
     const hex = String(payload.color || payload.smallrigColor || '').trim().toUpperCase();
-    if (!isHexColor(hex)) throw new Error(`Couleur invalide: ${hex}`);
+    if (!isHexColor(hex)) throw new Error(t('errors.smallrigInvalidColor', { color: hex }));
 
     const { hue, sat } = hexToHueSat(hex);
     const intensity = clamp(payload.brightness ?? payload.smallrigBrightness, 1, 100, DEFAULTS.brightness);
@@ -275,7 +276,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
       // d'alerte, déjà fire-and-forget côté orchestrateur Klixa).
       const known = new Set(client.listNodes().map((node) => node.uuid));
       const unknown = lightIds.filter((id) => !known.has(id));
-      if (unknown.length > 0) throw new Error(`Lampes inconnues ou non provisionnées : ${unknown.join(', ')}`);
+      if (unknown.length > 0) throw new Error(t('errors.smallrigUnknownLamps', { ids: unknown.join(', ') }));
       blink(lightIds, { hue, sat, intensity, durationMs }).catch((err) => {
         log.warn('Clignotement SmallRig en échec', err?.message || String(err));
       });
@@ -468,13 +469,13 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   // smallrig.status — lecture d'état (mode courant + batterie) d'une seule lampe.
   async function status(payload = {}) {
     const uuid = String(payload.uuid || '').trim();
-    if (!uuid) throw new Error('uuid manquant');
+    if (!uuid) throw new Error(t('errors.smallrigMissingUuid'));
     let lightState;
     let capacity;
     try { lightState = await client.readStatus(uuid, STATUS_READ_OPTIONS); } catch (err) { lightState = { error: err.message }; }
     try { capacity = await client.readCapacity(uuid, STATUS_READ_OPTIONS); } catch (err) { capacity = { error: err.message }; }
     if (lightState.error && capacity.error) {
-      const error = new Error(`Lecture SmallRig impossible : état (${lightState.error}), batterie (${capacity.error})`);
+      const error = new Error(t('errors.smallrigStatusReadFailed', { state: lightState.error, capacity: capacity.error }));
       error.code = 'SMALLRIG_STATUS_FAILED';
       throw error;
     }

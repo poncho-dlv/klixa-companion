@@ -1,5 +1,6 @@
 import OBSWebSocket from 'obs-websocket-js';
 import { createLogger } from '../logger.js';
+import { t } from '../i18n/core.js';
 
 const log = createLogger('obs');
 
@@ -83,7 +84,7 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         obs.disconnect().catch(() => {});
-        reject(new Error('timeout de connexion (10 s)'));
+        reject(new Error(t('errors.obsConnectTimeout')));
       }, 10000);
       obs.connect(url, obsConfig.password || undefined)
         .then(() => { clearTimeout(timer); resolve(); })
@@ -135,13 +136,13 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   // obs.sync-overlay-token — réécrit le token overlay dans les sources navigateur OBS
   // dont l'URL pointe vers `overlayBase`. Port fidèle de ObsSyncOverlayToken.cs.
   async function syncOverlayToken(payload = {}) {
-    if (!connected) throw new Error('OBS non connecté');
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
 
     const token = String(payload.overlayToken || '').trim();
-    if (!token) throw new Error('overlayToken manquant');
+    if (!token) throw new Error(t('errors.obsMissingOverlayToken'));
 
     const base = String(payload.overlayBase || '').trim();
-    if (!base) throw new Error('overlayBase manquant (fourni par le serveur)');
+    if (!base) throw new Error(t('errors.obsMissingOverlayBase'));
 
     // GetInputList renvoie TOUTES les sources connues d'OBS, quel que soit leur
     // canevas/scène (y compris les sources non placées dans une scène). On ne parcourt
@@ -179,7 +180,7 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   // 0 = bas de liste), + la scène courante. Consommé par la page admin « Écran
   // dynamique » (mapping entre scène et titre/étapes).
   async function getScenes() {
-    if (!connected) throw new Error('OBS non connecté');
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
 
     const { scenes, currentProgramSceneName } = await obs.call('GetSceneList');
     const names = (scenes || [])
@@ -195,17 +196,17 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
   // admin « Régie » (server/routers/obs.js, POST /api/obs/regie/switch). Le serveur a
   // déjà validé la scène contre sa whitelist ; ici on ne fait que transmettre à OBS.
   async function setScene(payload = {}) {
-    if (!connected) throw new Error('OBS non connecté');
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
 
     const sceneName = String(payload.sceneName || '').trim();
-    if (!sceneName) throw new Error('sceneName manquant');
+    if (!sceneName) throw new Error(t('errors.obsMissingSceneName'));
 
     await obs.call('SetCurrentProgramScene', { sceneName });
     return { sceneName };
   }
 
   async function healthcheck() {
-    if (!connected) throw new Error('OBS non connecté');
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
     return { url, connected };
   }
 

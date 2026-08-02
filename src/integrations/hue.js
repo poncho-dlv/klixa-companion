@@ -1,6 +1,7 @@
 import https from 'node:https';
 import net from 'node:net';
 import { createLogger } from '../logger.js';
+import { t } from '../i18n/core.js';
 import { clamp, isHexColor, mapWithConcurrency, normalizeLightIds } from './light-utils.js';
 
 const log = createLogger('hue');
@@ -64,7 +65,7 @@ export function isPrivateBridgeIp(value) {
 
 function assertPrivateBridgeIp(bridgeIp) {
   if (!isPrivateBridgeIp(bridgeIp)) {
-    throw new Error('HUE_BRIDGE_IP doit être une adresse IP privée littérale');
+    throw new Error(t('errors.hueBridgeIpMustBePrivate'));
   }
 }
 
@@ -98,12 +99,12 @@ function hueRequest(bridgeIp, bridgePort, appKey, method, path, body) {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             try { resolve(content ? JSON.parse(content) : {}); } catch { resolve(content); }
           } else {
-            reject(new Error(`Hue HTTP ${res.statusCode}: ${content}`));
+            reject(new Error(t('errors.hueHttpError', { status: res.statusCode, text: content })));
           }
         });
       }
     );
-    req.on('timeout', () => req.destroy(new Error('Hue timeout')));
+    req.on('timeout', () => req.destroy(new Error(t('errors.hueTimeout'))));
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
@@ -118,7 +119,7 @@ function hueRequest(bridgeIp, bridgePort, appKey, method, path, body) {
 // au cloud, uniquement persistée localement par l'appelant).
 export async function registerHueBridge(bridgeIp, bridgePort = 443, devicetype = 'Klixa#companion') {
   const ip = String(bridgeIp || '').trim();
-  if (!ip) throw new Error('bridgeIp manquant');
+  if (!ip) throw new Error(t('errors.hueBridgeIpMissing'));
   assertPrivateBridgeIp(ip);
 
   const res = await hueRequest(ip, bridgePort, '', 'POST', '/api', { devicetype: String(devicetype || 'Klixa#companion').trim() });
@@ -132,9 +133,9 @@ export async function registerHueBridge(bridgeIp, bridgePort = 443, devicetype =
 
   const failure = entries.find((e) => e?.error);
   if (failure?.error?.type === 101) {
-    throw new Error('Appuyez sur le bouton du bridge Hue puis réessayez');
+    throw new Error(t('errors.huePressButton'));
   }
-  throw new Error('Réponse inattendue du bridge Hue');
+  throw new Error(t('errors.hueUnexpectedResponse'));
 }
 
 /**
@@ -158,7 +159,7 @@ export function createHueIntegration(hueConfig = {}) {
     const bridgePort = Number.parseInt(hueConfig.bridgePort, 10) || 443;
     const appKey = String(hueConfig.appKey || '').trim();
     if (!bridgeIp || !appKey) {
-      throw new Error('Bridge Hue non configuré (à faire depuis l\'app Klixa Companion, section Philips Hue)');
+      throw new Error(t('errors.hueNotConfigured'));
     }
     assertPrivateBridgeIp(bridgeIp);
     return { bridgeIp, bridgePort, appKey };
@@ -238,8 +239,8 @@ export function createHueIntegration(hueConfig = {}) {
     const creds = resolveCredentials();
 
     const lightIds = normalizeLightIds(payload.lightIds ?? payload.hueLightIds);
-    if (lightIds.length === 0) throw new Error('Aucune lampe cible (lightIds vide)');
-    if (lightIds.length > maxLights) throw new Error(`Trop de lampes ciblées (${lightIds.length}, maximum ${maxLights})`);
+    if (lightIds.length === 0) throw new Error(t('errors.hueNoTargetLight'));
+    if (lightIds.length > maxLights) throw new Error(t('errors.hueTooManyLights', { count: lightIds.length, max: maxLights }));
 
     const transitionMs = clamp(payload.transitionMs ?? payload.hueTransitionMs, 0, 10000, DEFAULTS.transitionMs);
 
@@ -253,7 +254,7 @@ export function createHueIntegration(hueConfig = {}) {
     }
 
     const hex = String(payload.color || payload.hueColor || '').trim().toUpperCase();
-    if (!isHexColor(hex)) throw new Error(`Couleur invalide: ${hex}`);
+    if (!isHexColor(hex)) throw new Error(t('errors.hueInvalidColor', { color: hex }));
 
     const xy = hexToXy(hex);
     const brightness = clamp(payload.brightness ?? payload.hueBrightness, 1, 100, DEFAULTS.brightness);

@@ -7,6 +7,7 @@ import { registerHueBridge } from '../src/integrations/hue.js';
 import { ConfigStore } from './config-store.js';
 import electronUpdaterPkg from 'electron-updater';
 import { createLogger, setLogFile } from '../src/logger.js';
+import { t, setLanguage, resolveLanguage } from '../src/i18n/core.js';
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } = electron;
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -33,7 +34,7 @@ let window;
 let tray;
 let runtime;
 let store;
-let status = { running: false, message: 'Demarrage...' };
+let status = { running: false, message: t('status.starting') };
 let quitting = false;
 // Statut du handshake cloud (distinct de `status` : le runtime local peut demarrer
 // sans que la liaison WS au serveur Klixa soit etablie). Pilote l'affichage des
@@ -122,7 +123,7 @@ function buildRuntimeConfig(values) {
 }
 
 async function restartRuntime(values) {
-  updateStatus({ running: false, message: 'Redemarrage...' });
+  updateStatus({ running: false, message: t('status.restarting') });
   updateCloudStatus({ connected: false, features: {} });
   // Pas de reset d'integrationStatus ici (contrairement a cloudStatus) : le prochain
   // healthcheck (lance immediatement par startCompanion) l'ecrasera vite avec des
@@ -134,10 +135,10 @@ async function restartRuntime(values) {
       buildRuntimeConfig(values),
       { onCloudStatus: updateCloudStatus, onIntegrationStatus: updateIntegrationStatus }
     );
-    updateStatus({ running: true, message: values.CLOUD_WS_URL ? 'Compagnon actif' : 'Actif en mode local' });
+    updateStatus({ running: true, message: values.CLOUD_WS_URL ? t('status.activeCloud') : t('status.activeLocal') });
   } catch (error) {
     log.error('Echec du demarrage du runtime', error.stack || error.message);
-    updateStatus({ running: false, message: `Erreur : ${error.message}` });
+    updateStatus({ running: false, message: t('status.error', { message: error.message }) });
     throw error;
   }
 }
@@ -234,6 +235,9 @@ function publicConfig(values) {
     delete result[key];
   }
   result.AUTO_LAUNCH = app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
+  // 'system' (defaut) = pas de reglage explicite, la langue suit la locale OS (cf.
+  // resolveLanguage dans src/i18n/core.js, appele identiquement cote renderer).
+  result.LANGUAGE = (result.LANGUAGE === 'fr' || result.LANGUAGE === 'en') ? result.LANGUAGE : 'system';
   return result;
 }
 
@@ -246,32 +250,43 @@ function registerIpc() {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: true, args: LOGIN_ITEM_ARGS });
     return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
   });
+  // Reglage de langue independant du gros formulaire de config (comme auto-launch) :
+  // ne redemarre PAS le runtime (couperait la liaison cloud pour rien), juste persiste
+  // + reapplique immediatement aux surfaces cote main (tray, futurs dialogues natifs).
+  ipcMain.handle('language:set', (_event, language) => {
+    const current = store.load();
+    const next = { ...current, LANGUAGE: (language === 'fr' || language === 'en') ? language : 'system' };
+    store.save(next);
+    setLanguage(resolveLanguage(next.LANGUAGE));
+    applyTrayLanguage();
+    return publicConfig(next);
+  });
   ipcMain.handle('config:save', async (_event, submitted, { integrationId } = {}) => {
     const current = store.load();
     const obsHost = String(submitted.OBS_WS_HOST || '').trim();
     const obsPort = Number.parseInt(submitted.OBS_WS_PORT, 10);
-    if (!obsHost) throw new Error('IP ou hôte OBS requis');
-    if (!Number.isInteger(obsPort) || obsPort < 1 || obsPort > 65535) throw new Error('Port OBS invalide');
+    if (!obsHost) throw new Error(t('errors.obsHostRequired'));
+    if (!Number.isInteger(obsPort) || obsPort < 1 || obsPort > 65535) throw new Error(t('errors.obsPortInvalid'));
     const obsUrl = new URL(`ws://${obsHost.includes(':') && !obsHost.startsWith('[') ? `[${obsHost}]` : obsHost}:${obsPort}`);
     const normalizedSubmitted = { ...submitted, OBS_WS_URL: obsUrl.href.replace(/\/$/, '') };
     delete normalizedSubmitted.OBS_WS_HOST;
     delete normalizedSubmitted.OBS_WS_PORT;
     const smokeHost = String(submitted.SMOKE_SERVICE_HOST || '').trim();
     const smokePort = Number.parseInt(submitted.SMOKE_SERVICE_PORT || '8787', 10);
-    if (smokeHost && (!Number.isInteger(smokePort) || smokePort < 1 || smokePort > 65535)) throw new Error('Port machine à fumée invalide');
+    if (smokeHost && (!Number.isInteger(smokePort) || smokePort < 1 || smokePort > 65535)) throw new Error(t('errors.smokePortInvalid'));
     normalizedSubmitted.SMOKE_SERVICE_URL = smokeHost
       ? new URL(`http://${smokeHost.includes(':') && !smokeHost.startsWith('[') ? `[${smokeHost}]` : smokeHost}:${smokePort}`).href.replace(/\/$/, '')
       : '';
     delete normalizedSubmitted.SMOKE_SERVICE_HOST;
     delete normalizedSubmitted.SMOKE_SERVICE_PORT;
     const huePort = Number.parseInt(submitted.HUE_BRIDGE_PORT || '443', 10);
-    if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error('Port Hue invalide');
+    if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error(t('errors.huePortInvalid'));
     normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
     const next = { ...current, ...normalizedSubmitted };
     for (const key of SECRET_KEYS) {
       if (!normalizedSubmitted[key]) next[key] = current[key] || '';
     }
-    if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error('URL cloud invalide (ws:// ou wss:// attendu)');
+    if (next.CLOUD_WS_URL && !/^wss?:\/\//i.test(next.CLOUD_WS_URL)) throw new Error(t('errors.cloudUrlInvalid'));
     store.save(next);
     // Chaque page a son propre bouton "Enregistrer" cible sur SON integration (cf.
     // data-integration cote renderer) : un redemarrage complet du runtime n'est donc
@@ -290,9 +305,9 @@ function registerIpc() {
   // chiffré existant. Klixa ne voit jamais l'IP ni la clé, même transitoirement.
   ipcMain.handle('hue:register', async (_event, { bridgeIp, bridgePort } = {}) => {
     const trimmedIp = String(bridgeIp || '').trim();
-    if (!trimmedIp) throw new Error('IP du bridge requise');
+    if (!trimmedIp) throw new Error(t('errors.hueBridgeIpRequired'));
     const port = Number.parseInt(bridgePort || '443', 10);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port Hue invalide');
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(t('errors.huePortInvalid'));
     const { appKey } = await registerHueBridge(trimmedIp, port);
     const current = store.load();
     const next = { ...current, HUE_BRIDGE_IP: trimmedIp, HUE_BRIDGE_PORT: String(port), HUE_APP_KEY: appKey };
@@ -313,7 +328,7 @@ function registerIpc() {
   // la persistance de l'etat mesh se fait via smallrig.onStateChange (branche dans
   // buildRuntimeConfig), jamais via ces handlers directement.
   function requireRuntime() {
-    if (!runtime) throw new Error('Compagnon en cours de démarrage, réessaie dans un instant');
+    if (!runtime) throw new Error(t('errors.companionStarting'));
     return runtime;
   }
   ipcMain.handle('smallrig:discover', async (_event, { timeoutMs } = {}) => {
@@ -362,7 +377,7 @@ function registerIpc() {
     const resolvedBaseUrl = String(baseUrl || store.load().CLOUD_PAIR_URL || DEFAULT_CLOUD_PAIR_URL)
       .trim()
       .replace(/\/+$/, '');
-    if (!/^https?:\/\//i.test(resolvedBaseUrl)) throw new Error('URL d\'instance invalide (http:// ou https:// attendu)');
+    if (!/^https?:\/\//i.test(resolvedBaseUrl)) throw new Error(t('errors.pairInstanceUrlInvalid'));
 
     const response = await fetch(`${resolvedBaseUrl}/api/companion-pair/start`, { method: 'POST' });
     const data = await response.json();
@@ -401,10 +416,10 @@ const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 async function promptRestartToInstall(version) {
   const { response } = await dialog.showMessageBox({
     type: 'info',
-    title: 'Mise à jour prête',
-    message: `Klixa Companion ${version} est prêt à être installé.`,
-    detail: 'Redémarrer maintenant pour appliquer la mise à jour, ou plus tard depuis le menu de la zone de notification.',
-    buttons: ['Redémarrer maintenant', 'Plus tard'],
+    title: t('dialogs.updateReadyTitle'),
+    message: t('dialogs.updateReadyMessage', { version }),
+    detail: t('dialogs.updateReadyDetail'),
+    buttons: [t('dialogs.restartNow'), t('dialogs.later')],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -422,8 +437,8 @@ async function checkForUpdatesManually() {
   if (!app.isPackaged) {
     await dialog.showMessageBox({
       type: 'info',
-      title: 'Mise à jour',
-      message: 'Vérification indisponible en développement (application non empaquetée).'
+      title: t('dialogs.updateTitle'),
+      message: t('dialogs.updateUnavailableDev')
     });
     return;
   }
@@ -434,8 +449,8 @@ async function checkForUpdatesManually() {
     if (!latestVersion || latestVersion === app.getVersion()) {
       await dialog.showMessageBox({
         type: 'info',
-        title: 'Mise à jour',
-        message: `Vous utilisez déjà la dernière version (${app.getVersion()}).`
+        title: t('dialogs.updateTitle'),
+        message: t('dialogs.updateAlreadyLatest', { version: app.getVersion() })
       });
       return;
     }
@@ -443,16 +458,16 @@ async function checkForUpdatesManually() {
     // « pret a installer » (promptRestartToInstall) prendra le relais tout seul.
     await dialog.showMessageBox({
       type: 'info',
-      title: 'Mise à jour',
-      message: `Nouvelle version disponible : ${latestVersion}`,
-      detail: 'Téléchargement en cours en arrière-plan. Une notification apparaîtra une fois l\'installation prête.'
+      title: t('dialogs.updateTitle'),
+      message: t('dialogs.updateAvailable', { version: latestVersion }),
+      detail: t('dialogs.updateDownloadingDetail')
     });
   } catch (error) {
     log.warn('Echec du check manuel de mise a jour', error.message);
     await dialog.showMessageBox({
       type: 'error',
-      title: 'Mise à jour',
-      message: 'Échec de la vérification des mises à jour',
+      title: t('dialogs.updateTitle'),
+      message: t('dialogs.updateCheckFailed'),
       detail: error.message
     });
   }
@@ -461,10 +476,10 @@ async function checkForUpdatesManually() {
 function showAboutDialog() {
   dialog.showMessageBox({
     type: 'info',
-    title: 'À propos de Klixa Companion',
+    title: t('dialogs.aboutTitle'),
     message: 'Klixa Companion',
-    detail: `Version ${app.getVersion()}`,
-    buttons: ['Vérifier les mises à jour', 'Fermer'],
+    detail: t('dialogs.aboutVersion', { version: app.getVersion() }),
+    buttons: [t('dialogs.checkForUpdates'), t('dialogs.close')],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -516,18 +531,32 @@ function configureUpdates() {
   setInterval(check, UPDATE_CHECK_INTERVAL_MS);
 }
 
+// Reconstruit le menu tray avec les libellés de la langue courante — appelé au
+// premier lancement et a chaque changement de langue (cf. IPC `language:set`).
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    { label: t('tray.open'), click: showWindow },
+    { label: t('tray.openLogs'), click: () => shell.openPath(logDir) },
+    { label: t('tray.about'), click: showAboutDialog },
+    { type: 'separator' },
+    { label: t('tray.quit'), click: () => { quitting = true; app.quit(); } }
+  ]);
+}
+
+function applyTrayLanguage() {
+  tray?.setContextMenu(buildTrayMenu());
+}
+
 app.whenReady().then(async () => {
   app.setAppUserModelId('live.klixa.companion');
   store = new ConfigStore(app.getPath('userData'));
+  // Langue résolue une fois au démarrage (réglage explicite en config, sinon locale
+  // système via Intl, cf. src/i18n/core.js) — reappliquée par le handler IPC
+  // `language:set` des qu'elle change depuis les Paramètres, sans redémarrer le runtime.
+  setLanguage(resolveLanguage(store.load().LANGUAGE));
   createWindow();
   tray = new Tray(trayImage());
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Ouvrir Klixa Companion', click: showWindow },
-    { label: 'Ouvrir les logs', click: () => shell.openPath(logDir) },
-    { label: 'À propos', click: showAboutDialog },
-    { type: 'separator' },
-    { label: 'Quitter', click: () => { quitting = true; app.quit(); } }
-  ]));
+  applyTrayLanguage();
   tray.on('double-click', showWindow);
   registerIpc();
   await restartRuntime(store.load());
@@ -535,10 +564,10 @@ app.whenReady().then(async () => {
   if (!process.argv.includes('--hidden')) showWindow();
 }).catch((error) => {
   log.error('Echec du demarrage de l\'application', error.stack || error.message);
-  updateStatus({ running: false, message: `Erreur : ${error.message}` });
+  updateStatus({ running: false, message: t('status.error', { message: error.message }) });
   dialog.showErrorBox(
-    'Klixa Companion — démarrage impossible',
-    `${error.message}\n\nLa configuration et les clés Mesh ont été conservées. Consulte les logs avant toute réinitialisation.`
+    t('dialogs.startupErrorTitle'),
+    t('dialogs.startupErrorDetail', { message: error.message })
   );
   showWindow();
 });
