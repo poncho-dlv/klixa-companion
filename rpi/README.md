@@ -6,9 +6,8 @@ ses **éléments pilotables** (un relais on/off, dans le cas de la machine à fu
 le mécanisme est générique, à toi de piloter ce que tu veux). Protocole complet :
 [`../protocol/devices-messages.md`](../protocol/devices-messages.md).
 
-**C'est CE script qui se connecte au compagnon**, jamais l'inverse (comme le compagnon
-lui-même se connecte au cloud Klixa) : pas de port à ouvrir sur le Raspberry Pi, pas
-besoin que le compagnon connaisse son IP à l'avance.
+**C'est CE script qui se connecte au compagnon**, jamais l'inverse : pas de port à ouvrir 
+sur le Raspberry Pi, pas besoin que le compagnon connaisse son IP à l'avance.
 
 ## Machine à fumée (exemple de référence)
 
@@ -29,10 +28,10 @@ pip3 install -r requirements.txt --break-system-packages
 
 ### Générer un token
 
-Contrairement à l'ancien modèle (secret partagé choisi à la main), le token se génère
-**depuis l'IHM du compagnon** (app Klixa Companion → page « Appareils LAN » → Générer un
-token) : donne-lui l'identifiant que tu vas mettre dans `DEVICE_ID` (ex.
-`smoke-machine`), le token n'est affiché qu'une seule fois, à copier immédiatement.
+Le token se génère **depuis l'IHM du compagnon** 
+app Klixa Companion → page « Appareils LAN » → Générer un token) : donne-lui l'identifiant
+que tu vas mettre dans `DEVICE_ID` (ex. `smoke-machine`), le token n'est affiché qu'une 
+seule fois, à copier immédiatement.
 
 ### Configuration
 
@@ -59,10 +58,7 @@ sudo systemctl enable --now klixa-smoke-relay
 journalctl -u klixa-smoke-relay -f
 ```
 
-Pas de `curl` de test ici : ce script n'écoute plus rien (il ne fait que se connecter
-au compagnon), donc « ça marche » se vérifie dans les logs (`Connecté et enregistré
-auprès du compagnon.`) et dans l'IHM du compagnon (le device apparaît dans la liste
-« connectés »).
+Si le script fonctionne le device apparaît « connectés » dans le compagnon.
 
 ## Écrire son propre agent (autre matériel)
 
@@ -94,16 +90,6 @@ connexion, même s'il fait un `sleep()`) ou une coroutine `async def`. `payload`
 structuré (construit par Klixa depuis le schéma `params`, optionnel) ; `data` est un
 champ JSON libre jamais interprété ni par Klixa ni par le compagnon — sa forme
 t'appartient entièrement. Voir la docstring de `klixa_device_agent.py` pour le détail.
-
-## Ancien service HTTP (`smoke_service.py`) — legacy, en cours de retrait
-
-`smoke_service.py`/`.env.example`/`klixa-smoke.service` à la racine de ce dossier sont
-l'**ancien** modèle (le compagnon appelait ce service en HTTP sortant, ce script était
-serveur). Encore fonctionnel aujourd'hui (le compagnon peut encore s'y connecter via
-`src/integrations/smoke.js`), mais remplacé par `examples/smoke_relay.py` ci-dessus —
-gardé en parallèle le temps de valider ce dernier sur le matériel réel, sera retiré une
-fois la bascule confirmée (cf. `docs/local-device-agent-plan.md`, repo Klixa, phase 3).
-Ne pas utiliser pour un nouveau déploiement.
 
 ## Garde-fous
 
