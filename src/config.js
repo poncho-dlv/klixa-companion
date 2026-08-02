@@ -80,6 +80,21 @@ return {
     password: env.SB_PASSWORD || '',
     scheme: env.SB_SCHEME || 'ws',
   },
+  devices: {
+    // Appareils LAN génériques (RPi, ESP...) qui se connectent AU compagnon en WS
+    // sortant sur /devices/ws et s'annoncent avec leurs éléments pilotables (switch
+    // on/off, etc.) — la machine à fumée en est un exemple, pas un cas spécial. Voir
+    // docs/local-device-agent-plan.md (repo Klixa) pour le protocole complet.
+    // Un token PAR DEVICE (jamais COMPANION_LOCAL_TOKEN) : seul son hash est persisté
+    // (device-token-store.js), le JSON de l'état est injecté/sauvegardé comme l'état
+    // Mesh SmallRig (tokensJson/tokensFile/onTokensChange, même triple).
+    enabled: bool(env.DEVICES_ENABLED, true),
+    maxDevices: int(env.DEVICES_MAX, 20),
+    commandTimeoutMs: int(env.DEVICES_COMMAND_TIMEOUT_MS, 5000),
+    tokensJson: env.DEVICES_TOKENS_JSON || '',
+    tokensFile: env.DEVICES_TOKENS_FILE || '',
+    onTokensChange: undefined,
+  },
 };
 }
 

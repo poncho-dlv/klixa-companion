@@ -3,15 +3,47 @@ import { createIntegrationRegistry } from './integration-registry.js';
 import { registerIntegration, registerIntegrations } from './integrations/index.js';
 import { createCloudLink } from './cloud-link.js';
 import { createLocalServer } from './local-server.js';
+import { createDeviceHub } from './device-hub.js';
+import { createDeviceTokenStore } from './device-token-store.js';
+import { createDevicesIntegration } from './integrations/devices.js';
 
 const log = createLogger('runtime');
 const INTEGRATION_STATUS_POLL_MS = 5000;
+
+// Câblage spécial (hors registerIntegrations) : contrairement à hue/obs/smallrig, cette
+// intégration a besoin d'un hub partagé avec le serveur local (upgrade WS /devices/ws),
+// pas seulement de `config` — cf. docs/local-device-agent-plan.md (repo Klixa).
+function createDevicesIntegrationIfEnabled(config) {
+  if (!config.devices?.enabled) return { integration: null, deviceHub: null };
+
+  const tokenStore = createDeviceTokenStore({
+    initialJson: config.devices.tokensJson,
+    onChange: async (tokensJson) => {
+      config.devices.tokensJson = tokensJson;
+      if (typeof config.devices.onTokensChange === 'function') await config.devices.onTokensChange(tokensJson);
+    }
+  });
+  const deviceHub = createDeviceHub({
+    tokenStore,
+    maxDevices: config.devices.maxDevices,
+    commandTimeoutMs: config.devices.commandTimeoutMs
+  });
+  return { integration: createDevicesIntegration(deviceHub, tokenStore), deviceHub };
+}
 
 export function startCompanion(config, { onCloudStatus, onIntegrationStatus } = {}) {
   const registry = createIntegrationRegistry();
   const cloudLink = createCloudLink(config.cloud, registry, { onCloudStatus });
   registerIntegrations(registry, config, { emitEvent: (event) => cloudLink.sendEvent(event) });
-  const localServer = createLocalServer(config, registry);
+  const { integration: devicesIntegration, deviceHub } = createDevicesIntegrationIfEnabled(config);
+  if (devicesIntegration) {
+    try {
+      registry.register(devicesIntegration);
+    } catch (err) {
+      log.error('Intégration devices non chargée', err.message);
+    }
+  }
+  const localServer = createLocalServer(config, registry, { deviceHub });
   cloudLink.start();
   localServer.start();
   log.info('Compagnon Klixa demarre', { commands: registry.listCommands() });

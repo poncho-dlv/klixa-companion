@@ -31,6 +31,7 @@ export default {
     integrationsGroup: 'Integrations',
     smoke: 'Smoke machine',
     smallrig: 'SmallRig lamps',
+    devices: 'LAN devices',
     settings: 'Settings'
   },
   pages: {
@@ -40,6 +41,7 @@ export default {
     smoke: { title: 'Smoke machine', description: 'Control the control room smoke machine.' },
     hue: { title: 'Philips Hue', description: 'Control lights via the Hue bridge.' },
     smallrig: { title: 'SmallRig lamps', description: 'Manage RM75 lamps over Bluetooth Mesh.' },
+    devices: { title: 'LAN devices', description: 'Third-party scripts and devices (Raspberry Pi, ESP...) connected to the companion.' },
     settings: { title: 'Settings', description: 'General companion settings.' }
   },
   connexion: {
@@ -149,6 +151,27 @@ export default {
     readCurrentState: 'Read current state',
     reading: 'Reading…'
   },
+  devices: {
+    hint: 'Connect your own scripts or devices (Raspberry Pi, ESP...) to the companion: generate a token, paste it into your script, and it will show up below once connected.',
+    createHeading: 'Generate a token',
+    deviceIdLabel: 'Id',
+    deviceNameLabel: 'Name',
+    generateButton: 'Generate a token',
+    missingId: 'Id required (letters, digits, - and _)',
+    generating: 'Generating...',
+    generated: 'Token generated.',
+    tokenOneTimeWarning: 'Copy this token now: it will never be shown again.',
+    registeredHeading: 'Registered devices',
+    noTokenYet: 'No device registered yet.',
+    tokenMeta: 'id: %deviceId%',
+    revokeAction: 'Revoke',
+    revoking: 'Revoking...',
+    revoked: '"%deviceId%" revoked.',
+    revokeConfirm: 'Revoke "%deviceId%"? The script will need to be reconfigured with a new token.',
+    connectedHeading: 'Currently connected devices',
+    noneConnected: 'No device connected yet.',
+    noElements: 'no element announced'
+  },
   settings: {
     autoLaunch: 'Launch automatically with Windows',
     language: 'Language',
@@ -211,6 +234,19 @@ export default {
     smokeUnreachable: 'Smoke service unreachable (HTTP %status%)',
     streamerbotMissingActionId: 'actionId missing',
     streamerbotNotConnected: 'Streamer.bot not connected',
+    deviceProtocolVersion: 'Unsupported protocol version',
+    deviceInvalidToken: 'Invalid device token',
+    deviceLimitReached: 'Maximum number of connected devices reached',
+    deviceDisconnected: 'Device disconnected',
+    deviceCommandFailed: 'Device command failed',
+    deviceOffline: 'Device offline: %deviceId%',
+    deviceUnknownAction: 'Unknown action for this device: %elementId%.%action%',
+    deviceTimeout: 'The device did not respond (timeout)',
+    deviceHubStopped: 'Device hub stopped',
+    deviceTriggerMissingFields: 'deviceId, elementId and action are required',
+    deviceTokensStateInvalid: 'Unreadable device tokens state (invalid JSON)',
+    deviceIdInvalid: 'Invalid device id (letters, digits, - and _ only)',
+    deviceIdAlreadyExists: 'A device named "%deviceId%" already exists (revoke it first to reuse this id)',
     hueBridgeIpMustBePrivate: 'HUE_BRIDGE_IP must be a literal private IP address',
     hueBridgeIpMissing: 'bridgeIp missing',
     huePressButton: 'Press the Hue bridge button then try again',

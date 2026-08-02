@@ -32,6 +32,7 @@
           <button type="button" class="config-button" data-page="smoke" id="navSmoke" hidden data-i18n="nav.smoke">Machine à fumée</button>
           <button type="button" class="config-button" data-page="hue">Philips Hue</button>
           <button type="button" class="config-button" data-page="smallrig" data-i18n="nav.smallrig">Lampes SmallRig</button>
+          <button type="button" class="config-button" data-page="devices" data-i18n="nav.devices">Appareils LAN</button>
         </div>
         <div class="nav-group">
           <button type="button" class="config-button" data-page="settings" data-i18n="nav.settings">Paramètres</button>
@@ -144,6 +145,28 @@
             <ul id="smallrigPaired" class="lamp-list"></ul>
             <p id="smallrigMessage" role="status"></p>
             <button type="submit" class="primary page-save-btn" data-integration="smallrig" data-i18n="common.save">Enregistrer</button>
+          </section>
+
+          <section class="page" data-page="devices">
+            <p class="field-hint" data-i18n="devices.hint">Connecte tes propres scripts ou appareils (Raspberry Pi, ESP...) au compagnon : génère un token, colle-le dans ton script, et il apparaîtra ci-dessous une fois connecté.</p>
+
+            <h3 data-i18n="devices.createHeading">Générer un token</h3>
+            <div class="row">
+              <label><span data-i18n="devices.deviceIdLabel">Identifiant</span><input id="deviceNewId" placeholder="smoke-machine"></label>
+              <label><span data-i18n="devices.deviceNameLabel">Nom</span><input id="deviceNewName" placeholder="Machine à fumée"></label>
+            </div>
+            <button type="button" id="deviceGenerateBtn" data-i18n="devices.generateButton">Générer un token</button>
+            <p id="devicesMessage" role="status"></p>
+            <div id="deviceNewToken" class="pair-code" hidden>
+              <p data-i18n="devices.tokenOneTimeWarning">Copie ce token maintenant : il ne sera plus jamais affiché.</p>
+              <p class="token-value" id="deviceNewTokenValue"></p>
+            </div>
+
+            <h3 data-i18n="devices.registeredHeading">Appareils enregistrés</h3>
+            <ul id="devicesTokenList" class="lamp-list"></ul>
+
+            <h3 data-i18n="devices.connectedHeading">Appareils actuellement connectés</h3>
+            <ul id="devicesConnectedList" class="lamp-list"></ul>
           </section>
 
           <section class="page" data-page="settings">

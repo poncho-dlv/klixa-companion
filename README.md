@@ -8,24 +8,34 @@ n'est pas inclus dans ce dépôt. La licence du compagnon n'accorde aucun droit
 sur les marques, services cloud ou autres produits Klixa.
 
 Agent local (hub) du projet [Klixa Live](../Overlays). Il fait le pont entre les
-intégrations **locales** (Hue, lampes SmallRig, OBS, Streamer.bot, machine à
-fumée…) et le serveur Klixa, **sans jamais ouvrir de port entrant** : c'est le
-compagnon qui initie une connexion WebSocket **sortante** vers le cloud, qui
-pousse ses commandes dans ce tuyau.
+intégrations **locales** (Hue, lampes SmallRig, OBS, Streamer.bot, appareils LAN
+génériques comme la machine à fumée…) et le serveur Klixa, **sans jamais ouvrir de
+port accessible depuis Internet** : c'est le compagnon qui initie une connexion
+WebSocket **sortante** vers le cloud, qui pousse ses commandes dans ce tuyau. Sur le
+LAN du streamer, c'est l'inverse pour les appareils génériques (RPi, ESP...) : c'est
+le script/firmware qui se connecte AU compagnon, pas le contraire — même logique
+« le nœud le moins stable initie vers le nœud stable », un niveau plus bas.
 
 ```
-[Klixa cloud]  ◄── WS sortante ───  [Klixa Compagnon] ── [Hue, SmallRig, OBS, Streamer.bot, RPi]
+[Klixa cloud]  ◄── WS sortante ───  [Klixa Compagnon]  ◄── WS sortante ───  [RPi, ESP, script perso...]
+                                           │
+                                           └── [Hue, SmallRig, OBS, Streamer.bot] (natif, sur le LAN)
 ```
 
 ## Composants
 
 - **Compagnon** (`src/`) — Node.js. Liaison cloud sortante + serveur HTTP local
-  de test + registre d'intégrations. Se déploie en app Windows (Electron).
+  de test + registre d'intégrations + hub d'appareils LAN génériques
+  (`device-hub.js`, path `/devices/ws`). Se déploie en app Windows (Electron).
 - **Application desktop** (`desktop/`) — enrobage Electron du compagnon, avec
   écran de configuration et pairing. Voir [desktop/README.md](desktop/README.md).
 - **Service GPIO** (`rpi/`) — micro-service Python sur Raspberry Pi qui pilote
   le relais de la machine à fumée. Voir [rpi/README.md](rpi/README.md).
-- **Protocole** (`protocol/messages.md`) — contrat des messages entre le compagnon et le cloud.
+- **Protocole compagnon ↔ cloud** (`protocol/messages.md`) — contrat des messages
+  entre le compagnon et le cloud.
+- **Protocole compagnon ↔ appareils LAN** (`protocol/devices-messages.md`) — contrat
+  générique pour tout script/firmware tiers (RPi, ESP...) qui se connecte au
+  compagnon et s'annonce avec ses éléments pilotables.
 
 ## Développement
 

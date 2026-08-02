@@ -31,6 +31,7 @@ export default {
     integrationsGroup: 'Intégrations',
     smoke: 'Machine à fumée',
     smallrig: 'Lampes SmallRig',
+    devices: 'Appareils LAN',
     settings: 'Paramètres'
   },
   pages: {
@@ -40,6 +41,7 @@ export default {
     smoke: { title: 'Machine à fumée', description: 'Pilote la machine à fumée de la régie.' },
     hue: { title: 'Philips Hue', description: 'Contrôle les lumières via le bridge Hue.' },
     smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' },
+    devices: { title: 'Appareils LAN', description: 'Scripts et appareils tiers (Raspberry Pi, ESP...) connectés au compagnon.' },
     settings: { title: 'Paramètres', description: 'Réglages généraux du compagnon.' }
   },
   connexion: {
@@ -149,6 +151,27 @@ export default {
     readCurrentState: 'Lire l’état actuel',
     reading: 'Lecture…'
   },
+  devices: {
+    hint: 'Connecte tes propres scripts ou appareils (Raspberry Pi, ESP...) au compagnon : génère un token, colle-le dans ton script, et il apparaîtra ci-dessous une fois connecté.',
+    createHeading: 'Générer un token',
+    deviceIdLabel: 'Identifiant',
+    deviceNameLabel: 'Nom',
+    generateButton: 'Générer un token',
+    missingId: 'Identifiant requis (lettres, chiffres, - et _)',
+    generating: 'Génération...',
+    generated: 'Token généré.',
+    tokenOneTimeWarning: 'Copie ce token maintenant : il ne sera plus jamais affiché.',
+    registeredHeading: 'Appareils enregistrés',
+    noTokenYet: 'Aucun appareil enregistré pour le moment.',
+    tokenMeta: 'id : %deviceId%',
+    revokeAction: 'Révoquer',
+    revoking: 'Révocation...',
+    revoked: '« %deviceId% » révoqué.',
+    revokeConfirm: 'Révoquer « %deviceId% » ? Le script devra être reconfiguré avec un nouveau token.',
+    connectedHeading: 'Appareils actuellement connectés',
+    noneConnected: 'Aucun appareil connecté pour le moment.',
+    noElements: 'aucun élément annoncé'
+  },
   settings: {
     autoLaunch: 'Lancer automatiquement avec Windows',
     language: 'Langue',
@@ -211,6 +234,19 @@ export default {
     smokeUnreachable: 'Service fumée injoignable (HTTP %status%)',
     streamerbotMissingActionId: 'actionId manquant',
     streamerbotNotConnected: 'Streamer.bot non connecté',
+    deviceProtocolVersion: 'Version de protocole non supportée',
+    deviceInvalidToken: 'Token appareil invalide',
+    deviceLimitReached: 'Nombre maximal d’appareils connectés atteint',
+    deviceDisconnected: 'Appareil déconnecté',
+    deviceCommandFailed: 'Commande appareil échouée',
+    deviceOffline: 'Appareil hors ligne : %deviceId%',
+    deviceUnknownAction: 'Action inconnue pour cet appareil : %elementId%.%action%',
+    deviceTimeout: 'L’appareil n’a pas répondu (timeout)',
+    deviceHubStopped: 'Hub des appareils arrêté',
+    deviceTriggerMissingFields: 'deviceId, elementId et action sont requis',
+    deviceTokensStateInvalid: 'État des tokens appareil illisible (JSON invalide)',
+    deviceIdInvalid: 'Identifiant d’appareil invalide (lettres, chiffres, - et _ uniquement)',
+    deviceIdAlreadyExists: 'Un appareil « %deviceId% » existe déjà (révoque-le d’abord pour réutiliser cet identifiant)',
     hueBridgeIpMustBePrivate: 'HUE_BRIDGE_IP doit être une adresse IP privée littérale',
     hueBridgeIpMissing: 'bridgeIp manquant',
     huePressButton: 'Appuyez sur le bouton du bridge Hue puis réessayez',

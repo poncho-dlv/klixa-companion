@@ -119,6 +119,13 @@ function buildRuntimeConfig(values) {
     const current = store.load();
     store.save({ ...current, SMALLRIG_MESH_STATE: meshStateJson });
   };
+  // Registre des tokens device (id -> hash) : pas un secret au sens de SECRET_KEYS
+  // (un hash SHA-256 ne permet pas de reconstruire le token), donc pas chiffré via
+  // safeStorage — même traitement que tokenHash côté control-access-service.js cloud.
+  runtimeConfig.devices.onTokensChange = async (tokensJson) => {
+    const current = store.load();
+    store.save({ ...current, DEVICES_TOKENS_JSON: tokensJson });
+  };
   return runtimeConfig;
 }
 
@@ -371,6 +378,24 @@ function registerIpc() {
   });
   ipcMain.handle('smallrig:status', async (_event, { uuid } = {}) => {
     return requireRuntime().dispatch('smallrig.status', { uuid });
+  });
+  // Appareils LAN génériques (RPi, ESP...) : gestion des tokens et liste des devices
+  // connectés — jamais exposé au cloud (portée 'local' côté registry, cf.
+  // integrations/devices.js). requireRuntime() suffit : contrairement à Hue, il n'y a
+  // pas de reconfigureIntegration à appeler, le hub vit tant que le runtime tourne.
+  ipcMain.handle('devices:list', async () => {
+    if (!runtime) return { devices: [] };
+    return runtime.dispatch('devices.list', {});
+  });
+  ipcMain.handle('devices:list-tokens', async () => {
+    if (!runtime) return { tokens: [] };
+    return runtime.dispatch('devices.listTokens', {});
+  });
+  ipcMain.handle('devices:generate-token', async (_event, { deviceId, name } = {}) => {
+    return requireRuntime().dispatch('devices.generateToken', { deviceId, name });
+  });
+  ipcMain.handle('devices:revoke-token', async (_event, { deviceId } = {}) => {
+    return requireRuntime().dispatch('devices.revokeToken', { deviceId });
   });
   ipcMain.handle('pairing:start', async (_event, { baseUrl } = {}) => {
     stopPairingPoll();

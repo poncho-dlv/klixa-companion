@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createLogger } from './logger.js';
+import { DEVICES_WS_PATH } from './device-hub.js';
 
 const log = createLogger('local-server');
 const MAX_BODY_BYTES = 64 * 1024;
@@ -100,11 +101,30 @@ export function tokenMatches(actual, expected) {
   return timingSafeEqual(digest(actual), digest(expected));
 }
 
+// Réponse HTTP brute avant upgrade WS (pas de corps de réponse « normal » possible une
+// fois l'upgrade acceptée) — même esprit que les 403 JSON ci-dessus, adapté au protocole
+// HTTP/1.1 upgrade.
+function rejectUpgrade(socket, message) {
+  try {
+    socket.write(
+      `HTTP/1.1 403 Forbidden\r\n`
+      + `Content-Type: text/plain; charset=utf-8\r\n`
+      + `Content-Length: ${Buffer.byteLength(message)}\r\n`
+      + `Connection: close\r\n\r\n${message}`
+    );
+  } catch { /* socket déjà fermée */ }
+  socket.destroy();
+}
+
 /**
  * Serveur HTTP local : santé + déclenchement manuel des commandes (test sans
  * cloud, ou pilotage depuis le LAN). Même chemin de dispatch que la liaison cloud.
+ * `deviceHub`, si fourni, gère l'upgrade WS des appareils LAN (RPi, ESP...) sur
+ * /devices/ws — cf. device-hub.js. Ce serveur applique les mêmes gardes anti-CSRF/
+ * anti-DNS-rebinding sur l'upgrade que sur les routes HTTP ci-dessous avant de lui
+ * déléguer l'authentification par token device.
  */
-export function createLocalServer(config, registry) {
+export function createLocalServer(config, registry, { deviceHub } = {}) {
   const host = config.host || '127.0.0.1';
   if (config.production && !isLoopbackHost(host) && !config.localToken) {
     throw new Error('COMPANION_LOCAL_TOKEN obligatoire en production lorsque le serveur écoute sur le LAN');
@@ -169,6 +189,24 @@ export function createLocalServer(config, registry) {
   });
   server.requestTimeout = 10000;
   server.headersTimeout = 15000;
+
+  // Upgrade WS : seul /devices/ws est géré (appareils LAN génériques, cf.
+  // device-hub.js). Même garde Origin/Host que les routes HTTP ci-dessus — une page
+  // web malveillante ouverte par le streamer, ou un domaine rebindé vers la loopback,
+  // ne doit pas pouvoir initier cette upgrade. L'authentification par token device est
+  // ensuite entièrement déléguée au hub.
+  server.on('upgrade', (req, socket, head) => {
+    const { pathname } = new URL(req.url, 'http://localhost');
+    if (pathname !== DEVICES_WS_PATH || !deviceHub) {
+      socket.destroy();
+      return;
+    }
+    if (!isAllowedOrigin(req.headers.origin) || !isAllowedRequestHost(req.headers.host, host)) {
+      rejectUpgrade(socket, 'Origine non autorisee');
+      return;
+    }
+    deviceHub.handleUpgrade(req, socket, head);
+  });
 
   function start() {
     server.listen(config.port, host, () => log.info(`Serveur local sur ${host}:${config.port}`));

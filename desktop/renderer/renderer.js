@@ -29,6 +29,14 @@ const smallrigScanBtn = document.querySelector('#smallrigScanBtn');
 const smallrigFound = document.querySelector('#smallrigFound');
 const smallrigPaired = document.querySelector('#smallrigPaired');
 const smallrigMessage = document.querySelector('#smallrigMessage');
+const deviceNewId = document.querySelector('#deviceNewId');
+const deviceNewName = document.querySelector('#deviceNewName');
+const deviceGenerateBtn = document.querySelector('#deviceGenerateBtn');
+const devicesMessage = document.querySelector('#devicesMessage');
+const deviceNewToken = document.querySelector('#deviceNewToken');
+const deviceNewTokenValue = document.querySelector('#deviceNewTokenValue');
+const devicesTokenList = document.querySelector('#devicesTokenList');
+const devicesConnectedList = document.querySelector('#devicesConnectedList');
 const obsEnabled = document.querySelector('input[name="OBS_ENABLED"]');
 const obsConnectionBtn = document.querySelector('#obsConnectionBtn');
 const streamerbotEnabled = document.querySelector('input[name="SB_ENABLED"]');
@@ -698,6 +706,140 @@ smallrigScanBtn.addEventListener('click', async () => {
 renderSmallrigFound();
 refreshSmallrigPaired();
 
+// Appareils LAN génériques (RPi, ESP...) : contrairement à Hue/SmallRig, il n'y a pas de
+// notion de "connecté/déconnecté" binaire à afficher dans le header — juste deux listes
+// (tokens émis, devices actuellement connectés au hub). Pas de statut ok/erreur donc, pas
+// de garde tenant feature ici non plus (contrairement à navSmoke) : la page gère des
+// tokens LOCAUX, indépendants de ce que Klixa cloud autorise pour ce tenant (cf.
+// docs/local-device-agent-plan.md côté Klixa, phase 4 pas encore livrée).
+let lastDeviceTokens = [];
+let lastConnectedDevices = [];
+
+function renderDeviceTokens() {
+  devicesTokenList.innerHTML = '';
+  if (lastDeviceTokens.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'lamp-empty';
+    li.textContent = t('devices.noTokenYet');
+    devicesTokenList.appendChild(li);
+    return;
+  }
+  for (const entry of lastDeviceTokens) {
+    const row = lampRow({
+      title: entry.name || entry.deviceId,
+      meta: t('devices.tokenMeta', { deviceId: entry.deviceId }),
+      buttonLabel: t('devices.revokeAction'),
+      onClick: async (event) => {
+        if (!window.confirm(t('devices.revokeConfirm', { deviceId: entry.deviceId }))) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = t('devices.revoking');
+        try {
+          await window.klixa.devicesRevokeToken(entry.deviceId);
+          devicesMessage.className = 'ok';
+          devicesMessage.textContent = t('devices.revoked', { deviceId: entry.deviceId });
+          await refreshDeviceTokens();
+          await refreshConnectedDevices();
+        } catch (error) {
+          devicesMessage.className = 'error';
+          devicesMessage.textContent = error.message;
+          button.disabled = false;
+          button.textContent = t('devices.revokeAction');
+        }
+      }
+    });
+    devicesTokenList.appendChild(row);
+  }
+}
+
+function renderConnectedDevices() {
+  devicesConnectedList.innerHTML = '';
+  if (lastConnectedDevices.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'lamp-empty';
+    li.textContent = t('devices.noneConnected');
+    devicesConnectedList.appendChild(li);
+    return;
+  }
+  // Pas de lampRow() ici : cette liste n'a aucune action par ligne (contrairement aux
+  // tokens ci-dessus), lampRow impose un bouton qu'il faudrait sinon masquer après coup.
+  for (const device of lastConnectedDevices) {
+    const li = document.createElement('li');
+    li.className = 'lamp-row';
+    const line = document.createElement('div');
+    line.className = 'lamp-line';
+    const titleEl = document.createElement('span');
+    titleEl.className = 'lamp-label';
+    titleEl.textContent = device.name || device.deviceId;
+    const metaEl = document.createElement('span');
+    metaEl.className = 'lamp-meta';
+    const elementLabels = (device.elements || []).map((el) => el.name || el.id).join(', ');
+    metaEl.textContent = elementLabels || t('devices.noElements');
+    line.append(titleEl, metaEl);
+    li.appendChild(line);
+    devicesConnectedList.appendChild(li);
+  }
+}
+
+async function refreshDeviceTokens() {
+  try {
+    const { tokens } = await window.klixa.devicesListTokens();
+    lastDeviceTokens = tokens || [];
+  } catch (error) {
+    devicesMessage.className = 'error';
+    devicesMessage.textContent = error.message;
+  }
+  renderDeviceTokens();
+}
+
+async function refreshConnectedDevices() {
+  try {
+    const { devices } = await window.klixa.devicesList();
+    lastConnectedDevices = devices || [];
+  } catch {
+    // Silencieux : ne pas écraser un message de génération/révocation récent pour un
+    // simple rafraîchissement de la liste des connexions live.
+  }
+  renderConnectedDevices();
+}
+
+deviceGenerateBtn.addEventListener('click', async () => {
+  const deviceId = deviceNewId.value.trim();
+  const name = deviceNewName.value.trim();
+  if (!deviceId) {
+    devicesMessage.className = 'error';
+    devicesMessage.textContent = t('devices.missingId');
+    return;
+  }
+  deviceGenerateBtn.disabled = true;
+  devicesMessage.className = '';
+  devicesMessage.textContent = t('devices.generating');
+  deviceNewToken.hidden = true;
+  try {
+    const result = await window.klixa.devicesGenerateToken(deviceId, name);
+    deviceNewTokenValue.textContent = result.token;
+    deviceNewToken.hidden = false;
+    deviceNewId.value = '';
+    deviceNewName.value = '';
+    devicesMessage.className = 'ok';
+    devicesMessage.textContent = t('devices.generated');
+    await refreshDeviceTokens();
+  } catch (error) {
+    devicesMessage.className = 'error';
+    devicesMessage.textContent = error.message;
+  } finally {
+    deviceGenerateBtn.disabled = false;
+  }
+});
+
+// Rafraîchit la liste des devices connectés à chaque visite de la page (en plus du
+// chargement initial ci-dessous) : c'est la seule donnée de cette page qui change sans
+// action de l'utilisateur (un script peut se connecter/déconnecter à tout moment).
+navButtons.get('devices')?.addEventListener('click', refreshConnectedDevices);
+
+refreshDeviceTokens();
+refreshConnectedDevices();
+
 // Statut connecte/deconnecte en direct par integration (OBS, Streamer.bot, fumee),
 // pousse par polling depuis le process main (cf. onIntegrationStatus). Absence de
 // cle = integration desactivee dans la config ; lastIntegrationStatus null = pas
@@ -868,6 +1010,8 @@ function applyLanguage(lang) {
   renderSmallrigStatus();
   renderSmallrigFound();
   renderSmallrigPaired();
+  renderDeviceTokens();
+  renderConnectedDevices();
   if (lastUpdateState) renderUpdateStatus(lastUpdateState);
   if (!pairingActive) pairBtn.textContent = t('connexion.pairButton');
 }
