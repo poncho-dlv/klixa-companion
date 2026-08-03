@@ -6,7 +6,8 @@ connecte AU compagnon (WS sortant, comme le compagnon lui-même se connecte au c
 Klixa), s'annonce avec ses éléments pilotables (switch on/off, etc.), puis reçoit des
 commandes. Protocole complet : klixa-companion/protocol/devices-messages.md.
 
-Usage minimal (voir aussi examples/smoke_relay.py pour un exemple réel complet) :
+Usage minimal (voir aussi smoke_relay.py, dans ce même dossier, pour un exemple réel
+complet) :
 
     from klixa_device_agent import DeviceAgent
 
@@ -47,9 +48,9 @@ PROTOCOL_VERSION = 1
 
 
 def _log(device_id, message):
-    # Même esprit que smoke_service.py : un print() préfixé, simple, capturé tel quel
-    # par journalctl quand le script tourne en service systemd — pas besoin du module
-    # logging pour un script pensé pour être lu/adapté par un streamer.
+    # Un print() préfixé, simple, capturé tel quel par journalctl quand le script
+    # tourne en service systemd — pas besoin du module logging pour un script pensé
+    # pour être lu/adapté par un streamer.
     print(f"[{device_id}] {message}", flush=True)
 
 
@@ -151,8 +152,7 @@ class DeviceAgent:
             else:
                 # Handler bloquant (gpiozero, sleep...) : exécuté dans un thread pour ne
                 # jamais geler la boucle asyncio (donc le heartbeat/la réception d'autres
-                # commandes) — même raison que ThreadingHTTPServer dans l'ancien
-                # smoke_service.py.
+                # commandes).
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(None, handler, payload, data)
             await self._send({"type": "ack", "id": command_id, "ok": True, "result": result or {}})
@@ -222,7 +222,7 @@ class DeviceAgent:
 
     def run(self):
         """Point d'entrée bloquant — gère aussi l'arrêt propre sur Ctrl+C/SIGTERM
-        (utile pour un service systemd, cf. rpi/klixa-smoke.service)."""
+        (utile pour un service systemd, cf. rpi/klixa-smoke-relay.service)."""
         async def main():
             loop = asyncio.get_running_loop()
             with contextlib.suppress(NotImplementedError):

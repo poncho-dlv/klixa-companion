@@ -19,7 +19,7 @@ invalide/manquant → handshake fermé avec le code `4401`.
   "type": "hello",
   "tenantId": "<tenant>",
   "token": "<COMPANION_TOKEN>",
-  "capabilities": ["smoke.trigger"]
+  "capabilities": ["devices.list", "devices.trigger"]
 }
 ```
 `capabilities` = liste des commandes que le compagnon sait exécuter (dérivée du
@@ -46,7 +46,7 @@ côté cloud, dans le contexte du tenant résolu depuis le token. Pas de file : 
 
 ### `command`
 ```json
-{ "type": "command", "id": "<uuid>", "name": "smoke.trigger", "payload": { "durationMs": 300 } }
+{ "type": "command", "id": "<uuid>", "name": "devices.trigger", "payload": { "deviceId": "smoke-machine", "elementId": "relay", "action": "trigger", "payload": { "durationMs": 300 } } }
 ```
 - `id` : identifiant opaque, renvoyé tel quel dans l'`ack`.
 - `name` : nom canonique `<integration>.<action>`.
@@ -56,7 +56,8 @@ côté cloud, dans le contexte du tenant résolu depuis le token. Pas de file : 
 
 | Commande | Payload | Effet |
 |----------|---------|-------|
-| `smoke.trigger` | `{ durationMs }` | Impulsion relais machine à fumée (durée bornée côté compagnon ET RPi) |
+| `devices.list` | `{}` | Catalogue des appareils LAN génériques connectés (RPi, ESP...) — cf. `devices-messages.md` |
+| `devices.trigger` | `{ deviceId, elementId, action, payload?, data? }` | Relaie une commande à un appareil LAN connecté — cf. `devices-messages.md` |
 | `hue.color` | `{ lightIds[], color, brightness?, transitionMs?, durationMs?, mode?, sceneId? }` | Couleur/scène Hue en direct sur le bridge (LAN). `mode:'simple'` = clignotement puis restauration. `sceneId` = rappel de scène. Credentials TOUJOURS lues en local (`.env`/config desktop) — plus aucune surcharge possible par le payload cloud. |
 | `hue.discover` | `{}` | Liste lampes + scènes du bridge (credentials locales). **Le résultat revient dans l'`ack`** (`{ lights[], scenes[] }` — noms/ids uniquement, aucune IP) — le cloud le persiste (plus de POST direct du C# vers `/api/hue/discovered`). |
 | `hue.status` | `{}` | Statut d'appairage : `{ bridgeConfigured, paired }` (booléens, aucune IP/clé dans la réponse). Consommé par Klixa pour afficher l'état d'appairage dans le wizard admin. |

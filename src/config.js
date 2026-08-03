@@ -29,15 +29,6 @@ return {
       maxDelayMs: int(env.CLOUD_RECONNECT_MAX_MS, 30000),
     },
   },
-  smoke: {
-    enabled: bool(env.SMOKE_ENABLED, true),
-    serviceUrl: env.SMOKE_SERVICE_URL || '',
-    // Secret partagé avec le service GPIO du Raspberry Pi (SMOKE_TOKEN côté RPi).
-    token: env.SMOKE_SERVICE_TOKEN || '',
-    defaultMs: int(env.SMOKE_DEFAULT_MS, 300),
-    minMs: int(env.SMOKE_MIN_MS, 50),
-    maxMs: int(env.SMOKE_MAX_MS, 1500),
-  },
   hue: {
     // Intégration Hue NATIVE : le compagnon parle directement au bridge sur le LAN.
     // bridgeIp/appKey viennent EXCLUSIVEMENT d'ici (jamais du cloud, cf. hue.js).

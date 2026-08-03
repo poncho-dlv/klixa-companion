@@ -1,4 +1,3 @@
-import { createSmokeIntegration } from './smoke.js';
 import { createHueIntegration } from './hue.js';
 import { createSmallrigIntegration } from './smallrig/index.js';
 import { createObsIntegration } from './obs.js';
@@ -40,18 +39,10 @@ function registerUnavailableSmallrig(registry, cause) {
  * ajouter ici les futures intégrations locales (Streamer.bot, etc.).
  */
 export function registerIntegrations(registry, config, { emitEvent } = {}) {
-  for (const id of ['smoke', 'hue', 'smallrig', 'obs', 'streamerbot']) registerIntegration(registry, id, config, { emitEvent });
+  for (const id of ['hue', 'smallrig', 'obs', 'streamerbot']) registerIntegration(registry, id, config, { emitEvent });
 }
 
 export function registerIntegration(registry, id, config, { emitEvent } = {}) {
-  if (id === 'smoke' && config.smoke.enabled) {
-    try {
-      registry.register(createSmokeIntegration(config.smoke));
-    } catch (err) {
-      log.error('Intégration fumée non chargée', err.message);
-    }
-  }
-
   if (id === 'hue' && config.hue.enabled) {
     try {
       registry.register(createHueIntegration(config.hue));

@@ -29,7 +29,6 @@ export default {
   nav: {
     connexion: 'Connection',
     integrationsGroup: 'Integrations',
-    smoke: 'Smoke machine',
     smallrig: 'SmallRig lamps',
     devices: 'LAN devices',
     settings: 'Settings'
@@ -38,7 +37,6 @@ export default {
     connexion: { title: 'Klixa connection', description: 'Link this companion to your Klixa console.' },
     obs: { title: 'OBS', description: 'Control OBS Studio via obs-websocket.' },
     streamerbot: { title: 'Streamer.bot', description: 'Trigger Streamer.bot actions.' },
-    smoke: { title: 'Smoke machine', description: 'Control the control room smoke machine.' },
     hue: { title: 'Philips Hue', description: 'Control lights via the Hue bridge.' },
     smallrig: { title: 'SmallRig lamps', description: 'Manage RM75 lamps over Bluetooth Mesh.' },
     devices: { title: 'LAN devices', description: 'Third-party scripts and devices (Raspberry Pi, ESP...) connected to the companion.' },
@@ -60,10 +58,6 @@ export default {
   },
   streamerbot: {
     enable: 'Enable Streamer.bot'
-  },
-  smoke: {
-    enable: 'Enable smoke machine',
-    token: 'Service token'
   },
   hue: {
     enable: 'Enable Hue',
@@ -220,7 +214,6 @@ export default {
   errors: {
     obsHostRequired: 'OBS IP or hostname required',
     obsPortInvalid: 'Invalid OBS port',
-    smokePortInvalid: 'Invalid smoke machine port',
     huePortInvalid: 'Invalid Hue port',
     cloudUrlInvalid: 'Invalid cloud URL (ws:// or wss:// expected)',
     firewallRuleFailed: 'Settings saved, but the firewall could not be configured automatically (%message%). Allow the port manually in Windows Firewall if LAN devices can\'t connect.',
@@ -237,10 +230,6 @@ export default {
     obsMissingSceneName: 'sceneName missing',
     obsMissingSourceName: 'sourceName missing',
     obsMissingFilterName: 'filterName missing',
-    smokeUrlMissing: 'SMOKE_SERVICE_URL missing (GPIO service URL on the Raspberry Pi)',
-    smokeHttpError: 'Smoke service HTTP %status%: %text%',
-    smokeTokenInvalid: 'Invalid smoke service token (SMOKE_SERVICE_TOKEN)',
-    smokeUnreachable: 'Smoke service unreachable (HTTP %status%)',
     streamerbotMissingActionId: 'actionId missing',
     streamerbotNotConnected: 'Streamer.bot not connected',
     deviceProtocolVersion: 'Unsupported protocol version',

@@ -31,7 +31,7 @@ le script/firmware qui se connecte AU compagnon, pas le contraire — même logi
   écran de configuration et pairing. Voir [desktop/README.md](desktop/README.md).
 - **SDK appareils LAN** (`rpi/klixa_device_agent.py`) — module Python de référence pour
   connecter un script/appareil tiers (Raspberry Pi, ESP...) au compagnon, avec
-  `rpi/examples/smoke_relay.py` (machine à fumée) comme exemple concret. Voir
+  `rpi/smoke_relay.py` (machine à fumée) comme exemple concret. Voir
   [rpi/README.md](rpi/README.md).
 - **Protocole compagnon ↔ cloud** (`protocol/messages.md`) — contrat des messages
   entre le compagnon et le cloud.

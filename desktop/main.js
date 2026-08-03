@@ -255,7 +255,7 @@ async function pollPairingOnce() {
 // Secrets : jamais renvoyes en clair au renderer (remplaces par un booleen *_CONFIGURED)
 // et jamais ecrases par une valeur vide a la sauvegarde. Doit rester aligne avec
 // `secretKeys` de config-store.js (qui les chiffre au repos via safeStorage).
-const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMOKE_SERVICE_TOKEN', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN'];
+const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN'];
 
 function publicConfig(values) {
   const result = { ...values };
@@ -268,15 +268,6 @@ function publicConfig(values) {
     result.OBS_WS_PORT = '4455';
   }
   delete result.OBS_WS_URL;
-  try {
-    const smokeUrl = new URL(result.SMOKE_SERVICE_URL);
-    result.SMOKE_SERVICE_HOST = smokeUrl.hostname;
-    result.SMOKE_SERVICE_PORT = smokeUrl.port || (smokeUrl.protocol === 'https:' ? '443' : '80');
-  } catch {
-    result.SMOKE_SERVICE_HOST = '';
-    result.SMOKE_SERVICE_PORT = '8787';
-  }
-  delete result.SMOKE_SERVICE_URL;
   result.HUE_BRIDGE_PORT = String(result.HUE_BRIDGE_PORT || 443);
   // Case à cocher unique de la page Réseau local : dérivée de COMPANION_HOST à chaque
   // lecture (pas un champ stocké séparément) — une seule source de vérité, jamais de
@@ -325,14 +316,6 @@ function registerIpc() {
     const normalizedSubmitted = { ...submitted, OBS_WS_URL: obsUrl.href.replace(/\/$/, '') };
     delete normalizedSubmitted.OBS_WS_HOST;
     delete normalizedSubmitted.OBS_WS_PORT;
-    const smokeHost = String(submitted.SMOKE_SERVICE_HOST || '').trim();
-    const smokePort = Number.parseInt(submitted.SMOKE_SERVICE_PORT || '8787', 10);
-    if (smokeHost && (!Number.isInteger(smokePort) || smokePort < 1 || smokePort > 65535)) throw new Error(t('errors.smokePortInvalid'));
-    normalizedSubmitted.SMOKE_SERVICE_URL = smokeHost
-      ? new URL(`http://${smokeHost.includes(':') && !smokeHost.startsWith('[') ? `[${smokeHost}]` : smokeHost}:${smokePort}`).href.replace(/\/$/, '')
-      : '';
-    delete normalizedSubmitted.SMOKE_SERVICE_HOST;
-    delete normalizedSubmitted.SMOKE_SERVICE_PORT;
     const huePort = Number.parseInt(submitted.HUE_BRIDGE_PORT || '443', 10);
     if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error(t('errors.huePortInvalid'));
     normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
@@ -380,7 +363,7 @@ function registerIpc() {
     // plus necessaire (il couperait la liaison cloud pour rien) des qu'on sait laquelle
     // reconfigurer isolement. Reste sur restartRuntime seulement le pairing/disconnect
     // (qui changent CLOUD_WS_URL/COMPANION_TOKEN eux-memes, hors de ce handler).
-    if (['obs', 'streamerbot', 'smoke', 'hue', 'smallrig'].includes(integrationId) && runtime?.reconfigureIntegration) {
+    if (['obs', 'streamerbot', 'hue', 'smallrig'].includes(integrationId) && runtime?.reconfigureIntegration) {
       await runtime.reconfigureIntegration(integrationId, buildRuntimeConfig(next));
     } else {
       await restartRuntime(next);

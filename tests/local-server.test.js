@@ -80,7 +80,7 @@ test('isAllowedRequestHost refuse un domaine (anti DNS-rebinding) mais accepte I
 test('le serveur rejette une requête cross-origin ou rebindée avec 403', async () => {
   const registry = {
     healthcheck: async () => ({}),
-    listCommands: () => ['smoke.trigger'],
+    listCommands: () => ['devices.trigger'],
     dispatch: async () => ({ triggered: true })
   };
   const server = createLocalServer({ host: '127.0.0.1', port: 0, production: false, localToken: '' }, registry);
@@ -99,7 +99,7 @@ test('le serveur rejette une requête cross-origin ou rebindée avec 403', async
   // pour simuler fidèlement une requête forgée par un navigateur / une attaque rebinding.
   const rawPost = (headers) => new Promise((resolve, reject) => {
     const req = http.request(
-      { host: '127.0.0.1', port, method: 'POST', path: '/commands/smoke.trigger', headers },
+      { host: '127.0.0.1', port, method: 'POST', path: '/commands/devices.trigger', headers },
       (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); }
     );
     req.on('error', reject);

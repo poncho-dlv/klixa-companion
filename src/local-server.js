@@ -155,7 +155,7 @@ export function createLocalServer(config, registry, { deviceHub } = {}) {
         return;
       }
 
-      // POST /commands/:name — déclenchement local (ex. POST /commands/smoke.trigger {"durationMs":300})
+      // POST /commands/:name — déclenchement local (ex. POST /commands/devices.list {})
       const match = url.pathname.match(/^\/commands\/([\w.-]+)$/);
       if (req.method === 'POST' && match) {
         if (config.localToken && !tokenMatches(req.headers['x-companion-token'], config.localToken)) {

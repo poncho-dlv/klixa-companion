@@ -12,7 +12,6 @@ const pairCode = document.querySelector('#pairCode');
 const pairCodeValue = document.querySelector('#pairCodeValue');
 const pairCodeTimer = document.querySelector('#pairCodeTimer');
 const pairMessage = document.querySelector('#pairMessage');
-const navSmoke = document.querySelector('#navSmoke');
 const disconnectBtn = document.querySelector('#disconnectBtn');
 const updateBanner = document.querySelector('#updateBanner');
 const updateBannerMessage = document.querySelector('#updateBannerMessage');
@@ -23,7 +22,6 @@ const huePairBtn = document.querySelector('#huePairBtn');
 const hueMessage = document.querySelector('#hueMessage');
 const hueStatus = document.querySelector('#hueStatus');
 const hueUnpairBtn = document.querySelector('#hueUnpairBtn');
-const smokeServiceHost = document.querySelector('#smokeServiceHost');
 const smallrigStatus = document.querySelector('#smallrigStatus');
 const smallrigScanBtn = document.querySelector('#smallrigScanBtn');
 const smallrigFound = document.querySelector('#smallrigFound');
@@ -41,8 +39,6 @@ const obsEnabled = document.querySelector('input[name="OBS_ENABLED"]');
 const obsConnectionBtn = document.querySelector('#obsConnectionBtn');
 const streamerbotEnabled = document.querySelector('input[name="SB_ENABLED"]');
 const streamerbotConnectionBtn = document.querySelector('#streamerbotConnectionBtn');
-const smokeEnabled = document.querySelector('input[name="SMOKE_ENABLED"]');
-const smokeConnectionBtn = document.querySelector('#smokeConnectionBtn');
 const integrationStatusEls = new Map(
   [...document.querySelectorAll('.integration-status[data-integration]')].map((el) => [el.dataset.integration, el])
 );
@@ -64,13 +60,11 @@ function applyStaticTranslations() {
 // éditable (le désactiver est l'échappatoire pour reconfigurer une intégration bloquée).
 const INTEGRATION_PLAIN_FIELDS = {
   obs: [document.querySelector('input[name="OBS_WS_HOST"]'), document.querySelector('input[name="OBS_WS_PORT"]')],
-  streamerbot: [document.querySelector('input[name="SB_HOST"]'), document.querySelector('input[name="SB_PORT"]')],
-  smoke: [smokeServiceHost, document.querySelector('input[name="SMOKE_SERVICE_PORT"]')]
+  streamerbot: [document.querySelector('input[name="SB_HOST"]'), document.querySelector('input[name="SB_PORT"]')]
 };
 const INTEGRATION_ENABLED_KEYS = {
   obs: 'OBS_ENABLED',
-  streamerbot: 'SB_ENABLED',
-  smoke: 'SMOKE_ENABLED'
+  streamerbot: 'SB_ENABLED'
 };
 
 // Champs secrets (mot de passe / token) : jamais reaffiches en clair. Une fois
@@ -81,8 +75,7 @@ const INTEGRATION_ENABLED_KEYS = {
 const SECRET_MASK = '••••••••';
 const secretFields = [
   { input: document.querySelector('#obsWsPassword'), configuredKey: 'OBS_WS_PASSWORD_CONFIGURED', statusId: 'obs' },
-  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED', statusId: 'streamerbot' },
-  { input: document.querySelector('#smokeServiceToken'), configuredKey: 'SMOKE_SERVICE_TOKEN_CONFIGURED', statusId: 'smoke' }
+  { input: document.querySelector('#sbPassword'), configuredKey: 'SB_PASSWORD_CONFIGURED', statusId: 'streamerbot' }
   // COMPANION_LOCAL_TOKEN n'a plus de champ dans le DOM : généré et géré entièrement
   // par main.js (cf. Réseau local, un seul toggle) — rien à masquer/déverrouiller ici.
 ];
@@ -162,13 +155,13 @@ function renderStatus(status) {
 // non), pas sur le statut WS live : sauver la config ou appairer Hue redemarre tout
 // le runtime (donc coupe puis rouvre la liaison cloud un instant), et piloter le menu
 // sur ce flottement aurait fait sauter la page active a chaque sauvegarde. Le statut
-// live (cloud:status) reste reserve au texte du header et aux features tenant (ex.
-// machine a fumee).
+// live (cloud:status) reste reserve au texte du header et aux eventuelles features
+// tenant gatees cote cloud.
 function renderPairingUi() {
   const linked = Boolean(lastConfig.CLOUD_WS_URL);
   disconnectBtn.hidden = !linked;
   // Rien à faire sur cette page une fois lié (le "Déconnecter" de la sidebar suffit) :
-  // masquée plutôt que juste désactivée, comme navSmoke pour les fonctionnalités tenant.
+  // masquée plutôt que juste désactivée.
   navButtons.get('connexion').hidden = linked;
   setNavLocked(!linked);
 }
@@ -710,10 +703,11 @@ refreshSmallrigPaired();
 
 // Appareils LAN génériques (RPi, ESP...) : contrairement à Hue/SmallRig, il n'y a pas de
 // notion de "connecté/déconnecté" binaire à afficher dans le header — juste deux listes
-// (tokens émis, devices actuellement connectés au hub). Pas de statut ok/erreur donc, pas
-// de garde tenant feature ici non plus (contrairement à navSmoke) : la page gère des
-// tokens LOCAUX, indépendants de ce que Klixa cloud autorise pour ce tenant (cf.
-// docs/local-device-agent-plan.md côté Klixa, phase 4 pas encore livrée).
+// (tokens émis, devices actuellement connectés au hub). Pas de statut ok/erreur donc, et
+// pas de garde tenant feature ici non plus : cette page gère des tokens LOCAUX,
+// indépendants de ce que Klixa cloud autorise pour ce tenant (cf.
+// docs/local-device-agent-plan.md côté Klixa — la feature tenant `devices` qui gate la
+// carte admin Klixa cloud est distincte de cette page compagnon, toujours visible ici).
 let lastDeviceTokens = [];
 let lastConnectedDevices = [];
 
@@ -890,7 +884,6 @@ function renderIntegrationStatus() {
 
   renderConnectionButton('obs', obsConnectionBtn);
   renderConnectionButton('streamerbot', streamerbotConnectionBtn);
-  renderConnectionButton('smoke', smokeConnectionBtn);
 }
 
 function renderConnectionButton(id, button) {
@@ -938,8 +931,7 @@ function renderIntegrationStatusUpdate(status) {
   lastIntegrationStatus = status || {};
   for (const [id, enabledInput] of [
     ['obs', obsEnabled],
-    ['streamerbot', streamerbotEnabled],
-    ['smoke', smokeEnabled]
+    ['streamerbot', streamerbotEnabled]
   ]) {
     if (pendingConnections.has(id)) {
       const disconnecting = !enabledInput.checked;
@@ -981,9 +973,6 @@ window.klixa.onUpdateStatus(renderUpdateStatus);
 
 function renderCloudStatus(cloudStatus) {
   lastCloudStatus = cloudStatus || { connected: false, features: {} };
-  const smokeAvailable = Boolean(lastCloudStatus.connected && lastCloudStatus.features?.smoke === true);
-  navSmoke.hidden = !smokeAvailable;
-  if (!smokeAvailable && activePage === 'smoke') setActivePage('obs');
   renderHeaderStatus();
 }
 
@@ -1065,7 +1054,6 @@ function bindConnectionButton(id, enabledInput, button) {
 
 bindConnectionButton('obs', obsEnabled, obsConnectionBtn);
 bindConnectionButton('streamerbot', streamerbotEnabled, streamerbotConnectionBtn);
-bindConnectionButton('smoke', smokeEnabled, smokeConnectionBtn);
 
 autoLaunch.addEventListener('change', async () => {
   autoLaunch.checked = await window.klixa.setAutoLaunch(autoLaunch.checked);
@@ -1207,7 +1195,6 @@ form.addEventListener('submit', async (event) => {
   for (const checkbox of form.querySelectorAll('input[name][type=checkbox]')) data[checkbox.name] = checkbox.checked;
   if (data.SB_PORT) data.SB_PORT = String(Number(data.SB_PORT));
   if (data.OBS_WS_PORT) data.OBS_WS_PORT = String(Number(data.OBS_WS_PORT));
-  if (data.SMOKE_SERVICE_PORT) data.SMOKE_SERVICE_PORT = String(Number(data.SMOKE_SERVICE_PORT));
   // Un champ secret encore verrouille (masque) n'a pas ete modifie : ne pas envoyer
   // le masque factice, sinon il ecraserait le vrai secret stocke.
   for (const field of secretFields) {
@@ -1219,7 +1206,6 @@ form.addEventListener('submit', async (event) => {
     setForm(result);
     if (!obsEnabled.checked) pendingConnections.delete('obs');
     if (!streamerbotEnabled.checked) pendingConnections.delete('streamerbot');
-    if (!smokeEnabled.checked) pendingConnections.delete('smoke');
     // Pare-feu pas configurable automatiquement (refus UAC, etc.) : la config est
     // quand même enregistrée (cf. main.js), mais le streamer doit le savoir plutôt
     // qu'un "Enregistré" silencieux qui masquerait un appareil LAN injoignable.

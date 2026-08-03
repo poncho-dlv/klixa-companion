@@ -29,7 +29,6 @@ export default {
   nav: {
     connexion: 'Connexion',
     integrationsGroup: 'Intégrations',
-    smoke: 'Machine à fumée',
     smallrig: 'Lampes SmallRig',
     devices: 'Appareils LAN',
     settings: 'Paramètres'
@@ -38,7 +37,6 @@ export default {
     connexion: { title: 'Connexion Klixa', description: 'Lie ce compagnon à ta console Klixa.' },
     obs: { title: 'OBS', description: 'Contrôle OBS Studio via obs-websocket.' },
     streamerbot: { title: 'Streamer.bot', description: 'Déclenche des actions Streamer.bot.' },
-    smoke: { title: 'Machine à fumée', description: 'Pilote la machine à fumée de la régie.' },
     hue: { title: 'Philips Hue', description: 'Contrôle les lumières via le bridge Hue.' },
     smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' },
     devices: { title: 'Appareils LAN', description: 'Scripts et appareils tiers (Raspberry Pi, ESP...) connectés au compagnon.' },
@@ -60,10 +58,6 @@ export default {
   },
   streamerbot: {
     enable: 'Activer Streamer.bot'
-  },
-  smoke: {
-    enable: 'Activer la machine à fumée',
-    token: 'Token du service'
   },
   hue: {
     enable: 'Activer Hue',
@@ -220,7 +214,6 @@ export default {
   errors: {
     obsHostRequired: 'IP ou hôte OBS requis',
     obsPortInvalid: 'Port OBS invalide',
-    smokePortInvalid: 'Port machine à fumée invalide',
     huePortInvalid: 'Port Hue invalide',
     cloudUrlInvalid: 'URL cloud invalide (ws:// ou wss:// attendu)',
     firewallRuleFailed: 'Config enregistrée, mais le pare-feu n’a pas pu être configuré automatiquement (%message%). Autorise le port manuellement dans le pare-feu Windows si les appareils LAN n’arrivent pas à se connecter.',
@@ -237,10 +230,6 @@ export default {
     obsMissingSceneName: 'sceneName manquant',
     obsMissingSourceName: 'sourceName manquant',
     obsMissingFilterName: 'filterName manquant',
-    smokeUrlMissing: 'SMOKE_SERVICE_URL manquant (URL du service GPIO sur le Raspberry Pi)',
-    smokeHttpError: 'Service fumée HTTP %status%: %text%',
-    smokeTokenInvalid: 'Token du service fumée invalide (SMOKE_SERVICE_TOKEN)',
-    smokeUnreachable: 'Service fumée injoignable (HTTP %status%)',
     streamerbotMissingActionId: 'actionId manquant',
     streamerbotNotConnected: 'Streamer.bot non connecté',
     deviceProtocolVersion: 'Version de protocole non supportée',
