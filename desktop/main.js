@@ -521,10 +521,22 @@ function registerIpc() {
 
 // Frequence de re-check en plus de celui au demarrage : le compagnon tourne en tray
 // potentiellement plusieurs jours (toute la duree d'un live et au-dela), un seul
-// check au lancement laisserait passer les MAJ publiees entre-temps.
-const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+// check au lancement laisserait passer les MAJ publiees entre-temps. Le check lui-meme est
+// silencieux (une requete GitHub) : seule la MAJ telechargee declenche un prompt, une
+// seule fois par version, donc un intervalle court ne spamme pas.
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+// Reprises rapides apres un echec (typiquement reseau pas encore pret quand l'app demarre
+// avec la session Windows), avant de retomber sur le rythme normal.
+const UPDATE_RETRY_DELAYS_MS = [2 * 60 * 1000, 10 * 60 * 1000];
+
+// Version deja proposee via le prompt natif : evite de le rejouer a chaque check periodique
+// (electron-updater re-emet update-downloaded pour un fichier deja en cache) ou de
+// l'empiler si l'utilisateur n'a pas encore repondu. La banniere reste disponible.
+let promptedUpdateVersion = null;
 
 async function promptRestartToInstall(version) {
+  if (promptedUpdateVersion === version) return;
+  promptedUpdateVersion = version;
   const { response } = await dialog.showMessageBox({
     type: 'info',
     title: t('dialogs.updateReadyTitle'),
@@ -554,6 +566,9 @@ async function checkForUpdatesManually() {
     return;
   }
   const { autoUpdater } = electronUpdaterPkg;
+  // Demande explicite : le prompt « pret a installer » doit reapparaitre meme s'il a deja
+  // ete ecarte pour cette version.
+  promptedUpdateVersion = null;
   try {
     const result = await autoUpdater.checkForUpdates();
     const latestVersion = result?.updateInfo?.version;
@@ -637,7 +652,18 @@ function configureUpdates() {
     pushUpdateState({ phase: 'error', message: error.message });
   });
 
-  const check = () => autoUpdater.checkForUpdates().catch((error) => log.warn('Echec du check de mise a jour', error.message));
+  let failedChecks = 0;
+  const check = async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      failedChecks = 0;
+      log.info('Check de mise a jour termine, derniere version publiee :', result?.updateInfo?.version);
+    } catch (error) {
+      log.warn('Echec du check de mise a jour', error.message);
+      const retryDelay = UPDATE_RETRY_DELAYS_MS[failedChecks++];
+      if (retryDelay) setTimeout(check, retryDelay);
+    }
+  };
   check();
   setInterval(check, UPDATE_CHECK_INTERVAL_MS);
 }
