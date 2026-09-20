@@ -47,3 +47,62 @@ export async function mapWithConcurrency(items, limit, mapper) {
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   return results;
 }
+
+// Plafond d'un maintien d'état (`holdMs`) : 24 h. Klixa borne déjà à 1 h côté règle, ce
+// plafond ne sert qu'à ne jamais armer un timer aberrant si un payload arrive d'ailleurs.
+export const MAX_HOLD_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Registre des « maintiens » d'état d'une lampe : un état appliqué pour une durée
+ * donnée (`holdMs`), puis restauré à l'état d'AVANT (snapshot pris au premier maintien).
+ *
+ * Règles (chaque piège a déjà mordu le blink d'alerte) :
+ * - un second maintien sur une lampe déjà maintenue GARDE le snapshot d'origine et ne
+ *   fait que ré-armer le timer — sinon la restauration du premier ramènerait la lampe à
+ *   l'état du second, et celle du second à un état intermédiaire (lampe bloquée) ;
+ * - un état PERMANENT (`cancel`) annule le maintien en cours : la restauration tardive ne
+ *   doit jamais écraser ce que le streamer a demandé de garder ;
+ * - le timer est `unref` : il ne retient jamais l'arrêt du process.
+ * Pur (timers injectables) et testé.
+ */
+export function createHoldRegistry({ setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  const holds = new Map();
+
+  return {
+    has: (id) => holds.has(id),
+    snapshotOf: (id) => holds.get(id)?.snapshot,
+    get size() { return holds.size; },
+
+    /** Arme (ou ré-arme) la restauration de `id` dans `holdMs`. */
+    arm(id, snapshot, holdMs, onExpire) {
+      const previous = holds.get(id);
+      if (previous) clearTimer(previous.timer);
+      const origin = previous ? previous.snapshot : snapshot;
+      const delay = Math.max(1, Math.min(MAX_HOLD_MS, Math.round(Number(holdMs) || 0)));
+      const timer = setTimer(() => {
+        holds.delete(id);
+        Promise.resolve()
+          .then(() => onExpire(origin))
+          .catch(() => {});
+      }, delay);
+      timer?.unref?.();
+      holds.set(id, { snapshot: origin, timer });
+    },
+
+    /** Annule les maintiens des lampes données (un état permanent les remplace). */
+    cancel(ids) {
+      for (const id of ids) {
+        const hold = holds.get(id);
+        if (!hold) continue;
+        clearTimer(hold.timer);
+        holds.delete(id);
+      }
+    },
+
+    /** Annule tout (arrêt de l'intégration). */
+    clear() {
+      for (const hold of holds.values()) clearTimer(hold.timer);
+      holds.clear();
+    }
+  };
+}

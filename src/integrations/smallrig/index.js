@@ -3,7 +3,7 @@ import { t } from '../../i18n/core.js';
 import { hexToHueSat } from './color-convert.js';
 import { createMeshClient } from './mesh-client.js';
 import { parseMeshState, serializeMeshState } from './mesh-store.js';
-import { isHexColor, clamp, normalizeLightIds, mapWithConcurrency } from '../light-utils.js';
+import { isHexColor, clamp, normalizeLightIds, mapWithConcurrency, createHoldRegistry, MAX_HOLD_MS } from '../light-utils.js';
 
 const log = createLogger('smallrig');
 
@@ -250,10 +250,47 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     return { lamps: client.listNodes() };
   }
 
+  // États maintenus pour une durée (`holdMs`) puis restaurés à l'état d'avant — même
+  // mécanique que hue.js (cf. createHoldRegistry), le snapshot étant ici la baseline
+  // logicielle de la lampe (snapshotLightState).
+  const holds = createHoldRegistry();
+
+  // Applique un état STEADY. `holdMs` > 0 : maintenu ce temps puis restauré (la commande
+  // rend la main dès l'état appliqué). `holdMs` = 0 : permanent, annule tout maintien en
+  // cours sur ces lampes pour que la restauration tardive ne l'écrase pas.
+  async function applyWithHold(lightIds, holdMs, apply) {
+    if (!(holdMs > 0)) {
+      holds.cancel(lightIds);
+      return apply();
+    }
+
+    const snapshots = {};
+    await mapWithConcurrency(lightIds, requestConcurrency, async (uuid) => {
+      snapshots[uuid] = holds.has(uuid) ? holds.snapshotOf(uuid) : await snapshotLightState(uuid);
+    });
+
+    try {
+      return await apply();
+    } finally {
+      for (const uuid of lightIds) {
+        holds.arm(uuid, snapshots[uuid], holdMs, async (origin) => {
+          try {
+            await restoreLightState(uuid, origin);
+            // La restauration écrit directement via le client (pas executeForLights) : la
+            // baseline doit revenir à l'état d'origine, sinon elle resterait sur l'état maintenu.
+            if (origin) baselineByUuid.set(uuid, origin);
+          } catch (err) {
+            log.warn(`Restauration SmallRig impossible pour ${uuid}`, err.message);
+          }
+        });
+      }
+    }
+  }
+
   // smallrig.color — même contrat que hue.color (lightIds, color hex, brightness,
-  // transitionMs, durationMs, mode) pour permettre un pilotage cross-marques uniforme
-  // côté Klixa. `transitionMs` n'a pas d'équivalent natif RM75 (pas de fondu matériel
-  // pour HSI) : ignoré en dehors du calcul de cadence du mode "simple".
+  // transitionMs, durationMs, mode, holdMs) pour permettre un pilotage cross-marques
+  // uniforme côté Klixa. `transitionMs` n'a pas d'équivalent natif RM75 (pas de fondu
+  // matériel pour HSI) : ignoré en dehors du calcul de cadence du mode "simple".
   async function color(payload = {}) {
     const lightIds = normalizeLightIds(payload.lightIds ?? payload.smallrigLightIds);
     checkLightIds(lightIds);
@@ -284,14 +321,15 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
       return { lights: lightIds.length, color: hex, accepted: true };
     }
 
-    await executeForLights(
+    const holdMs = clamp(payload.holdMs, 0, MAX_HOLD_MS, 0);
+    await applyWithHold(lightIds, holdMs, () => executeForLights(
       'Commande couleur',
       lightIds,
       (uuid) => client.setHsi([uuid], { hue, sat, intensity }),
       { status: { type: 'hsi', hue, sat, intensity }, poweredOn: true }
-    );
+    ));
 
-    log.info('Commande couleur envoyée', { lights: lightIds.length, color: hex, mode: mode || 'steady' });
+    log.info('Commande couleur envoyée', { lights: lightIds.length, color: hex, mode: mode || 'steady', holdMs });
     return { lights: lightIds.length, color: hex };
   }
 
@@ -399,6 +437,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const intensity = clamp(payload.brightness ?? payload.intensity, 1, 100, DEFAULTS.brightness);
     const gm = clamp(payload.gm, -10, 10, 0);
 
+    holds.cancel(lightIds);
     await executeForLights('Commande température de couleur', lightIds, (uuid) =>
       client.setCct([uuid], { kelvin, intensity, gm }),
     { status: { type: 'cct', kelvin, intensity, gm }, poweredOn: true });
@@ -419,6 +458,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const b = clamp(payload.b, 0, 255, 0);
     const w = clamp(payload.w, 0, 255, 0);
 
+    holds.cancel(lightIds);
     await executeForLights('Commande RGBW', lightIds, (uuid) => client.setRgbw([uuid], { r, g, b, w }),
       { status: { type: 'rgbw', r, g, b, w }, poweredOn: true });
 
@@ -434,11 +474,13 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
     const level = payload.level ?? payload.brightness;
     const on = payload.on !== false;
     const normalizedLevel = on && Number.isFinite(Number(level)) ? clamp(level, 0, 100, undefined) : undefined;
+    const holdMs = clamp(payload.holdMs, 0, MAX_HOLD_MS, 0);
     // Baseline : seul `poweredOn` bouge (le level ajuste la luminosité sans changer le
     // mode couleur courant — la restauration ne réapplique de toute façon que le mode).
-    await executeForLights('Commande alimentation', lightIds, (uuid) => client.setPower([uuid], { on, level: normalizedLevel }),
-      { poweredOn: on });
-    log.info('Commande alimentation envoyée', { lights: lightIds.length, on, level });
+    await applyWithHold(lightIds, holdMs, () => executeForLights('Commande alimentation', lightIds,
+      (uuid) => client.setPower([uuid], { on, level: normalizedLevel }),
+      { poweredOn: on }));
+    log.info('Commande alimentation envoyée', { lights: lightIds.length, on, level, holdMs });
     return { lights: lightIds.length };
   }
 
@@ -458,11 +500,12 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
 
     // Forme alignée sur decodeStatus type 'fx' (freq/intensity), consommée telle
     // quelle par restoreLightState.
-    await executeForLights('Effet dynamique', lightIds, (uuid) =>
+    const holdMs = clamp(payload.holdMs, 0, MAX_HOLD_MS, 0);
+    await applyWithHold(lightIds, holdMs, () => executeForLights('Effet dynamique', lightIds, (uuid) =>
       client.setFx([uuid], { mode, param1, param2 }),
-    { status: { type: 'fx', mode, freq: param1, intensity: param2 }, poweredOn: true });
+    { status: { type: 'fx', mode, freq: param1, intensity: param2 }, poweredOn: true }));
 
-    log.info('Effet dynamique envoyé', { lights: lightIds.length, mode, param1, param2 });
+    log.info('Effet dynamique envoyé', { lights: lightIds.length, mode, param1, param2, holdMs });
     return { lights: lightIds.length, mode };
   }
 
@@ -487,6 +530,7 @@ export function createSmallrigIntegration(smallrigConfig = {}) {
   }
 
   async function stop() {
+    holds.clear();
     await client.stop();
   }
 

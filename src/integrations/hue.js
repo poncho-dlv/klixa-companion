@@ -2,7 +2,7 @@ import https from 'node:https';
 import net from 'node:net';
 import { createLogger } from '../logger.js';
 import { t } from '../i18n/core.js';
-import { clamp, isHexColor, mapWithConcurrency, normalizeLightIds } from './light-utils.js';
+import { clamp, createHoldRegistry, isHexColor, mapWithConcurrency, MAX_HOLD_MS, normalizeLightIds } from './light-utils.js';
 
 const log = createLogger('hue');
 
@@ -206,6 +206,9 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
     return mapWithConcurrency(lightIds, requestConcurrency, operation);
   }
 
+  // États maintenus pour une durée (`holdMs`) puis restaurés à l'état d'avant.
+  const holds = createHoldRegistry();
+
   function resolveCredentials() {
     const bridgeIp = String(hueConfig.bridgeIp || '').trim();
     const bridgePort = Number.parseInt(hueConfig.bridgePort, 10) || 443;
@@ -295,8 +298,47 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
     }
   }
 
+  // Applique un état STEADY. `holdMs` > 0 : l'état est maintenu ce temps puis la lampe
+  // retrouve son état d'avant (snapshot pris ici, ou celui du maintien déjà en cours sur
+  // la lampe — cf. createHoldRegistry). `holdMs` = 0 : état permanent, il annule tout
+  // maintien en cours pour que la restauration tardive ne l'écrase pas. La commande rend la
+  // main dès l'état appliqué : la restauration part en arrière-plan.
+  async function applyWithHold(creds, lightIds, holdMs, transitionMs, apply) {
+    if (!(holdMs > 0)) {
+      holds.cancel(lightIds);
+      await apply();
+      return;
+    }
+
+    const snapshots = {};
+    await forEachLight(lightIds, async (id) => {
+      if (holds.has(id)) {
+        snapshots[id] = holds.snapshotOf(id);
+        return;
+      }
+      try { snapshots[id] = await readLightState(creds, id); }
+      catch (err) { log.warn(`Snapshot impossible pour ${id}`, err.message); }
+    });
+
+    try {
+      await apply();
+    } finally {
+      for (const id of lightIds) {
+        if (!snapshots[id]) {
+          log.warn(`Maintien sans restauration pour ${id} : état d'origine inconnu`);
+          continue;
+        }
+        holds.arm(id, snapshots[id], holdMs, async (origin) => {
+          try { await restoreLightState(creds, id, origin, transitionMs); }
+          catch (err) { log.warn(`Restauration impossible pour ${id}`, err.message); }
+        });
+      }
+    }
+  }
+
   // hue.color — couleur sur les lampes ciblées. Payload : { lightIds, color, brightness,
-  // transitionMs, durationMs, mode ('simple' = clignotement + restauration) }.
+  // transitionMs, durationMs, mode ('simple' = clignotement + restauration), holdMs (état
+  // steady maintenu ce temps puis restauré) }.
   // (La gestion des scènes Hue a été retirée : recall permanent, incompatible avec des
   // alertes ponctuelles qui doivent restaurer l'état initial.)
   async function color(payload = {}) {
@@ -311,9 +353,13 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
     // Extinction steady (lampe hors du thème courant, cf. resolveThemeLightColors
     // côté Klixa) : pas de couleur à valider, juste on:false — distinct du blink
     // (mode:'simple'), qui pulse puis restaure l'état d'avant l'alerte.
+    // Maintien : l'état demandé ne dure que `holdMs`, puis la lampe retrouve son état d'avant.
+    // Ignoré pour un clignotement (mode 'simple'), qui restaure déjà de lui-même.
+    const holdMs = payload.mode || payload.hueMode ? 0 : clamp(payload.holdMs, 0, MAX_HOLD_MS, 0);
+
     if (payload.on === false) {
-      await forEachLight(lightIds, (id) => setLightOn(creds, id, false, transitionMs));
-      log.info('Lampes éteintes', { lights: lightIds.length });
+      await applyWithHold(creds, lightIds, holdMs, transitionMs, () => forEachLight(lightIds, (id) => setLightOn(creds, id, false, transitionMs)));
+      log.info('Lampes éteintes', { lights: lightIds.length, holdMs });
       return { lights: lightIds.length, on: false };
     }
 
@@ -336,7 +382,7 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
       if (mode === 'simple') {
         await blinkLights(creds, lightIds, null, stateBrightness, transitionMs, durationMs, mirek);
       } else {
-        await forEachLight(lightIds, (id) => setLightState(creds, id, { brightness: stateBrightness, mirek }, transitionMs));
+        await applyWithHold(creds, lightIds, holdMs, transitionMs, () => forEachLight(lightIds, (id) => setLightState(creds, id, { brightness: stateBrightness, mirek }, transitionMs)));
       }
 
       log.info('Commande état envoyée', { lights: lightIds.length, mode: mode || 'steady' });
@@ -351,10 +397,10 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
     if (mode === 'simple') {
       await blinkLights(creds, lightIds, xy, brightness, transitionMs, durationMs);
     } else {
-      await forEachLight(lightIds, (id) => setLightColor(creds, id, xy, brightness, transitionMs));
+      await applyWithHold(creds, lightIds, holdMs, transitionMs, () => forEachLight(lightIds, (id) => setLightColor(creds, id, xy, brightness, transitionMs)));
     }
 
-    log.info('Commande couleur envoyée', { lights: lightIds.length, color: hex, mode: mode || 'steady' });
+    log.info('Commande couleur envoyée', { lights: lightIds.length, color: hex, mode: mode || 'steady', holdMs });
     return { lights: lightIds.length, color: hex };
   }
 
@@ -436,6 +482,7 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
     healthcheck,
     stop() {
       if (notifyTimer) clearTimeout(notifyTimer);
+      holds.clear();
     }
   };
 }
