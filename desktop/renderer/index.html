@@ -108,39 +108,59 @@
               </p>
             </div>
 
-            <ol id="hueSteps" class="wizard-steps">
-              <li><button type="button" data-hue-step="1"><span class="wizard-step-number">1</span><span data-i18n="hue.stepBridge">Bridge</span></button></li>
-              <li><button type="button" data-hue-step="2"><span class="wizard-step-number">2</span><span data-i18n="hue.stepLamps">Lampes</span></button></li>
-              <li><button type="button" data-hue-step="3"><span class="wizard-step-number">3</span><span data-i18n="hue.stepActivation">Activation</span></button></li>
-            </ol>
-
-            <div class="wizard-panel" data-hue-panel="1">
-              <div class="row"><label><span data-i18n="hue.bridgeIp">IP du bridge</span><input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label><span data-i18n="common.port">Port</span><input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
-              <button type="button" id="huePairBtn" data-i18n="hue.pairButton">Appairer (presser le bouton du bridge avant)</button>
-              <button type="button" id="hueUnpairBtn" class="secondary-button disconnect-btn" hidden data-i18n="common.disconnect">Déconnecter</button>
-              <p id="hueMessage" role="status"></p>
+            <div id="hueRecap" hidden>
+              <h3 data-i18n="hue.recapBridgeTitle">Bridge</h3>
+              <ul class="lamp-list">
+                <li class="lamp-row"><div class="lamp-line"><span class="lamp-label" data-i18n="hue.recapBridge">Bridge</span><span class="lamp-meta" id="hueRecapBridge"></span></div></li>
+                <li class="lamp-row"><div class="lamp-line"><span class="lamp-label" data-i18n="hue.recapPairing">Appairage</span><span class="lamp-meta" id="hueRecapPairing"></span></div></li>
+                <li class="lamp-row"><div class="lamp-line"><span class="lamp-label" data-i18n="hue.recapIntegration">Intégration</span><span class="lamp-meta" id="hueRecapIntegration"></span></div></li>
+              </ul>
+              <h3 data-i18n="hue.recapLampsTitle">Lampes utilisées avec Klixa</h3>
+              <ul id="hueRecapLamps" class="lamp-list"></ul>
+              <p id="hueRecapMessage" class="field-hint" role="status"></p>
               <div class="wizard-nav">
-                <button type="button" id="hueNext1" class="primary" data-i18n="common.next">Suivant</button>
+                <button type="button" id="hueReconfigureBtn" class="primary" data-i18n="hue.reconfigure">Reconfigurer</button>
               </div>
             </div>
 
-            <div class="wizard-panel" data-hue-panel="2" hidden>
-              <button type="button" id="hueDiscoverBtn" data-i18n="hue.discoverButton">Rechercher les lampes</button>
-              <ul id="hueLampList" class="lamp-list"></ul>
-              <p id="hueLampMessage" role="status"></p>
-              <input type="hidden" name="HUE_LIGHT_IDS" id="hueLightIds">
-              <div class="wizard-nav">
-                <button type="button" id="huePrev2" class="secondary-button" data-i18n="common.previous">Précédent</button>
-                <button type="button" id="hueNext2" class="primary" data-i18n="common.next">Suivant</button>
-              </div>
-            </div>
+            <div id="hueWizard">
+              <ol id="hueSteps" class="wizard-steps">
+                <li><button type="button" data-hue-step="1"><span class="wizard-step-number">1</span><span data-i18n="hue.stepBridge">Bridge</span></button></li>
+                <li><button type="button" data-hue-step="2"><span class="wizard-step-number">2</span><span data-i18n="hue.stepLamps">Lampes</span></button></li>
+                <li><button type="button" data-hue-step="3"><span class="wizard-step-number">3</span><span data-i18n="hue.stepActivation">Activation</span></button></li>
+              </ol>
 
-            <div class="wizard-panel" data-hue-panel="3" hidden>
-              <label class="toggle switch-row"><input name="HUE_ENABLED" type="checkbox"><span class="switch-label-text" data-i18n="hue.enable">Activer Hue</span></label>
-              <p id="hueSummary" class="field-hint"></p>
-              <div class="wizard-nav">
-                <button type="button" id="huePrev3" class="secondary-button" data-i18n="common.previous">Précédent</button>
-                <button type="submit" class="primary page-save-btn" data-integration="hue" data-i18n="common.save">Enregistrer</button>
+              <div class="wizard-panel" data-hue-panel="1">
+                <div class="row"><label><span data-i18n="hue.bridgeIp">IP du bridge</span><input name="HUE_BRIDGE_IP" id="hueBridgeIp" placeholder="192.168.1.40"></label><label><span data-i18n="common.port">Port</span><input name="HUE_BRIDGE_PORT" id="hueBridgePort" type="number" min="1" max="65535" placeholder="443"></label></div>
+                <button type="button" id="huePairBtn" data-i18n="hue.pairButton">Appairer (presser le bouton du bridge avant)</button>
+                <button type="button" id="hueUnpairBtn" class="secondary-button disconnect-btn" hidden data-i18n="common.disconnect">Déconnecter</button>
+                <p id="hueMessage" role="status"></p>
+                <div class="wizard-nav">
+                  <button type="button" id="hueNext1" class="primary" data-i18n="common.next">Suivant</button>
+                </div>
+              </div>
+
+              <div class="wizard-panel" data-hue-panel="2" hidden>
+                <button type="button" id="hueDiscoverBtn" data-i18n="hue.discoverButton">Rechercher les lampes</button>
+                <ul id="hueLampList" class="lamp-list"></ul>
+                <p id="hueLampMessage" role="status"></p>
+                <input type="hidden" name="HUE_LIGHT_IDS" id="hueLightIds">
+                <div class="wizard-nav">
+                  <button type="button" id="huePrev2" class="secondary-button" data-i18n="common.previous">Précédent</button>
+                  <button type="button" id="hueNext2" class="primary" data-i18n="common.next">Suivant</button>
+                </div>
+              </div>
+
+              <div class="wizard-panel" data-hue-panel="3" hidden>
+                <label class="toggle switch-row"><input name="HUE_ENABLED" type="checkbox"><span class="switch-label-text" data-i18n="hue.enable">Activer Hue</span></label>
+                <p id="hueSummary" class="field-hint"></p>
+                <div class="wizard-nav">
+                  <button type="button" id="huePrev3" class="secondary-button" data-i18n="common.previous">Précédent</button>
+                  <button type="submit" class="primary page-save-btn" data-integration="hue" data-i18n="common.save">Enregistrer</button>
+                </div>
+              </div>
+              <div class="wizard-nav wizard-cancel">
+                <button type="button" id="hueCancelBtn" class="secondary-button" hidden data-i18n="common.cancel">Annuler</button>
               </div>
             </div>
           </section>

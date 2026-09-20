@@ -249,6 +249,7 @@ h3{font-size:13px;color:var(--text-muted);margin:18px 0 8px;text-transform:upper
 .wizard-panel[hidden]{display:none}
 .wizard-nav{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .wizard-nav button{width:auto;flex-shrink:0;padding:9px 16px;margin:0}
+.wizard-cancel{justify-content:flex-start;margin-top:8px}
 .lamp-row--check>.lamp-line{cursor:pointer;user-select:none;margin:0;color:var(--text)}
 .lamp-row--check>.lamp-line:hover{background:rgba(255,255,255,.025)}
 .lamp-row--check input[type=checkbox]{width:auto;margin:0;flex-shrink:0}

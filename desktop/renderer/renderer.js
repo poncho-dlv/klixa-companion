@@ -29,6 +29,15 @@ const hueLampList = document.querySelector('#hueLampList');
 const hueLampMessage = document.querySelector('#hueLampMessage');
 const hueLightIds = document.querySelector('#hueLightIds');
 const hueSummary = document.querySelector('#hueSummary');
+const hueRecap = document.querySelector('#hueRecap');
+const hueWizard = document.querySelector('#hueWizard');
+const hueRecapBridge = document.querySelector('#hueRecapBridge');
+const hueRecapPairing = document.querySelector('#hueRecapPairing');
+const hueRecapIntegration = document.querySelector('#hueRecapIntegration');
+const hueRecapLampList = document.querySelector('#hueRecapLamps');
+const hueRecapMessage = document.querySelector('#hueRecapMessage');
+const hueReconfigureBtn = document.querySelector('#hueReconfigureBtn');
+const hueCancelBtn = document.querySelector('#hueCancelBtn');
 const smallrigStatus = document.querySelector('#smallrigStatus');
 const smallrigScanBtn = document.querySelector('#smallrigScanBtn');
 const smallrigFound = document.querySelector('#smallrigFound');
@@ -173,8 +182,12 @@ function renderPairingUi() {
   setNavLocked(!linked);
 }
 
+function isHueEnabled() {
+  return lastConfig.HUE_ENABLED !== false && lastConfig.HUE_ENABLED !== 'false';
+}
+
 function renderHueUi() {
-  const enabled = lastConfig.HUE_ENABLED !== false && lastConfig.HUE_ENABLED !== 'false';
+  const enabled = isHueEnabled();
   const paired = Boolean(lastConfig.HUE_APP_KEY_CONFIGURED);
   const connected = Boolean(lastIntegrationStatus?.hue?.ok);
   huePairBtn.hidden = paired;
@@ -196,27 +209,53 @@ function renderHueUi() {
   renderHueWizard();
 }
 
-// ── Assistant Hue : 1 Bridge (IP + appairage) → 2 Lampes (recherche + choix) → 3 Activation.
+// ── Page Hue : deux vues.
+//  - « recap » : compte rendu de l'état ENREGISTRÉ (bridge, appairage, intégration, lampes) ;
+//    c'est la vue d'arrivée dès que le bridge est appairé ET qu'une sélection est enregistrée,
+//    et celle où l'on retombe après « Enregistrer ». « Reconfigurer » relance l'assistant.
+//  - « wizard » : 1 Bridge (IP + appairage) → 2 Lampes (recherche + choix) → 3 Activation.
 // La sélection des lampes vit ICI (champ caché HUE_LIGHT_IDS, enregistré avec le reste de la
 // page) : Klixa ne reçoit que les lampes choisies, avec leur type (commande hue.lights).
+let hueView = 'wizard';
+let hueViewChosen = false; // la vue initiale se déduit de la config enregistrée, une seule fois
 let hueStep = 1;
-let hueStepChosen = false; // l'étape initiale se déduit de la config, une seule fois
 let configLoaded = false; // tant que la config n'est pas chargée, « non appairé » n'est pas fiable
 let hueBridgeLamps = [];
 let hueDiscovering = false;
 let hueDiscoverAttempted = false;
+// Lampes du bridge lues pour le récapitulatif (noms/types des ids enregistrés) : null = pas
+// encore lues ; relues à chaque entrée dans la vue, jamais à chaque rendu (le statut des
+// intégrations relance ce rendu en boucle).
+let hueRecapLamps = null;
+let hueRecapLoading = false;
 
 function isHuePaired() {
   return Boolean(lastConfig.HUE_APP_KEY_CONFIGURED);
 }
 
-function readHueSelection() {
+// Sélection ENREGISTRÉE (≠ champ caché, qui est la copie de travail de l'assistant) :
+// chaîne vide = jamais choisie ; `[]` = choix explicite « aucune lampe ».
+function hasSavedHueSelection() {
+  return String(lastConfig.HUE_LIGHT_IDS ?? '').trim() !== '';
+}
+
+// Electron préfixe les erreurs d'IPC (« Error invoking remote method 'x': Error: … ») : on
+// n'affiche que le message utile.
+function ipcErrorMessage(error) {
+  return String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
+}
+
+function parseHueIds(raw) {
   try {
-    const ids = JSON.parse(hueLightIds.value || '[]');
+    const ids = JSON.parse(raw || '[]');
     return Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
   } catch {
     return [];
   }
+}
+
+function readHueSelection() {
+  return parseHueIds(hueLightIds.value);
 }
 
 function writeHueSelection(ids) {
@@ -276,11 +315,18 @@ async function discoverHueLamps() {
   try {
     const result = await window.klixa.hueDiscover();
     hueBridgeLamps = Array.isArray(result?.lights) ? result.lights : [];
+    // Ids sélectionnés que le bridge ne connaît plus (lampe supprimée/réappairée) : retirés de
+    // la copie de travail, pour que « Enregistrer » nettoie la sélection. Jamais sur une liste
+    // vide (bridge qui ne répond pas correctement) ni sur « jamais choisi » (champ vide).
+    if (hueBridgeLamps.length > 0 && hueLightIds.value.trim()) {
+      const known = new Set(hueBridgeLamps.map((lamp) => lamp.id));
+      writeHueSelection(readHueSelection().filter((id) => known.has(id)));
+    }
     hueLampMessage.className = 'ok';
     hueLampMessage.textContent = t('hue.lampsFound', { count: hueBridgeLamps.length });
   } catch (error) {
     hueLampMessage.className = 'error';
-    hueLampMessage.textContent = error.message;
+    hueLampMessage.textContent = ipcErrorMessage(error);
   } finally {
     hueDiscovering = false;
     hueDiscoverBtn.disabled = false;
@@ -294,21 +340,154 @@ function setHueStep(step) {
   renderHueWizard();
 }
 
+async function loadHueRecapLamps() {
+  hueRecapLoading = true;
+  try {
+    const result = await window.klixa.hueDiscover();
+    hueRecapLamps = { lights: Array.isArray(result?.lights) ? result.lights : [], error: '' };
+  } catch (error) {
+    hueRecapLamps = { lights: [], error: ipcErrorMessage(error) };
+  } finally {
+    hueRecapLoading = false;
+    renderHueWizard();
+  }
+}
+
+function setRecapValue(element, text, state) {
+  element.textContent = text;
+  element.className = `lamp-meta${state ? ` ${state}` : ''}`;
+}
+
+function appendRecapLampRow(text, meta) {
+  const li = document.createElement('li');
+  li.className = 'lamp-row';
+  const line = document.createElement('div');
+  line.className = 'lamp-line';
+  const name = document.createElement('span');
+  name.className = 'lamp-label';
+  name.textContent = text;
+  line.appendChild(name);
+  if (meta) {
+    const kind = document.createElement('span');
+    kind.className = 'lamp-meta';
+    kind.textContent = meta;
+    line.appendChild(kind);
+  }
+  li.appendChild(line);
+  hueRecapLampList.appendChild(li);
+}
+
+function appendRecapLampNote(text) {
+  const li = document.createElement('li');
+  li.className = 'lamp-empty';
+  li.textContent = text;
+  hueRecapLampList.appendChild(li);
+}
+
+// Compte rendu de la config ENREGISTRÉE (lastConfig), jamais de la copie de travail de
+// l'assistant : ce qu'on voit ici est ce que le compagnon applique réellement.
+function renderHueRecap() {
+  const enabled = isHueEnabled();
+  const connected = Boolean(lastIntegrationStatus?.hue?.ok);
+  const paired = isHuePaired();
+  setRecapValue(hueRecapBridge, `${lastConfig.HUE_BRIDGE_IP || '—'}:${lastConfig.HUE_BRIDGE_PORT || '443'}`);
+  setRecapValue(hueRecapPairing, paired ? t('hue.recapPaired') : t('hue.recapNotPaired'), paired ? 'ok' : 'error');
+  if (!enabled) setRecapValue(hueRecapIntegration, t('common.disabled'));
+  else setRecapValue(hueRecapIntegration, connected ? t('common.connected') : t('common.notConnected'), connected ? 'ok' : 'error');
+
+  hueRecapLampList.innerHTML = '';
+  hueRecapMessage.className = 'field-hint';
+  hueRecapMessage.textContent = '';
+  if (!hasSavedHueSelection()) {
+    appendRecapLampNote(t('hue.recapNotChosen'));
+    return;
+  }
+  const savedIds = [...new Set(parseHueIds(lastConfig.HUE_LIGHT_IDS))];
+  if (savedIds.length === 0) {
+    appendRecapLampNote(t('hue.recapNoLamps'));
+    return;
+  }
+
+  if (hueRecapLamps === null) {
+    appendRecapLampNote(t('hue.discovering'));
+    if (!hueRecapLoading) loadHueRecapLamps();
+    return;
+  }
+  // Bridge injoignable : on n'a pas les noms, mais on sait au moins combien de lampes sont enregistrées.
+  if (hueRecapLamps.error) {
+    appendRecapLampNote(t('hue.summarySelected', { count: savedIds.length }));
+    hueRecapMessage.className = 'field-hint error';
+    hueRecapMessage.textContent = t('hue.recapLampsError', { message: hueRecapLamps.error });
+    return;
+  }
+  const selected = new Set(savedIds);
+  const found = hueRecapLamps.lights.filter((lamp) => selected.has(lamp.id));
+  for (const lamp of found) appendRecapLampRow(lamp.name, t(`hue.kind.${lamp.kind}`));
+  // Ids enregistrés qui n'existent plus sur le bridge (lampe supprimée/réappairée) : ignorés
+  // par Klixa, on le signale plutôt que de les faire disparaître en silence.
+  if (found.length < savedIds.length) {
+    hueRecapMessage.className = 'field-hint error';
+    hueRecapMessage.textContent = t('hue.recapMissing', { count: savedIds.length - found.length });
+  }
+}
+
+function showHueRecap() {
+  hueView = 'recap';
+  hueRecapLamps = null;
+  renderHueWizard();
+}
+
+// « Reconfigurer » : on rejoue l'assistant depuis le début. La copie de travail (champ caché,
+// case « activé ») part de la config enregistrée, donc la sélection actuelle est pré-cochée.
+function startHueWizard() {
+  hueView = 'wizard';
+  hueStep = 1;
+  hueBridgeLamps = [];
+  hueDiscoverAttempted = false;
+  renderHueWizard();
+}
+
+// « Annuler » : on abandonne les modifications non enregistrées de l'assistant (uniquement
+// les champs Hue — les autres pages du formulaire ne sont pas touchées) et on revient au compte rendu.
+function cancelHueWizard() {
+  hueBridgeIp.value = lastConfig.HUE_BRIDGE_IP ?? '';
+  hueBridgePort.value = lastConfig.HUE_BRIDGE_PORT ?? '';
+  hueLightIds.value = lastConfig.HUE_LIGHT_IDS ?? '';
+  form.elements.HUE_ENABLED.checked = isHueEnabled();
+  hueMessage.textContent = '';
+  hueLampMessage.textContent = '';
+  showHueRecap();
+}
+
 function renderHueWizard() {
   const paired = isHuePaired();
-  if (!paired) hueStep = 1;
-  else if (!hueStepChosen) {
-    hueStep = hueLightIds.value.trim() ? 3 : 2;
+  // La vue initiale n'est figée qu'une fois la vraie config connue : sinon un premier rendu
+  // (avant setForm) figerait l'assistant à l'étape 1 et le récapitulatif ne s'ouvrirait jamais.
+  if (configLoaded && !hueViewChosen) {
+    hueViewChosen = true;
+    hueView = paired && hasSavedHueSelection() ? 'recap' : 'wizard';
+    hueStep = paired ? 2 : 1;
   }
-  // L'étape initiale n'est figée qu'une fois la vraie config connue : sinon un premier rendu
-  // (avant setForm) figerait l'étape 1 et l'assistant ne s'ouvrirait jamais sur « Lampes ».
-  if (configLoaded) hueStepChosen = true;
 
-  // Bridge délié : la liste des lampes n'a plus de sens, la prochaine recherche repart de zéro.
+  // Bridge délié : plus de récapitulatif ni de liste de lampes, tout repart de l'étape 1.
   if (!paired) {
+    hueView = 'wizard';
+    hueStep = 1;
     hueBridgeLamps = [];
     hueDiscoverAttempted = false;
+    hueRecapLamps = null;
   }
+
+  const showRecap = hueView === 'recap';
+  hueRecap.hidden = !showRecap;
+  hueWizard.hidden = showRecap;
+  if (showRecap) {
+    renderHueRecap();
+    return;
+  }
+
+  // Annulation possible seulement s'il y a un état enregistré à retrouver.
+  hueCancelBtn.hidden = !(paired && hasSavedHueSelection());
   // Première arrivée sur l'étape « Lampes » : la recherche part toute seule (une seule fois
   // par appairage — ce rendu est aussi relancé par le statut des intégrations).
   if (paired && hueStep === 2 && !hueDiscoverAttempted && !hueDiscovering) discoverHueLamps();
@@ -339,6 +518,8 @@ document.querySelector('#hueNext2').addEventListener('click', () => setHueStep(3
 document.querySelector('#huePrev2').addEventListener('click', () => setHueStep(1));
 document.querySelector('#huePrev3').addEventListener('click', () => setHueStep(2));
 hueDiscoverBtn.addEventListener('click', discoverHueLamps);
+hueReconfigureBtn.addEventListener('click', startHueWizard);
+hueCancelBtn.addEventListener('click', cancelHueWizard);
 
 let lastFoundLamps = [];
 let lastPairedLamps = [];
@@ -1358,6 +1539,9 @@ form.addEventListener('submit', async (event) => {
   try {
     const result = await window.klixa.saveConfig(data, integrationId);
     setForm(result);
+    // Fin de l'assistant Hue : on affiche le compte rendu de ce qui vient d'être enregistré
+    // plutôt que de laisser l'utilisateur sur l'étape 3.
+    if (integrationId === 'hue') showHueRecap();
     if (!obsEnabled.checked) pendingConnections.delete('obs');
     if (!streamerbotEnabled.checked) pendingConnections.delete('streamerbot');
     // Pare-feu pas configurable automatiquement (refus UAC, etc.) : la config est

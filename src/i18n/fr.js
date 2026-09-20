@@ -18,7 +18,8 @@ export default {
     saving: 'Enregistrement...',
     saved: 'Configuration enregistrée.',
     next: 'Suivant',
-    previous: 'Précédent'
+    previous: 'Précédent',
+    cancel: 'Annuler'
   },
   status: {
     starting: 'Démarrage...',
@@ -78,6 +79,18 @@ export default {
     lampsFound: '%count% lampe(s) trouvée(s) sur le bridge.',
     summaryNotChosen: 'Aucune sélection : Klixa garde les lampes choisies auparavant. Choisis tes lampes à l\'étape 2.',
     summarySelected: '%count% lampe(s) utilisée(s) avec Klixa.',
+    recapBridgeTitle: 'Connexion',
+    recapBridge: 'Bridge',
+    recapPairing: 'Appairage',
+    recapIntegration: 'Intégration',
+    recapLampsTitle: 'Lampes utilisées avec Klixa',
+    recapPaired: 'Appairé',
+    recapNotPaired: 'Non appairé',
+    recapNotChosen: 'Aucune sélection enregistrée : Klixa garde les lampes choisies auparavant.',
+    recapNoLamps: 'Aucune lampe sélectionnée.',
+    recapLampsError: 'Impossible de lire les lampes du bridge (%message%).',
+    recapMissing: '%count% lampe(s) enregistrée(s) introuvable(s) sur le bridge.',
+    reconfigure: 'Reconfigurer',
     kind: {
       color: 'Lampe couleur',
       tunable_white: 'Blanc réglable',

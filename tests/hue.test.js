@@ -4,6 +4,7 @@ import {
   classifyHueLight,
   clamp,
   createHueIntegration,
+  dynamicsFor,
   hexToXy,
   isHexColor,
   isPrivateBridgeIp,
@@ -195,4 +196,11 @@ test('hue: stop() annule la notification différée (intégration remplacée ava
   await integration.stop();
   await new Promise((resolve) => setTimeout(resolve, 1200));
   assert.equal(events.length, 0);
+});
+
+test('dynamicsFor: durée de transition envoyée seulement si > 0 (prise on/off : rien)', () => {
+  assert.deepEqual(dynamicsFor(350), { dynamics: { duration: 350 } });
+  assert.deepEqual(dynamicsFor(0), {});
+  assert.deepEqual(dynamicsFor(undefined), {});
+  assert.deepEqual(dynamicsFor(-5), {});
 });

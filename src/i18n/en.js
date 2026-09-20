@@ -18,7 +18,8 @@ export default {
     saving: 'Saving...',
     saved: 'Configuration saved.',
     next: 'Next',
-    previous: 'Previous'
+    previous: 'Previous',
+    cancel: 'Cancel'
   },
   status: {
     starting: 'Starting...',
@@ -78,6 +79,18 @@ export default {
     lampsFound: '%count% light(s) found on the bridge.',
     summaryNotChosen: 'No selection: Klixa keeps the lights chosen previously. Pick your lights in step 2.',
     summarySelected: '%count% light(s) used with Klixa.',
+    recapBridgeTitle: 'Connection',
+    recapBridge: 'Bridge',
+    recapPairing: 'Pairing',
+    recapIntegration: 'Integration',
+    recapLampsTitle: 'Lights used with Klixa',
+    recapPaired: 'Paired',
+    recapNotPaired: 'Not paired',
+    recapNotChosen: 'No selection saved: Klixa keeps the lights chosen previously.',
+    recapNoLamps: 'No light selected.',
+    recapLampsError: 'Could not read the lights from the bridge (%message%).',
+    recapMissing: '%count% saved light(s) no longer found on the bridge.',
+    reconfigure: 'Reconfigure',
     kind: {
       color: 'Color light',
       tunable_white: 'Tunable white',

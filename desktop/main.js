@@ -7,7 +7,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import electron from 'electron';
 import { createConfig } from '../src/config.js';
 import { startCompanion } from '../src/runtime.js';
-import { registerHueBridge } from '../src/integrations/hue.js';
+import { createHueIntegration, registerHueBridge } from '../src/integrations/hue.js';
 import { normalizeLightIds } from '../src/integrations/light-utils.js';
 import { isLoopbackHost } from '../src/local-server.js';
 import { ConfigStore } from './config-store.js';
@@ -399,10 +399,15 @@ function registerIpc() {
     await runtime.reconfigureIntegration('hue', createConfig({ ...process.env, ...next, NODE_ENV: 'production' }));
     return publicConfig(next);
   });
-  // Recherche des lampes du bridge pour l'assistant Hue (étape « Lampes ») : appel local au
-  // bridge via l'intégration (IP/clé jamais transmises), résultat destiné uniquement à
-  // l'IHM du compagnon. L'intégration doit être active (activée + appairée).
-  ipcMain.handle('hue:discover', async () => requireRuntime().dispatch('hue.discover', {}));
+  // Recherche des lampes du bridge pour l'assistant Hue (étape « Lampes ») et son récapitulatif :
+  // appel local au bridge (IP/clé jamais transmises), résultat destiné uniquement à l'IHM du
+  // compagnon. Volontairement HORS runtime : une intégration Hue désactivée n'est pas
+  // enregistrée, or on doit pouvoir relister les lampes pour reconfigurer ou afficher le
+  // récapitulatif. Il suffit que le bridge soit appairé.
+  ipcMain.handle('hue:discover', async () => {
+    const { hue } = createConfig({ ...process.env, ...store.load(), NODE_ENV: 'production' });
+    return createHueIntegration(hue).commands['hue.discover']({});
+  });
   ipcMain.handle('hue:disconnect', async () => {
     const current = store.load();
     const next = { ...current, HUE_APP_KEY: '' };

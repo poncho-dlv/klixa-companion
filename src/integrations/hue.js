@@ -46,6 +46,13 @@ export function hexToXy(hex) {
 const MIREK_MIN = 153;
 const MIREK_MAX = 500;
 
+// Durée de transition à envoyer au bridge : omise quand elle vaut 0. Klixa envoie 0 pour une
+// lampe on/off seule (prise) — inutile pour elle, et l'omettre évite qu'un bridge refuse un
+// paramètre que la ressource n'expose pas. Pur + testé.
+export function dynamicsFor(transitionMs) {
+  return transitionMs > 0 ? { dynamics: { duration: transitionMs } } : {};
+}
+
 // Kelvin → mirek borné à la plage Hue (pur + testé).
 export function kelvinToMirek(kelvin) {
   return clamp(Math.round(1000000 / Number(kelvin)), MIREK_MIN, MIREK_MAX, 366);
@@ -222,7 +229,7 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
   // État SANS couleur : allume la lampe et n'envoie que ce qu'elle supporte (le serveur
   // ne fournit `brightness`/`kelvin` que pour les lampes qui savent les appliquer).
   async function setLightState(creds, lightId, { brightness, mirek }, transitionMs) {
-    const body = { on: { on: true }, dynamics: { duration: transitionMs } };
+    const body = { on: { on: true }, ...dynamicsFor(transitionMs) };
     if (Number.isFinite(brightness)) body.dimming = { brightness };
     if (Number.isFinite(mirek)) body.color_temperature = { mirek };
     return hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, body);
@@ -231,7 +238,7 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
   async function setLightOn(creds, lightId, on, transitionMs) {
     return hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, {
       on: { on },
-      dynamics: { duration: transitionMs }
+      ...dynamicsFor(transitionMs)
     });
   }
 
@@ -250,7 +257,7 @@ export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
 
   async function restoreLightState(creds, lightId, state, transitionMs) {
     if (!state) return;
-    const body = { dynamics: { duration: transitionMs } };
+    const body = { ...dynamicsFor(transitionMs) };
     if (typeof state.on === 'boolean') body.on = { on: state.on };
     if (Number.isFinite(state.brightness)) body.dimming = { brightness: state.brightness };
     if (state.xy) body.color = { xy: state.xy };
