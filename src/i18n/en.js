@@ -16,7 +16,9 @@ export default {
     disabled: 'Disabled',
     checking: 'Checking...',
     saving: 'Saving...',
-    saved: 'Configuration saved.'
+    saved: 'Configuration saved.',
+    next: 'Next',
+    previous: 'Previous'
   },
   status: {
     starting: 'Starting...',
@@ -37,7 +39,7 @@ export default {
     connexion: { title: 'Klixa connection', description: 'Link this companion to your Klixa console.' },
     obs: { title: 'OBS', description: 'Control OBS Studio via obs-websocket.' },
     streamerbot: { title: 'Streamer.bot', description: 'Trigger Streamer.bot actions.' },
-    hue: { title: 'Philips Hue', description: 'Control lights via the Hue bridge.' },
+    hue: { title: 'Philips Hue', description: 'Pair the bridge, choose the lights to use with Klixa and enable Hue.' },
     smallrig: { title: 'SmallRig lamps', description: 'Manage RM75 lamps over Bluetooth Mesh.' },
     devices: { title: 'LAN devices', description: 'Third-party scripts and devices (Raspberry Pi, ESP...) connected to the companion.' },
     settings: { title: 'Settings', description: 'General companion settings.' }
@@ -65,7 +67,23 @@ export default {
     pairButton: 'Pair (press the bridge button first)',
     pairing: 'Pairing in progress...',
     paired: 'Bridge paired.',
-    missingIp: 'Enter the bridge IP.'
+    missingIp: 'Enter the bridge IP.',
+    stepBridge: 'Bridge',
+    stepLamps: 'Lights',
+    stepActivation: 'Activation',
+    pairFirst: 'Pair the bridge first.',
+    discoverButton: 'Search for lights',
+    discovering: 'Searching…',
+    noLampListed: 'No light listed. Run the search.',
+    lampsFound: '%count% light(s) found on the bridge.',
+    summaryNotChosen: 'No selection: Klixa keeps the lights chosen previously. Pick your lights in step 2.',
+    summarySelected: '%count% light(s) used with Klixa.',
+    kind: {
+      color: 'Color light',
+      tunable_white: 'Tunable white',
+      dimmable: 'Dimmable light',
+      onoff: 'Plug / on-off'
+    }
   },
   smallrig: {
     enable: 'Enable SmallRig lamps',

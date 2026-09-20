@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('klixa', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   saveConfig: (config, integrationId) => ipcRenderer.invoke('config:save', config, { integrationId }),
   hueRegister: (bridgeIp, bridgePort) => ipcRenderer.invoke('hue:register', { bridgeIp, bridgePort }),
+  hueDiscover: () => ipcRenderer.invoke('hue:discover'),
   hueDisconnect: () => ipcRenderer.invoke('hue:disconnect'),
   smallrigDiscover: (timeoutMs) => ipcRenderer.invoke('smallrig:discover', { timeoutMs }),
   smallrigProvision: (bleDeviceId, deviceUuid, name) => ipcRenderer.invoke('smallrig:provision', { bleDeviceId, deviceUuid, name }),

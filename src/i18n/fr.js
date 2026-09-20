@@ -16,7 +16,9 @@ export default {
     disabled: 'Désactivé',
     checking: 'Vérification...',
     saving: 'Enregistrement...',
-    saved: 'Configuration enregistrée.'
+    saved: 'Configuration enregistrée.',
+    next: 'Suivant',
+    previous: 'Précédent'
   },
   status: {
     starting: 'Démarrage...',
@@ -37,7 +39,7 @@ export default {
     connexion: { title: 'Connexion Klixa', description: 'Lie ce compagnon à ta console Klixa.' },
     obs: { title: 'OBS', description: 'Contrôle OBS Studio via obs-websocket.' },
     streamerbot: { title: 'Streamer.bot', description: 'Déclenche des actions Streamer.bot.' },
-    hue: { title: 'Philips Hue', description: 'Contrôle les lumières via le bridge Hue.' },
+    hue: { title: 'Philips Hue', description: 'Appaire le bridge, choisis les lampes à utiliser avec Klixa et active Hue.' },
     smallrig: { title: 'Lampes SmallRig', description: 'Gère les lampes RM75 en Bluetooth Mesh.' },
     devices: { title: 'Appareils LAN', description: 'Scripts et appareils tiers (Raspberry Pi, ESP...) connectés au compagnon.' },
     settings: { title: 'Paramètres', description: 'Réglages généraux du compagnon.' }
@@ -65,7 +67,23 @@ export default {
     pairButton: 'Appairer (presser le bouton du bridge avant)',
     pairing: 'Appairage en cours...',
     paired: 'Bridge appairé.',
-    missingIp: 'Renseigne l\'IP du bridge.'
+    missingIp: 'Renseigne l\'IP du bridge.',
+    stepBridge: 'Bridge',
+    stepLamps: 'Lampes',
+    stepActivation: 'Activation',
+    pairFirst: 'Appaire d\'abord le bridge.',
+    discoverButton: 'Rechercher les lampes',
+    discovering: 'Recherche en cours…',
+    noLampListed: 'Aucune lampe listée. Lance la recherche.',
+    lampsFound: '%count% lampe(s) trouvée(s) sur le bridge.',
+    summaryNotChosen: 'Aucune sélection : Klixa garde les lampes choisies auparavant. Choisis tes lampes à l\'étape 2.',
+    summarySelected: '%count% lampe(s) utilisée(s) avec Klixa.',
+    kind: {
+      color: 'Lampe couleur',
+      tunable_white: 'Blanc réglable',
+      dimmable: 'Lampe dimmable',
+      onoff: 'Prise / on-off'
+    }
   },
   smallrig: {
     enable: 'Activer les lampes SmallRig',

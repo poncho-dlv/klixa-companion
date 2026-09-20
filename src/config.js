@@ -1,5 +1,6 @@
 import process from 'node:process';
 import dotenv from 'dotenv';
+import { normalizeLightIds } from './integrations/light-utils.js';
 
 dotenv.config();
 
@@ -38,6 +39,11 @@ return {
     appKey: env.HUE_APP_KEY || '',
     maxLights: int(env.HUE_MAX_LIGHTS, 50),
     concurrency: int(env.HUE_CONCURRENCY, 5),
+    // Lampes utilisées avec Klixa, choisies dans l'assistant du compagnon (JSON ou liste
+    // séparée par virgules). `selectionConfigured` distingue « jamais choisi » (chaîne
+    // vide : Klixa garde sa sélection d'avant) d'un choix explicite, même vide (`[]`).
+    lightIds: normalizeLightIds(env.HUE_LIGHT_IDS),
+    selectionConfigured: String(env.HUE_LIGHT_IDS ?? '').trim() !== '',
   },
   smallrig: {
     // Intégration lampes SmallRig RM75 (Bluetooth Mesh) : nécessite un adaptateur

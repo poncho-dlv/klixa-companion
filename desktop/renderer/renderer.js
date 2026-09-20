@@ -22,6 +22,13 @@ const huePairBtn = document.querySelector('#huePairBtn');
 const hueMessage = document.querySelector('#hueMessage');
 const hueStatus = document.querySelector('#hueStatus');
 const hueUnpairBtn = document.querySelector('#hueUnpairBtn');
+const hueStepButtons = [...document.querySelectorAll('#hueSteps button[data-hue-step]')];
+const huePanels = [...document.querySelectorAll('[data-hue-panel]')];
+const hueDiscoverBtn = document.querySelector('#hueDiscoverBtn');
+const hueLampList = document.querySelector('#hueLampList');
+const hueLampMessage = document.querySelector('#hueLampMessage');
+const hueLightIds = document.querySelector('#hueLightIds');
+const hueSummary = document.querySelector('#hueSummary');
 const smallrigStatus = document.querySelector('#smallrigStatus');
 const smallrigScanBtn = document.querySelector('#smallrigScanBtn');
 const smallrigFound = document.querySelector('#smallrigFound');
@@ -186,7 +193,152 @@ function renderHueUi() {
     icon.setAttribute('d', connected ? ICON_CHECK : ICON_WARNING);
     span.textContent = connected ? t('common.connected') : t('common.notConnected');
   }
+  renderHueWizard();
 }
+
+// ── Assistant Hue : 1 Bridge (IP + appairage) → 2 Lampes (recherche + choix) → 3 Activation.
+// La sélection des lampes vit ICI (champ caché HUE_LIGHT_IDS, enregistré avec le reste de la
+// page) : Klixa ne reçoit que les lampes choisies, avec leur type (commande hue.lights).
+let hueStep = 1;
+let hueStepChosen = false; // l'étape initiale se déduit de la config, une seule fois
+let configLoaded = false; // tant que la config n'est pas chargée, « non appairé » n'est pas fiable
+let hueBridgeLamps = [];
+let hueDiscovering = false;
+let hueDiscoverAttempted = false;
+
+function isHuePaired() {
+  return Boolean(lastConfig.HUE_APP_KEY_CONFIGURED);
+}
+
+function readHueSelection() {
+  try {
+    const ids = JSON.parse(hueLightIds.value || '[]');
+    return Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHueSelection(ids) {
+  hueLightIds.value = JSON.stringify([...new Set(ids)]);
+  renderHueSummary();
+}
+
+function renderHueSummary() {
+  if (!hueLightIds.value.trim()) hueSummary.textContent = t('hue.summaryNotChosen');
+  else hueSummary.textContent = t('hue.summarySelected', { count: readHueSelection().length });
+}
+
+function renderHueLampList() {
+  hueLampList.innerHTML = '';
+  if (hueBridgeLamps.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'lamp-empty';
+    li.textContent = hueDiscovering ? t('hue.discovering') : t('hue.noLampListed');
+    hueLampList.appendChild(li);
+    return;
+  }
+
+  const selected = new Set(readHueSelection());
+  for (const lamp of hueBridgeLamps) {
+    const li = document.createElement('li');
+    li.className = 'lamp-row lamp-row--check';
+    const line = document.createElement('label');
+    line.className = 'lamp-line';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selected.has(lamp.id);
+    checkbox.addEventListener('change', () => {
+      const current = new Set(readHueSelection());
+      if (checkbox.checked) current.add(lamp.id);
+      else current.delete(lamp.id);
+      writeHueSelection([...current]);
+    });
+    const name = document.createElement('span');
+    name.className = 'lamp-label';
+    name.textContent = lamp.name;
+    const kind = document.createElement('span');
+    kind.className = 'lamp-meta';
+    kind.textContent = t(`hue.kind.${lamp.kind}`);
+    line.append(checkbox, name, kind);
+    li.appendChild(line);
+    hueLampList.appendChild(li);
+  }
+}
+
+async function discoverHueLamps() {
+  hueDiscoverAttempted = true;
+  hueDiscovering = true;
+  hueDiscoverBtn.disabled = true;
+  hueLampMessage.className = '';
+  hueLampMessage.textContent = t('hue.discovering');
+  renderHueLampList();
+  try {
+    const result = await window.klixa.hueDiscover();
+    hueBridgeLamps = Array.isArray(result?.lights) ? result.lights : [];
+    hueLampMessage.className = 'ok';
+    hueLampMessage.textContent = t('hue.lampsFound', { count: hueBridgeLamps.length });
+  } catch (error) {
+    hueLampMessage.className = 'error';
+    hueLampMessage.textContent = error.message;
+  } finally {
+    hueDiscovering = false;
+    hueDiscoverBtn.disabled = false;
+    renderHueLampList();
+  }
+}
+
+function setHueStep(step) {
+  const paired = isHuePaired();
+  hueStep = paired ? Math.max(1, Math.min(3, step)) : 1;
+  renderHueWizard();
+}
+
+function renderHueWizard() {
+  const paired = isHuePaired();
+  if (!paired) hueStep = 1;
+  else if (!hueStepChosen) {
+    hueStep = hueLightIds.value.trim() ? 3 : 2;
+  }
+  // L'étape initiale n'est figée qu'une fois la vraie config connue : sinon un premier rendu
+  // (avant setForm) figerait l'étape 1 et l'assistant ne s'ouvrirait jamais sur « Lampes ».
+  if (configLoaded) hueStepChosen = true;
+
+  // Bridge délié : la liste des lampes n'a plus de sens, la prochaine recherche repart de zéro.
+  if (!paired) {
+    hueBridgeLamps = [];
+    hueDiscoverAttempted = false;
+  }
+  // Première arrivée sur l'étape « Lampes » : la recherche part toute seule (une seule fois
+  // par appairage — ce rendu est aussi relancé par le statut des intégrations).
+  if (paired && hueStep === 2 && !hueDiscoverAttempted && !hueDiscovering) discoverHueLamps();
+
+  for (const button of hueStepButtons) {
+    const step = Number(button.dataset.hueStep);
+    button.classList.toggle('active', step === hueStep);
+    button.classList.toggle('done', step < hueStep);
+    button.disabled = step > 1 && !paired;
+  }
+  for (const panel of huePanels) panel.hidden = Number(panel.dataset.huePanel) !== hueStep;
+  renderHueLampList();
+  renderHueSummary();
+}
+
+for (const button of hueStepButtons) {
+  button.addEventListener('click', () => setHueStep(Number(button.dataset.hueStep)));
+}
+document.querySelector('#hueNext1').addEventListener('click', () => {
+  if (!isHuePaired()) {
+    hueMessage.className = 'error';
+    hueMessage.textContent = t('hue.pairFirst');
+    return;
+  }
+  setHueStep(2);
+});
+document.querySelector('#hueNext2').addEventListener('click', () => setHueStep(3));
+document.querySelector('#huePrev2').addEventListener('click', () => setHueStep(1));
+document.querySelector('#huePrev3').addEventListener('click', () => setHueStep(2));
+hueDiscoverBtn.addEventListener('click', discoverHueLamps);
 
 let lastFoundLamps = [];
 let lastPairedLamps = [];
@@ -978,6 +1130,7 @@ function renderCloudStatus(cloudStatus) {
 
 function setForm(config) {
   lastConfig = config;
+  configLoaded = true;
   for (const field of form.elements) {
     if (!field.name) continue;
     if (field.type === 'checkbox') field.checked = config[field.name] !== false && config[field.name] !== 'false';
@@ -1136,6 +1289,7 @@ huePairBtn.addEventListener('click', async () => {
     setForm(await window.klixa.hueRegister(bridgeIp, bridgePort));
     hueMessage.className = 'ok';
     hueMessage.textContent = t('hue.paired');
+    setHueStep(2);
   } catch (error) {
     hueMessage.className = 'error';
     hueMessage.textContent = error.message;

@@ -97,6 +97,7 @@ radio maîtrisé.
 | `HUE_ENABLED` | Active l'intégration Hue native (défaut true). |
 | `HUE_BRIDGE_IP` | IP du bridge Philips Hue sur le LAN (ex. `192.168.1.40`). En usage desktop, se configure et s'appaire depuis l'app Klixa Companion — jamais fourni par le cloud. |
 | `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`), obtenue par appairage. Jamais fournie par le cloud. |
+| `HUE_LIGHT_IDS` | Lampes Hue utilisées avec Klixa (JSON ou liste séparée par virgules), choisies dans l'assistant Hue de l'app desktop (étape « Lampes »). Vide = jamais choisi : Klixa garde alors sa sélection précédente ; `[]` = choix explicite « aucune ». Klixa ne reçoit que ces lampes (commande `hue.lights`). |
 | `HUE_MAX_LIGHTS` / `HUE_CONCURRENCY` | Limite de lampes par commande (50) et de requêtes Hue simultanées (5). |
 | `SMALLRIG_ENABLED` | Active l'intégration lampes SmallRig RM75 (Bluetooth Mesh, défaut true). Nécessite un adaptateur Bluetooth actif sur la machine. En usage desktop, l'appairage (scan + provisioning) se fait depuis l'app Klixa Companion — voir [RM75_SPEC_DEV.md](RM75_SPEC_DEV.md). |
 | `SMALLRIG_MESH_STATE` | Clés réseau + lampes appairées (JSON), générées et gérées localement. Jamais fourni par le cloud ; sans intérêt à remplir à la main en usage desktop (persisté automatiquement). |

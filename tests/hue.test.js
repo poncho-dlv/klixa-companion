@@ -3,13 +3,17 @@ import assert from 'node:assert/strict';
 import {
   classifyHueLight,
   clamp,
+  createHueIntegration,
   hexToXy,
   isHexColor,
   isPrivateBridgeIp,
   kelvinToMirek,
   mapWithConcurrency,
-  normalizeLightIds
+  normalizeLightIds,
+  selectHueLights,
+  toBridgeLight
 } from '../src/integrations/hue.js';
+import { createConfig } from '../src/config.js';
 
 test('classifyHueLight: lampe couleur (color présent, même avec color_temperature)', () => {
   assert.deepEqual(
@@ -113,4 +117,82 @@ test('mapWithConcurrency borne les opérations simultanées', async () => {
   });
   assert.equal(maximum, 2);
   assert.deepEqual(results, [2, 4, 6, 8, 10]);
+});
+
+test('toBridgeLight: id, nom et type de la ressource light du bridge', () => {
+  assert.deepEqual(
+    toBridgeLight({ id: 'a1', metadata: { name: 'Bureau' }, dimming: {}, color: {} }),
+    { id: 'a1', name: 'Bureau', kind: 'color' }
+  );
+  assert.deepEqual(toBridgeLight({ id: 'p1' }), { id: 'p1', name: 'p1', kind: 'onoff' });
+});
+
+test('selectHueLights: ne garde que les lampes choisies, les ids disparus du bridge sont ignorés', () => {
+  const bridge = [
+    { id: 'a', name: 'A', kind: 'color' },
+    { id: 'b', name: 'B', kind: 'onoff' },
+    { id: 'c', name: 'C', kind: 'dimmable' }
+  ];
+  assert.deepEqual(selectHueLights(bridge, ['c', 'a', 'disparue']).map((l) => l.id), ['a', 'c']);
+  assert.deepEqual(selectHueLights(bridge, []), []);
+});
+
+test('config: sélection Hue absente = jamais choisie, [] = choix explicite vide', () => {
+  const never = createConfig({}).hue;
+  assert.equal(never.selectionConfigured, false);
+  assert.deepEqual(never.lightIds, []);
+
+  const empty = createConfig({ HUE_LIGHT_IDS: '[]' }).hue;
+  assert.equal(empty.selectionConfigured, true);
+  assert.deepEqual(empty.lightIds, []);
+
+  const chosen = createConfig({ HUE_LIGHT_IDS: '["a","b","a"]' }).hue;
+  assert.equal(chosen.selectionConfigured, true);
+  assert.deepEqual(chosen.lightIds, ['a', 'b']);
+});
+
+function createHueForTest(hueConfig) {
+  const events = [];
+  const integration = createHueIntegration(hueConfig, { emitEvent: (event) => events.push(event) });
+  return { integration, events };
+}
+
+test('hue.lights: sélection jamais choisie → rien à remonter, Klixa garde sa sélection', async () => {
+  const { integration } = createHueForTest({ bridgeIp: '192.168.1.40', appKey: 'k', selectionConfigured: false, lightIds: [] });
+  try {
+    assert.deepEqual(await integration.commands['hue.lights'](), { selectionConfigured: false, lights: [] });
+  } finally {
+    await integration.stop();
+  }
+});
+
+test('hue.status: expose selectionConfigured (sans IP ni clé)', async () => {
+  const { integration } = createHueForTest({ bridgeIp: '192.168.1.40', appKey: 'k', selectionConfigured: true, lightIds: ['a'] });
+  try {
+    assert.deepEqual(await integration.commands['hue.status'](), { bridgeConfigured: true, paired: true, selectionConfigured: true });
+  } finally {
+    await integration.stop();
+  }
+});
+
+test('hue: notifie Klixa (LightsChanged) uniquement si une sélection est configurée et le bridge appairé', async () => {
+  const configured = createHueForTest({ bridgeIp: '192.168.1.40', appKey: 'k', selectionConfigured: true, lightIds: ['a'] });
+  const notConfigured = createHueForTest({ bridgeIp: '192.168.1.40', appKey: 'k', selectionConfigured: false, lightIds: [] });
+  const unpaired = createHueForTest({ bridgeIp: '192.168.1.40', appKey: '', selectionConfigured: true, lightIds: ['a'] });
+
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+
+  assert.equal(configured.events.length, 1);
+  assert.deepEqual(configured.events[0].event, { source: 'Hue', type: 'LightsChanged' });
+  assert.equal(notConfigured.events.length, 0);
+  assert.equal(unpaired.events.length, 0);
+
+  await Promise.all([configured, notConfigured, unpaired].map(({ integration }) => integration.stop()));
+});
+
+test('hue: stop() annule la notification différée (intégration remplacée avant l\'envoi)', async () => {
+  const { integration, events } = createHueForTest({ bridgeIp: '192.168.1.40', appKey: 'k', selectionConfigured: true, lightIds: ['a'] });
+  await integration.stop();
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.equal(events.length, 0);
 });

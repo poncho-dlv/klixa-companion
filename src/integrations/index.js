@@ -45,7 +45,7 @@ export function registerIntegrations(registry, config, { emitEvent } = {}) {
 export function registerIntegration(registry, id, config, { emitEvent } = {}) {
   if (id === 'hue' && config.hue.enabled) {
     try {
-      registry.register(createHueIntegration(config.hue));
+      registry.register(createHueIntegration(config.hue, { emitEvent }));
     } catch (err) {
       log.error('Intégration Hue non chargée', err.message);
     }

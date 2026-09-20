@@ -73,6 +73,20 @@ export function classifyHueLight(light) {
   return { kind: 'onoff' };
 }
 
+// Lampe du bridge telle que remontée à Klixa : id, nom, type (cf. classifyHueLight) et,
+// pour un blanc réglable, sa plage de température. Pur + testé.
+export function toBridgeLight(resource) {
+  return { id: resource.id, name: resource.metadata?.name || resource.id, ...classifyHueLight(resource) };
+}
+
+// Sous-ensemble des lampes du bridge choisi dans l'assistant du compagnon — c'est ce
+// que Klixa reçoit (« ne remonte que les utiles »). Les identifiants sélectionnés qui
+// n'existent plus sur le bridge sont ignorés. Pur + testé.
+export function selectHueLights(bridgeLights, selectedIds) {
+  const selected = new Set(selectedIds);
+  return bridgeLights.filter((light) => selected.has(light.id));
+}
+
 export function isPrivateBridgeIp(value) {
   const ip = String(value || '').trim();
   const version = net.isIP(ip);
@@ -177,7 +191,7 @@ export async function registerHueBridge(bridgeIp, bridgePort = 443, devicetype =
  * (retiré avec `allowPayloadCredentials` : le cloud ne doit structurellement plus
  * jamais pouvoir fournir une IP/clé de bridge).
  */
-export function createHueIntegration(hueConfig = {}) {
+export function createHueIntegration(hueConfig = {}, { emitEvent } = {}) {
   const maxLights = Math.max(1, Math.min(200, Math.trunc(hueConfig.maxLights) || 50));
   const requestConcurrency = Math.max(1, Math.min(20, Math.trunc(hueConfig.concurrency) || 5));
 
@@ -337,19 +351,32 @@ export function createHueIntegration(hueConfig = {}) {
     return { lights: lightIds.length, color: hex };
   }
 
-  // hue.discover — liste des lampes (résultat renvoyé dans l'ack au cloud).
-  async function discover() {
+  async function fetchBridgeLights() {
     const creds = resolveCredentials();
-
     const lightsRes = await hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'GET', '/clip/v2/resource/light', null);
 
-    const lights = (lightsRes?.data || [])
+    return (lightsRes?.data || [])
       .filter((l) => l?.id)
-      .map((l) => ({ id: l.id, name: l.metadata?.name || l.id, ...classifyHueLight(l) }))
+      .map(toBridgeLight)
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
 
+  // hue.discover — TOUTES les lampes du bridge, pour l'assistant du compagnon (choix des
+  // lampes utilisées). Klixa ne s'en sert plus : il reçoit la sélection via hue.lights.
+  async function discover() {
+    const lights = await fetchBridgeLights();
     log.info('Découverte terminée', { lights: lights.length });
     return { lights };
+  }
+
+  // hue.lights — uniquement les lampes CHOISIES dans le compagnon, avec leur type.
+  // `selectionConfigured: false` = l'utilisateur n'a encore rien choisi ici : Klixa garde
+  // alors la sélection qu'il avait avant (aucune remise à zéro d'une config existante).
+  async function lights() {
+    if (!hueConfig.selectionConfigured) return { selectionConfigured: false, lights: [] };
+
+    const bridgeLights = await fetchBridgeLights();
+    return { selectionConfigured: true, lights: selectHueLights(bridgeLights, hueConfig.lightIds || []) };
   }
 
   // hue.register — conservée dans le registre de commandes pour local-server.js
@@ -365,7 +392,23 @@ export function createHueIntegration(hueConfig = {}) {
   async function status() {
     const bridgeIp = String(hueConfig.bridgeIp || '').trim();
     const appKey = String(hueConfig.appKey || '').trim();
-    return { bridgeConfigured: Boolean(bridgeIp), paired: Boolean(bridgeIp && appKey) };
+    return {
+      bridgeConfigured: Boolean(bridgeIp),
+      paired: Boolean(bridgeIp && appKey),
+      selectionConfigured: hueConfig.selectionConfigured === true
+    };
+  }
+
+  // Prévient Klixa que la sélection a pu changer : il la relit lui-même via hue.lights
+  // (rien de sensible ne transite dans la notification). Différé pour laisser
+  // l'intégration s'enregistrer avant la requête de Klixa ; ignoré si la liaison cloud
+  // n'est pas encore ouverte — Klixa relit alors la sélection à la connexion.
+  let notifyTimer = null;
+  if (hueConfig.selectionConfigured && hueConfig.appKey && typeof emitEvent === 'function') {
+    notifyTimer = setTimeout(() => {
+      emitEvent({ event: { source: 'Hue', type: 'LightsChanged' }, data: {} });
+    }, 1000);
+    notifyTimer.unref?.();
   }
 
   async function healthcheck() {
@@ -379,9 +422,13 @@ export function createHueIntegration(hueConfig = {}) {
     commands: {
       'hue.color': color,
       'hue.discover': discover,
+      'hue.lights': lights,
       'hue.register': register,
       'hue.status': status
     },
-    healthcheck
+    healthcheck,
+    stop() {
+      if (notifyTimer) clearTimeout(notifyTimer);
+    }
   };
 }

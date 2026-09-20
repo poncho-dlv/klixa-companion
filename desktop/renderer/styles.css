@@ -236,3 +236,19 @@ h3{font-size:13px;color:var(--text-muted);margin:18px 0 8px;text-transform:upper
 .sidebar::-webkit-scrollbar-track,.page-scroll::-webkit-scrollbar-track{background:transparent}
 .sidebar::-webkit-scrollbar-thumb,.page-scroll::-webkit-scrollbar-thumb{background:rgba(173,173,184,.22);border:3px solid var(--bg-base);border-radius:999px}
 .sidebar::-webkit-scrollbar-thumb:hover,.page-scroll::-webkit-scrollbar-thumb:hover{background:rgba(191,148,255,.58)}
+
+/* ── Assistant Hue (3 étapes : Bridge, Lampes, Activation) ─────────────────── */
+.wizard-steps{list-style:none;display:flex;gap:8px;margin:0 0 18px;padding:0}
+.wizard-steps li{flex:1}
+.wizard-steps button{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 10px;font-size:13px;background:var(--bg-elevated);color:var(--text-muted);border:1px solid var(--border)}
+.wizard-steps button.active{color:var(--text);border-color:var(--accent);background:var(--accent-subtle)}
+.wizard-steps button:disabled{opacity:.5;cursor:not-allowed}
+.wizard-step-number{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--bg-muted);font-size:11px;font-weight:700}
+.wizard-steps button.active .wizard-step-number{background:var(--accent);color:#fff}
+.wizard-steps button.done .wizard-step-number{background:var(--success);color:#0E0E10}
+.wizard-panel[hidden]{display:none}
+.wizard-nav{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.wizard-nav button{width:auto;flex-shrink:0;padding:9px 16px;margin:0}
+.lamp-row--check>.lamp-line{cursor:pointer;user-select:none;margin:0;color:var(--text)}
+.lamp-row--check>.lamp-line:hover{background:rgba(255,255,255,.025)}
+.lamp-row--check input[type=checkbox]{width:auto;margin:0;flex-shrink:0}

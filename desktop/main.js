@@ -8,6 +8,7 @@ import electron from 'electron';
 import { createConfig } from '../src/config.js';
 import { startCompanion } from '../src/runtime.js';
 import { registerHueBridge } from '../src/integrations/hue.js';
+import { normalizeLightIds } from '../src/integrations/light-utils.js';
 import { isLoopbackHost } from '../src/local-server.js';
 import { ConfigStore } from './config-store.js';
 import electronUpdaterPkg from 'electron-updater';
@@ -193,6 +194,9 @@ async function restartRuntime(values) {
 
 const LOGIN_ITEM_ARGS = ['--hidden'];
 
+// Borne de la sélection de lampes Hue (même ordre de grandeur que HUE_MAX_LIGHTS côté config).
+const MAX_HUE_LIGHT_IDS = 200;
+
 // Pairing device-code (cf. server/companion-pairing-service.js cote Klixa) : le
 // compagnon demande un code a l'instance cloud (URL par defaut, surchargeable pour
 // le self-host), affiche le userCode 6 chiffres et poll jusqu'a ce que le streamer
@@ -319,6 +323,16 @@ function registerIpc() {
     const huePort = Number.parseInt(submitted.HUE_BRIDGE_PORT || '443', 10);
     if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error(t('errors.huePortInvalid'));
     normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
+    // Sélection des lampes Hue utilisées avec Klixa (assistant du compagnon) : chaîne vide =
+    // jamais choisie (Klixa garde sa sélection d'avant), sinon tableau JSON d'identifiants
+    // normalisé (dédupliqué, borné) — un choix explicite peut être `[]`.
+    if (typeof submitted.HUE_LIGHT_IDS === 'string' && submitted.HUE_LIGHT_IDS.trim()) {
+      const lightIds = normalizeLightIds(submitted.HUE_LIGHT_IDS);
+      if (lightIds.length > MAX_HUE_LIGHT_IDS) throw new Error(t('errors.hueTooManyLights', { count: lightIds.length, max: MAX_HUE_LIGHT_IDS }));
+      normalizedSubmitted.HUE_LIGHT_IDS = JSON.stringify(lightIds);
+    } else {
+      normalizedSubmitted.HUE_LIGHT_IDS = '';
+    }
     const next = { ...current, ...normalizedSubmitted };
     for (const key of SECRET_KEYS) {
       if (!normalizedSubmitted[key]) next[key] = current[key] || '';
@@ -385,6 +399,10 @@ function registerIpc() {
     await runtime.reconfigureIntegration('hue', createConfig({ ...process.env, ...next, NODE_ENV: 'production' }));
     return publicConfig(next);
   });
+  // Recherche des lampes du bridge pour l'assistant Hue (étape « Lampes ») : appel local au
+  // bridge via l'intégration (IP/clé jamais transmises), résultat destiné uniquement à
+  // l'IHM du compagnon. L'intégration doit être active (activée + appairée).
+  ipcMain.handle('hue:discover', async () => requireRuntime().dispatch('hue.discover', {}));
   ipcMain.handle('hue:disconnect', async () => {
     const current = store.load();
     const next = { ...current, HUE_APP_KEY: '' };
