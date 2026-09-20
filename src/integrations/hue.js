@@ -42,6 +42,37 @@ export function hexToXy(hex) {
   return { x: round4(x / total), y: round4(y / total) };
 }
 
+// Plage de mirek acceptée par l'API CLIP v2 (153 ≈ 6500 K, 500 = 2000 K).
+const MIREK_MIN = 153;
+const MIREK_MAX = 500;
+
+// Kelvin → mirek borné à la plage Hue (pur + testé).
+export function kelvinToMirek(kelvin) {
+  return clamp(Math.round(1000000 / Number(kelvin)), MIREK_MIN, MIREK_MAX, 366);
+}
+
+// Type d'une lampe d'après les capacités de sa ressource `light` (API CLIP v2) — pas
+// d'après la marque ni l'archétype : une prise Zigbee tierce appairée au bridge
+// apparaît comme une `light` qui n'expose que `on`, avec un archétype souvent inconnu.
+// `color` avant `color_temperature` : une lampe couleur expose aussi la température.
+// Pur + testé.
+export function classifyHueLight(light) {
+  if (light?.color) return { kind: 'color' };
+
+  if (light?.color_temperature) {
+    const schema = light.color_temperature.mirek_schema || {};
+    const lowestMirek = Number(schema.mirek_minimum);
+    const highestMirek = Number(schema.mirek_maximum);
+    const range = Number.isFinite(lowestMirek) && Number.isFinite(highestMirek) && lowestMirek > 0 && highestMirek > 0
+      ? { minKelvin: Math.round(1000000 / highestMirek), maxKelvin: Math.round(1000000 / lowestMirek) }
+      : {};
+    return { kind: 'tunable_white', ...range };
+  }
+
+  if (light?.dimming) return { kind: 'dimmable' };
+  return { kind: 'onoff' };
+}
+
 export function isPrivateBridgeIp(value) {
   const ip = String(value || '').trim();
   const version = net.isIP(ip);
@@ -174,6 +205,15 @@ export function createHueIntegration(hueConfig = {}) {
     });
   }
 
+  // État SANS couleur : allume la lampe et n'envoie que ce qu'elle supporte (le serveur
+  // ne fournit `brightness`/`kelvin` que pour les lampes qui savent les appliquer).
+  async function setLightState(creds, lightId, { brightness, mirek }, transitionMs) {
+    const body = { on: { on: true }, dynamics: { duration: transitionMs } };
+    if (Number.isFinite(brightness)) body.dimming = { brightness };
+    if (Number.isFinite(mirek)) body.color_temperature = { mirek };
+    return hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, body);
+  }
+
   async function setLightOn(creds, lightId, on, transitionMs) {
     return hueRequest(creds.bridgeIp, creds.bridgePort, creds.appKey, 'PUT', `/clip/v2/resource/light/${encodeURIComponent(lightId)}`, {
       on: { on },
@@ -206,7 +246,8 @@ export function createHueIntegration(hueConfig = {}) {
   }
 
   // Clignotement coloré puis restauration de l'état initial (mode alerte « simple »).
-  async function blinkLights(creds, lightIds, xy, brightness, transitionMs, durationMs) {
+  // `xy` null = lampe sans couleur : la phase « allumée » applique intensité/blanc.
+  async function blinkLights(creds, lightIds, xy, brightness, transitionMs, durationMs, mirek) {
     const previous = {};
     await forEachLight(lightIds, async (id) => {
       try { previous[id] = await readLightState(creds, id); }
@@ -218,7 +259,9 @@ export function createHueIntegration(hueConfig = {}) {
 
     try {
       while (Date.now() < endAt) {
-        await forEachLight(lightIds, (id) => setLightColor(creds, id, xy, brightness, transitionMs));
+        await forEachLight(lightIds, (id) => (xy
+          ? setLightColor(creds, id, xy, brightness, transitionMs)
+          : setLightState(creds, id, { brightness, mirek }, transitionMs)));
         await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
         await forEachLight(lightIds, (id) => setLightOn(creds, id, false, transitionMs));
         await sleep(Math.min(pulseMs, Math.max(0, endAt - Date.now())));
@@ -254,12 +297,35 @@ export function createHueIntegration(hueConfig = {}) {
     }
 
     const hex = String(payload.color || payload.hueColor || '').trim().toUpperCase();
+    const mode = String(payload.mode || payload.hueMode || '').trim().toLowerCase();
+    const durationMs = clamp(payload.durationMs ?? payload.hueDurationMs, 100, 60000, DEFAULTS.durationMs);
+
+    // Sans couleur : lampe qui n'en supporte pas (blanc réglable, intensité seule,
+    // on/off). `on: true`, une température ou une impulsion (mode simple) la
+    // désignent ; le serveur n'envoie `brightness`/`kelvin` que si la lampe les gère,
+    // donc ils ne reçoivent AUCUN défaut ici (contrairement au chemin couleur).
+    if (!hex && (payload.on === true || payload.kelvin != null || mode === 'simple')) {
+      const stateBrightness = payload.brightness != null && Number.isFinite(Number(payload.brightness))
+        ? clamp(payload.brightness, 1, 100, DEFAULTS.brightness)
+        : undefined;
+      const mirek = payload.kelvin != null && Number.isFinite(Number(payload.kelvin))
+        ? kelvinToMirek(payload.kelvin)
+        : undefined;
+
+      if (mode === 'simple') {
+        await blinkLights(creds, lightIds, null, stateBrightness, transitionMs, durationMs, mirek);
+      } else {
+        await forEachLight(lightIds, (id) => setLightState(creds, id, { brightness: stateBrightness, mirek }, transitionMs));
+      }
+
+      log.info('Commande état envoyée', { lights: lightIds.length, mode: mode || 'steady' });
+      return { lights: lightIds.length, on: true };
+    }
+
     if (!isHexColor(hex)) throw new Error(t('errors.hueInvalidColor', { color: hex }));
 
     const xy = hexToXy(hex);
     const brightness = clamp(payload.brightness ?? payload.hueBrightness, 1, 100, DEFAULTS.brightness);
-    const durationMs = clamp(payload.durationMs ?? payload.hueDurationMs, 100, 60000, DEFAULTS.durationMs);
-    const mode = String(payload.mode || payload.hueMode || '').trim().toLowerCase();
 
     if (mode === 'simple') {
       await blinkLights(creds, lightIds, xy, brightness, transitionMs, durationMs);
@@ -279,7 +345,7 @@ export function createHueIntegration(hueConfig = {}) {
 
     const lights = (lightsRes?.data || [])
       .filter((l) => l?.id)
-      .map((l) => ({ id: l.id, name: l.metadata?.name || l.id }))
+      .map((l) => ({ id: l.id, name: l.metadata?.name || l.id, ...classifyHueLight(l) }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     log.info('Découverte terminée', { lights: lights.length });
