@@ -73,8 +73,7 @@ ni dans Klixa** : il vit dans le dépôt [klixa-lan-devices](https://github.com/
 (`devices/smallrig`), qui expose chaque lampe comme un appareil LAN de type `light` (voir
 [protocol/devices-messages.md](protocol/devices-messages.md)).
 
-**Depuis une version ≤ 0.5.x** : les lampes sont à **appairer à neuf** avec ce script (l'ancien état mesh est
-purgé de la configuration du compagnon au premier lancement de la nouvelle version).
+Les lampes SmallRig déjà utilisées avec une version ≤ 0.5.x sont à appairer à neuf avec ce script.
 
 ## Variables d'environnement
 
