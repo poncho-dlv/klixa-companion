@@ -6,9 +6,9 @@ import { t } from './i18n/core.js';
 // que la lampe sait porter, et le compagnon gère le maintien temporaire + la restauration
 // (snapshot via l'action optionnelle `getState`) pour que le script reste trivial.
 
-export const LIGHT_CAPABILITIES = Object.freeze(['onoff', 'dimming', 'color', 'color_temperature']);
-export const LIGHT_SET_ACTION = 'set';
-export const LIGHT_GET_STATE_ACTION = 'getState';
+const LIGHT_CAPABILITIES = Object.freeze(['onoff', 'dimming', 'color', 'color_temperature']);
+const LIGHT_SET_ACTION = 'set';
+const LIGHT_GET_STATE_ACTION = 'getState';
 
 const KELVIN_LIMITS = Object.freeze({ min: 1000, max: 10000 });
 const MAX_FX_MODES = 24;

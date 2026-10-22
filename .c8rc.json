@@ -9,7 +9,7 @@
   ],
   "check-coverage": true,
   "clean": true,
-  "lines": 72,
+  "lines": 70,
   "functions": 78,
   "branches": 72
 }

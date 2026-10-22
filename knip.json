@@ -1,7 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
-    "scripts/*.mjs",
     "tests/**/*.test.js",
     "desktop/renderer/renderer.js",
     "desktop/preload.cjs"
@@ -10,10 +9,8 @@
     "src/**/*.js",
     "desktop/**/*.js",
     "desktop/**/*.cjs",
-    "scripts/**/*.mjs",
     "tests/**/*.js"
   ],
-  "ignoreBinaries": ["where.exe"],
   "rules": {
     "files": "error",
     "unresolved": "error",
