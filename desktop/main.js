@@ -151,16 +151,9 @@ async function ensureFirewallRule(port) {
   }
 }
 
-// Construit la config runtime et y branche la persistance de l'etat mesh SmallRig
-// (cle NetKey/AppKey/noeuds appaires generee et geree localement, jamais par le
-// cloud - meme principe que HUE_APP_KEY). Le state complet est re-serialise et
-// chiffre via le ConfigStore existant (safeStorage) a chaque provisioning/oubli.
+// Construit la config runtime et y branche la persistance du registre des tokens device.
 function buildRuntimeConfig(values) {
   const runtimeConfig = createConfig({ ...process.env, ...values, NODE_ENV: 'production' });
-  runtimeConfig.smallrig.onStateChange = async (meshStateJson) => {
-    const current = store.load();
-    store.save({ ...current, SMALLRIG_MESH_STATE: meshStateJson });
-  };
   // Registre des tokens device (id -> hash) : pas un secret au sens de SECRET_KEYS
   // (un hash SHA-256 ne permet pas de reconstruire le token), donc pas chiffré via
   // safeStorage — même traitement que tokenHash côté control-access-service.js cloud.
@@ -259,6 +252,8 @@ async function pollPairingOnce() {
 // Secrets : jamais renvoyes en clair au renderer (remplaces par un booleen *_CONFIGURED)
 // et jamais ecrases par une valeur vide a la sauvegarde. Doit rester aligne avec
 // `secretKeys` de config-store.js (qui les chiffre au repos via safeStorage).
+// SMALLRIG_MESH_STATE : clé HÉRITÉE (le support SmallRig a quitté le compagnon, cf. klixa-smallrig-lan). Elle
+// reste dans config.json pour pouvoir être exportée ; elle ne doit jamais fuiter vers le renderer.
 const SECRET_KEYS = ['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN'];
 
 function publicConfig(values) {
@@ -377,7 +372,7 @@ function registerIpc() {
     // plus necessaire (il couperait la liaison cloud pour rien) des qu'on sait laquelle
     // reconfigurer isolement. Reste sur restartRuntime seulement le pairing/disconnect
     // (qui changent CLOUD_WS_URL/COMPANION_TOKEN eux-memes, hors de ce handler).
-    if (['obs', 'streamerbot', 'hue', 'smallrig'].includes(integrationId) && runtime?.reconfigureIntegration) {
+    if (['obs', 'streamerbot', 'hue'].includes(integrationId) && runtime?.reconfigureIntegration) {
       await runtime.reconfigureIntegration(integrationId, buildRuntimeConfig(next));
     } else {
       await restartRuntime(next);
@@ -415,56 +410,12 @@ function registerIpc() {
     await runtime.reconfigureIntegration('hue', createConfig({ ...process.env, ...next, NODE_ENV: 'production' }));
     return publicConfig(next);
   });
-  // Appairage SmallRig (lampes Bluetooth Mesh) : contrairement a Hue, l'integration
-  // reste vivante entre les appels (pas de reconfigureIntegration a chaque action) -
-  // le scan/provisioning/oubli passe directement par les commandes du registre, et
-  // la persistance de l'etat mesh se fait via smallrig.onStateChange (branche dans
-  // buildRuntimeConfig), jamais via ces handlers directement.
+  // Dispatch direct vers le runtime (commandes du registre) ; le runtime peut ne pas etre
+  // encore demarre au tout debut de la vie de l'app.
   function requireRuntime() {
     if (!runtime) throw new Error(t('errors.companionStarting'));
     return runtime;
   }
-  ipcMain.handle('smallrig:discover', async (_event, { timeoutMs } = {}) => {
-    return requireRuntime().dispatch('smallrig.discover', { timeoutMs });
-  });
-  ipcMain.handle('smallrig:provision', async (_event, { bleDeviceId, deviceUuid, name } = {}) => {
-    return requireRuntime().dispatch('smallrig.provision', { bleDeviceId, deviceUuid, name });
-  });
-  ipcMain.handle('smallrig:forget', async (_event, { uuid, forceLocal } = {}) => {
-    return requireRuntime().dispatch('smallrig.forget', { uuid, forceLocal: forceLocal === true });
-  });
-  // Recours si la bascule 0x1827 -> 0x1828 après provisioning a été plus lente que le
-  // délai imparti (observé sur certains matériels) : la lampe est provisionnée
-  // (clés valides) mais pas configurée (ignore les commandes en silence). Relance
-  // uniquement l'étape de configuration, sans tout recommencer.
-  ipcMain.handle('smallrig:reconfigure', async (_event, { uuid } = {}) => {
-    return requireRuntime().dispatch('smallrig.reconfigure', { uuid });
-  });
-  ipcMain.handle('smallrig:list', async () => {
-    if (!runtime) return { lamps: [] };
-    return runtime.dispatch('smallrig.list', {});
-  });
-  // Pilotage direct depuis le panneau de controle de la page SmallRig : effet
-  // immediat sur la/les lampe(s) ciblee(s), independant du formulaire de config
-  // (comme discover/provision/forget/reconfigure ci-dessus).
-  ipcMain.handle('smallrig:power', async (_event, { uuids, on, level } = {}) => {
-    return requireRuntime().dispatch('smallrig.power', { lightIds: uuids, on, level });
-  });
-  ipcMain.handle('smallrig:color', async (_event, { uuids, color, brightness } = {}) => {
-    return requireRuntime().dispatch('smallrig.color', { lightIds: uuids, color, brightness });
-  });
-  ipcMain.handle('smallrig:cct', async (_event, { uuids, kelvin, brightness, gm } = {}) => {
-    return requireRuntime().dispatch('smallrig.cct', { lightIds: uuids, kelvin, brightness, gm });
-  });
-  ipcMain.handle('smallrig:rgbw', async (_event, { uuids, r, g, b, w } = {}) => {
-    return requireRuntime().dispatch('smallrig.rgbw', { lightIds: uuids, r, g, b, w });
-  });
-  ipcMain.handle('smallrig:fx', async (_event, { uuids, mode, param1, param2 } = {}) => {
-    return requireRuntime().dispatch('smallrig.fx', { lightIds: uuids, mode, param1, param2 });
-  });
-  ipcMain.handle('smallrig:status', async (_event, { uuid } = {}) => {
-    return requireRuntime().dispatch('smallrig.status', { uuid });
-  });
   // Appareils LAN génériques (RPi, ESP...) : gestion des tokens et liste des devices
   // connectés — jamais exposé au cloud (portée 'local' côté registry, cf.
   // integrations/devices.js). requireRuntime() suffit : contrairement à Hue, il n'y a

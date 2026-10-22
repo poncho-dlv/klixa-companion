@@ -35,8 +35,7 @@ function atomicWrite(file, content) {
 }
 
 /**
- * Branche une persistance durable pour le mode headless (mêmes garanties que
- * configureHeadlessSmallrigState, cf. smallrig-state-file.js) : sans fichier explicite,
+ * Branche une persistance durable pour le mode headless (écriture atomique) : sans fichier explicite,
  * générer un token échoue plutôt que de laisser le registre disparaître silencieusement
  * au prochain redémarrage (perte de tokens déjà distribués à des scripts en prod).
  */

@@ -45,6 +45,8 @@ import time
 import websockets
 
 PROTOCOL_VERSION = 1
+# Les éléments de type « light » (agent.light(...)) demandent le protocole v2 du compagnon.
+PROTOCOL_VERSION_LIGHT = 2
 
 
 def _log(device_id, message):
@@ -116,6 +118,56 @@ class DeviceAgent:
             return func
         return decorator
 
+    def light(self, element_id, *, name=None, capabilities=("onoff",), kelvin=None, fx_modes=None):
+        """Déclare une LAMPE (élément de type « light », protocole v2) et renvoie un objet
+        dont `.set` et `.get_state` sont des décorateurs.
+
+        - `capabilities` : parmi "onoff", "dimming", "color", "color_temperature" — Klixa
+          n'enverra que ce que la lampe sait porter ;
+        - `kelvin` : (min, max) si la lampe a une température de blanc réglable ;
+        - `fx_modes` : {"id": "Libellé"} des effets matériels proposés dans l'éditeur.
+
+        Le handler `.set(state, data)` reçoit `{"on": bool, "color": "#RRGGBB"?, "brightness": 1-100?,
+        "kelvin": int?, "fx": str?}`. `.get_state()` (facultatif) doit renvoyer le même format :
+        c'est ce qui permet au compagnon de rendre à la lampe son état d'avant après un effet
+        temporaire. Sans `get_state`, un effet temporaire reste appliqué.
+
+            lamp = agent.light("lamp", name="Lampe bureau", capabilities=["onoff", "dimming", "color"])
+
+            @lamp.set
+            def set_lamp(state, data):
+                ...
+
+            @lamp.get_state
+            def get_lamp():
+                return {"on": True, "color": "#FFFFFF", "brightness": 100}
+        """
+        element = self._elements.setdefault(element_id, {
+            "id": element_id,
+            "type": "light",
+            "name": name or element_id,
+            "actions": [],
+            "params": {},
+        })
+        element["type"] = "light"
+        element["capabilities"] = list(capabilities)
+        if kelvin:
+            element["kelvin"] = {"min": int(kelvin[0]), "max": int(kelvin[1])}
+        if fx_modes:
+            element["fxModes"] = [{"id": key, "label": label} for key, label in fx_modes.items()]
+
+        agent = self
+
+        class _Light:
+            def set(self, func):
+                return agent.action(element_id, "set", element_type="light")(func)
+
+            def get_state(self, func):
+                # getState n'a ni payload ni donnée : le handler ne prend aucun argument.
+                return agent.action(element_id, "getState", element_type="light")(lambda payload, data: func())
+
+        return _Light()
+
     def send_event(self, element_id, data):
         """Canal montant réservé du protocole (cf. devices-messages.md) : pas encore
         exploité côté Klixa aujourd'hui, mais utilisable dès maintenant (ex. un bouton
@@ -167,7 +219,11 @@ class DeviceAgent:
         try:
             await ws.send(json.dumps({
                 "type": "hello",
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": (
+                    PROTOCOL_VERSION_LIGHT
+                    if any(el["type"] == "light" for el in self._elements.values())
+                    else PROTOCOL_VERSION
+                ),
                 "deviceId": self.device_id,
                 "name": self.name,
                 "elements": list(self._elements.values()),

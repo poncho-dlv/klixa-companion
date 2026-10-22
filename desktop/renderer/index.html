@@ -30,7 +30,6 @@
           <button type="button" class="config-button" data-page="obs">OBS</button>
           <button type="button" class="config-button" data-page="streamerbot">Streamer.bot</button>
           <button type="button" class="config-button" data-page="hue">Philips Hue</button>
-          <button type="button" class="config-button" data-page="smallrig" data-i18n="nav.smallrig">Lampes SmallRig</button>
           <button type="button" class="config-button" data-page="devices" data-i18n="nav.devices">Appareils LAN</button>
         </div>
         <div class="nav-group">
@@ -163,23 +162,6 @@
                 <button type="button" id="hueCancelBtn" class="secondary-button" hidden data-i18n="common.cancel">Annuler</button>
               </div>
             </div>
-          </section>
-
-          <section class="page" data-page="smallrig">
-            <div class="section-head">
-              <p id="smallrigStatus" class="integration-status status-line">
-                <svg class="status-icon" viewBox="0 0 512 512" aria-hidden="true"><path d=""/></svg>
-                <span></span>
-              </p>
-            </div>
-            <label class="toggle switch-row"><input name="SMALLRIG_ENABLED" type="checkbox"><span class="switch-label-text" data-i18n="smallrig.enable">Activer les lampes SmallRig</span></label>
-            <p class="field-hint" data-i18n="smallrig.bluetoothHint">Le Bluetooth doit être activé sur cette machine. Rapproche les lampes et mets-les sous tension avant de scanner.</p>
-            <button type="button" id="smallrigScanBtn" data-i18n="smallrig.scanButton">Scanner les lampes à proximité</button>
-            <ul id="smallrigFound" class="lamp-list"></ul>
-            <h3 data-i18n="smallrig.pairedHeading">Lampes appairées</h3>
-            <ul id="smallrigPaired" class="lamp-list"></ul>
-            <p id="smallrigMessage" role="status"></p>
-            <button type="submit" class="primary page-save-btn" data-integration="smallrig" data-i18n="common.save">Enregistrer</button>
           </section>
 
           <section class="page" data-page="devices">

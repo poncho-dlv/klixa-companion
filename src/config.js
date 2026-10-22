@@ -45,22 +45,6 @@ return {
     lightIds: normalizeLightIds(env.HUE_LIGHT_IDS),
     selectionConfigured: String(env.HUE_LIGHT_IDS ?? '').trim() !== '',
   },
-  smallrig: {
-    // Intégration lampes SmallRig RM75 (Bluetooth Mesh) : nécessite un adaptateur
-    // Bluetooth actif sur la machine. L'appairage (scan/provisioning) se fait
-    // entièrement depuis l'IHM du compagnon (jamais via le cloud). L'état mesh
-    // (clés réseau générées localement + nœuds appairés) est sérialisé en JSON ;
-    // `onStateChange` est injecté par desktop/main.js pour la persistance chiffrée
-    // (ConfigStore/safeStorage, même principe que HUE_APP_KEY). En mode headless,
-    // src/index.js branche obligatoirement un fichier durable avant toute émission.
-    enabled: bool(env.SMALLRIG_ENABLED, true),
-    meshStateJson: env.SMALLRIG_MESH_STATE || '',
-    meshStateFile: env.SMALLRIG_MESH_STATE_FILE || '',
-    maxLamps: int(env.SMALLRIG_MAX_LAMPS, 50),
-    concurrency: int(env.SMALLRIG_CONCURRENCY, 3),
-    seqBlockSize: int(env.SMALLRIG_SEQ_BLOCK_SIZE, 100),
-    onStateChange: undefined,
-  },
   obs: {
     // Intégration OBS NATIVE (obs-websocket) : le compagnon parle directement à OBS sur le LAN.
     // `overlayBase` n'est PAS configuré ici : il est toujours fourni par le serveur dans la commande.
@@ -80,11 +64,11 @@ return {
   devices: {
     // Appareils LAN génériques (RPi, ESP...) qui se connectent AU compagnon en WS
     // sortant sur /devices/ws et s'annoncent avec leurs éléments pilotables (switch
-    // on/off, etc.) — la machine à fumée en est un exemple, pas un cas spécial. Voir
+    // on/off, lampes, etc.) — la machine à fumée en est un exemple, pas un cas spécial. Voir
     // docs/local-device-agent-plan.md (repo Klixa) pour le protocole complet.
     // Un token PAR DEVICE (jamais COMPANION_LOCAL_TOKEN) : seul son hash est persisté
-    // (device-token-store.js), le JSON de l'état est injecté/sauvegardé comme l'état
-    // Mesh SmallRig (tokensJson/tokensFile/onTokensChange, même triple).
+    // (device-token-store.js), le JSON de l'état est injecté/sauvegardé via
+    // (tokensJson/tokensFile/onTokensChange).
     enabled: bool(env.DEVICES_ENABLED, true),
     maxDevices: int(env.DEVICES_MAX, 20),
     commandTimeoutMs: int(env.DEVICES_COMMAND_TIMEOUT_MS, 5000),

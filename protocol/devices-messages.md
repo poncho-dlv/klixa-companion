@@ -26,6 +26,50 @@ connexion est refusée avec le code `4409`.
 Un token révoqué (`devices.revokeToken`) coupe **immédiatement** la connexion live du
 device concerné (code `4403`), pas seulement sa prochaine tentative de reconnexion.
 
+## Version du protocole
+
+`protocolVersion` vaut **1** ou **2**. La v2 est la v1 plus les éléments de type `light`
+(ci-dessous) ; elle est strictement additive. Un script sans lampe peut rester en v1.
+
+## Éléments de type `light` (protocole v2)
+
+Une lampe est un élément `type: "light"` qui sait exécuter l'action `set`. Klixa la propose
+alors dans l'action « Lumière » des automatisations, à côté de Philips Hue, avec exactement les
+réglages que la lampe déclare supporter.
+
+```json
+{
+  "id": "lamp",
+  "type": "light",
+  "name": "Lampe bureau",
+  "actions": ["set", "getState"],
+  "capabilities": ["onoff", "dimming", "color", "color_temperature"],
+  "kelvin": { "min": 2000, "max": 6500 },
+  "fxModes": [{ "id": "rainbow", "label": "Arc-en-ciel" }]
+}
+```
+
+- `capabilities` : parmi `onoff`, `dimming` (intensité 1-100), `color` (RGB), `color_temperature`
+  (blanc réglable, plage dans `kelvin`). Vide ou inconnue = `["onoff"]`. Klixa déduit le type de
+  lampe de la capacité la plus riche (`color` > `color_temperature` > `dimming` > `onoff`).
+- `kelvin` : plage du blanc réglable, bornes entre 1000 et 10000, `min < max` (sinon ignorée).
+- `fxModes` : effets matériels propres à la lampe (24 max), proposés dans l'éditeur.
+- `set` (obligatoire) : le compagnon envoie dans `payload` **uniquement ce que la lampe supporte** :
+  `{ "on": true, "color": "#RRGGBB", "brightness": 80, "kelvin": 3000, "fx": "rainbow" }`.
+  Éteindre = `{ "on": false }` seul. `color` et `kelvin` ne sont jamais envoyés ensemble ; un effet
+  (`fx`) est envoyé seul.
+- `getState` (facultatif) : renvoie dans le `result` de l'`ack` l'état courant, au **même format
+  que `set`**. C'est ce qui permet au compagnon de restituer l'état d'avant après un effet
+  temporaire. Sans `getState`, un effet temporaire reste appliqué (l'éditeur l'indique).
+
+### Maintien temporaire et restauration (commande `devices.setLight`)
+
+Le script n'a rien à gérer : quand une règle demande « pendant N secondes puis retour à l'état
+d'avant », le compagnon appelle `getState` (une fois, au premier maintien en cours), applique `set`,
+puis rejoue le snapshot via `set` à l'échéance. Un second maintien pendant le premier garde le
+snapshot d'origine ; un état permanent annule le maintien en cours. La restauration est perdue si
+le compagnon redémarre.
+
 ## Device → Compagnon
 
 ### `hello` (à la connexion)
@@ -50,7 +94,7 @@ device concerné (code `4403`), pas seulement sa prochaine tentative de reconnex
 
 `elements` = tout ce que ce device sait piloter, déclaré par le script lui-même — le
 compagnon ne connaît AUCUNE commande métier en dur pour cette intégration (contrairement
-à Hue/OBS/SmallRig). Bornes appliquées côté compagnon : 20 éléments max, 20 actions max
+à Hue/OBS). Bornes appliquées côté compagnon : 20 éléments max, 20 actions max
 par élément. `params`, s'il est fourni, sert uniquement à construire un input typé côté
 admin Klixa (min/max/default) — le compagnon ne le valide pas plus loin, c'est indicatif.
 
@@ -90,7 +134,7 @@ physique → événement Klixa).
 { "type": "registered", "ok": false, "error": "Version de protocole non supportée" }
 ```
 
-Une version de protocole non supportée (`protocolVersion` ≠ 1) ou un token invalide
+Une version de protocole non supportée (`protocolVersion` autre que 1 ou 2) ou un token invalide
 ferment la connexion respectivement avec les codes `4400` et `4401`.
 
 ### `command`
@@ -124,6 +168,7 @@ tardif sera simplement ignoré (id déjà purgé).
 | --- | --- | --- | --- |
 | `devices.list` | cloud + local | `{}` | Catalogue des devices connectés (id, nom, éléments, date de connexion) |
 | `devices.trigger` | cloud + local | `{ deviceId, elementId, action, payload?, data? }` | Relaie la commande au device concerné, résout avec le résultat de son `ack` |
+| `devices.setLight` | cloud + local | `{ deviceId, elementId, state, holdMs? }` | Applique un état à une lampe (élément `light`), avec maintien + restauration si `holdMs > 0` ; résout `{ applied, restorable? }` |
 | `devices.listTokens` | local uniquement | `{}` | Liste des devices connus (id, nom, date de création) — jamais le hash |
 | `devices.generateToken` | local uniquement | `{ deviceId, name }` | Génère un nouveau token (retourné en clair une seule fois) |
 | `devices.revokeToken` | local uniquement | `{ deviceId }` | Révoque un device (son token cesse de fonctionner immédiatement) |

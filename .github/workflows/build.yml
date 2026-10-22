@@ -47,8 +47,6 @@ jobs:
       - name: Lancer les tests (+ couverture)
         run: npm run test:coverage
 
-      - run: npm run smoke:webbluetooth -- --node-only
-
       # Fichiers/exports/dépendances jamais utilisés. "files"/"dependencies"/
       # "unlisted" bloquent (peu de bruit, quasi toujours un vrai oubli) ;
       # "exports"/"duplicates" restent en warn (cf. knip.json — surface d'API
@@ -63,16 +61,14 @@ jobs:
         run: npm run dup
 
       # Vulnérabilités des dépendances de prod uniquement (les dev deps, ex.
-      # electron-builder/webbluetooth build tooling, ne sont pas embarquées
+      # electron-builder, ne sont pas embarquées
       # dans l'app packagée).
       - name: Audit des dépendances (high+)
         run: npm audit --omit=dev --audit-level=high
 
   windows-installer:
     needs: test
-    # Voir release.yml : windows-latest a basculé vers un MSVC trop récent pour
-    # <experimental/coroutine> (backend Windows de SimpleBLE).
-    runs-on: windows-2022
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -82,8 +78,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run dist:win
-      - run: npm run smoke:webbluetooth
-      - run: npm run smoke:webbluetooth:packaged
       - uses: actions/upload-artifact@v7
         with:
           name: klixa-companion-windows-unsigned

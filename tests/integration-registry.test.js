@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createIntegrationRegistry } from '../src/integration-registry.js';
-import { registerIntegration } from '../src/integrations/index.js';
 
 test('registry.stop ferme toutes les intégrations qui exposent stop', async () => {
   const registry = createIntegrationRegistry();
@@ -86,20 +85,4 @@ test('registry échoue fermé pour une source de dispatch inconnue', async () =>
 
   await assert.rejects(registry.dispatch('safe.local', {}, { source: 'remote' }), /Source de commande invalide/);
   assert.throws(() => registry.listCommands({ source: 'remote' }), /Source de commande invalide/);
-});
-
-test('une intégration SmallRig invalide reste visible avec sa cause exacte', async () => {
-  const registry = createIntegrationRegistry();
-  registerIntegration(registry, 'smallrig', {
-    smallrig: { enabled: true, meshStateJson: '{état invalide' }
-  });
-
-  const health = await registry.healthcheck();
-  assert.equal(health.smallrig.ok, false);
-  assert.match(health.smallrig.error, /SmallRig indisponible/i);
-  assert.match(health.smallrig.error, /JSON|état Mesh/i);
-  await assert.rejects(
-    registry.dispatch('smallrig.list', {}),
-    (error) => error.code === 'INTEGRATION_UNAVAILABLE' && /SmallRig indisponible/i.test(error.message)
-  );
 });

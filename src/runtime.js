@@ -10,7 +10,7 @@ import { createDevicesIntegration } from './integrations/devices.js';
 const log = createLogger('runtime');
 const INTEGRATION_STATUS_POLL_MS = 5000;
 
-// Câblage spécial (hors registerIntegrations) : contrairement à hue/obs/smallrig, cette
+// Câblage spécial (hors registerIntegrations) : contrairement à hue/obs, cette
 // intégration a besoin d'un hub partagé avec le serveur local (upgrade WS /devices/ws),
 // pas seulement de `config` — cf. docs/local-device-agent-plan.md (repo Klixa).
 function createDevicesIntegrationIfEnabled(config) {
@@ -69,8 +69,8 @@ export function startCompanion(config, { onCloudStatus, onIntegrationStatus } = 
   let stopping;
   return {
     commands: registry.listCommands(),
-    // Dispatch direct d'une commande enregistrée (ex. `smallrig.discover`), pour les
-    // actions déclenchées depuis l'IHM desktop (cf. desktop/main.js IPC `smallrig:*`)
+    // Dispatch direct d'une commande enregistrée (ex. `hue.discover`), pour les
+    // actions déclenchées depuis l'IHM desktop (cf. desktop/main.js IPC `hue:*`)
     // sans passer par le serveur HTTP local ni recréer l'intégration.
     dispatch(name, payload) {
       return registry.dispatch(name, payload);

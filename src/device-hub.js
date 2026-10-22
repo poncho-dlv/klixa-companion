@@ -2,11 +2,13 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { createLogger } from './logger.js';
 import { t } from './i18n/core.js';
+import { sanitizeLightFields } from './device-light.js';
 
 const log = createLogger('device-hub');
 
 export const DEVICES_WS_PATH = '/devices/ws';
-const PROTOCOL_VERSION = 1;
+// v2 = v1 + éléments de type `light` (capacités, plage Kelvin, effets) ; additive, v1 reste acceptée.
+const SUPPORTED_PROTOCOL_VERSIONS = [1, 2];
 const DEFAULT_COMMAND_TIMEOUT_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const MAX_ELEMENTS = 20;
@@ -30,15 +32,19 @@ function sanitizeElements(elements) {
   if (!Array.isArray(elements)) return [];
   return elements
     .slice(0, MAX_ELEMENTS)
-    .map((el) => ({
-      id: String(el?.id || '').trim(),
-      type: String(el?.type || 'switch').trim() || 'switch',
-      name: String(el?.name || el?.id || '').trim(),
-      actions: Array.isArray(el?.actions)
-        ? [...new Set(el.actions.map(String))].slice(0, MAX_ACTIONS_PER_ELEMENT)
-        : [],
-      params: el?.params && typeof el.params === 'object' && !Array.isArray(el.params) ? el.params : {}
-    }))
+    .map((el) => {
+      const type = String(el?.type || 'switch').trim() || 'switch';
+      return {
+        id: String(el?.id || '').trim(),
+        type,
+        name: String(el?.name || el?.id || '').trim(),
+        actions: Array.isArray(el?.actions)
+          ? [...new Set(el.actions.map(String))].slice(0, MAX_ACTIONS_PER_ELEMENT)
+          : [],
+        params: el?.params && typeof el.params === 'object' && !Array.isArray(el.params) ? el.params : {},
+        ...(type === 'light' ? sanitizeLightFields(el) : {})
+      };
+    })
     .filter((el) => el.id);
 }
 
@@ -87,7 +93,7 @@ export function createDeviceHub({
     }
 
     if (msg.type === 'hello') {
-      if (msg.protocolVersion !== PROTOCOL_VERSION) {
+      if (!SUPPORTED_PROTOCOL_VERSIONS.includes(msg.protocolVersion)) {
         send(ws, { type: 'registered', ok: false, error: t('errors.deviceProtocolVersion') });
         try { ws.close(4400, 'protocol-version'); } catch { /* déjà fermée */ }
         return;
@@ -214,6 +220,12 @@ export function createDeviceHub({
       }));
   }
 
+  function getElement(deviceId, elementId) {
+    const ws = connectionsByDeviceId.get(String(deviceId || '').trim());
+    if (!ws || !isOpen(ws) || !ws.registered) return null;
+    return ws.elements.find((el) => el.id === elementId) || null;
+  }
+
   function trigger(deviceId, elementId, action, { payload = {}, data = {} } = {}) {
     const ws = connectionsByDeviceId.get(String(deviceId || '').trim());
     if (!ws || !isOpen(ws) || !ws.registered) {
@@ -262,5 +274,5 @@ export function createDeviceHub({
     connectionsByDeviceId.clear();
   }
 
-  return { handleUpgrade, list, trigger, disconnect, stop };
+  return { handleUpgrade, list, getElement, trigger, disconnect, stop };
 }

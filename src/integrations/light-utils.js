@@ -1,4 +1,4 @@
-// Utilitaires purs partagés entre intégrations de lumières (Hue, SmallRig, et toute
+// Utilitaires purs partagés entre intégrations de lumières (Hue, et toute
 // marque future) : validation de couleur hex, bornage de valeurs, normalisation de
 // listes d'identifiants cibles, et exécution à concurrence bornée. Aucune dépendance
 // à une marque précise — c'est le socle commun qui permet à Klixa de piloter

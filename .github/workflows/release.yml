@@ -15,10 +15,7 @@ permissions:
 
 jobs:
   publish-windows:
-    # Epinglé (au lieu de windows-latest) : ce label a basculé vers une image avec un
-    # MSVC trop récent qui rejette le <experimental/coroutine> historique utilisé par
-    # le backend Windows de SimpleBLE (voir échec du run 29804850880).
-    runs-on: windows-2022
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,8 +27,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run dist:win
-      - run: npm run smoke:webbluetooth
-      - run: npm run smoke:webbluetooth:packaged
       - name: Attacher les binaires a la release
         shell: pwsh
         env:

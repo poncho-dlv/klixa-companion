@@ -8,7 +8,7 @@ n'est pas inclus dans ce dépôt. La licence du compagnon n'accorde aucun droit
 sur les marques, services cloud ou autres produits Klixa.
 
 Agent local (hub) du projet [Klixa Live](../Overlays). Il fait le pont entre les
-intégrations **locales** (Hue, lampes SmallRig, OBS, Streamer.bot, appareils LAN
+intégrations **locales** (Hue, OBS, Streamer.bot, appareils LAN
 génériques comme la machine à fumée…) et le serveur Klixa, **sans jamais ouvrir de
 port accessible depuis Internet** : c'est le compagnon qui initie une connexion
 WebSocket **sortante** vers le cloud, qui pousse ses commandes dans ce tuyau. Sur le
@@ -19,7 +19,7 @@ le script/firmware qui se connecte AU compagnon, pas le contraire — même logi
 ```
 [Klixa cloud]  ◄── WS sortante ───  [Klixa Compagnon]  ◄── WS sortante ───  [RPi, ESP, script perso...]
                                            │
-                                           └── [Hue, SmallRig, OBS, Streamer.bot] (natif, sur le LAN)
+                                           └── [Hue, OBS, Streamer.bot] (natif, sur le LAN)
 ```
 
 ## Composants
@@ -58,24 +58,24 @@ chiffrés via Windows, démarrage automatique à l'ouverture de session.
 
 ```bash
 npm install
-npm run build:webbluetooth:win # requis après une installation propre pour le mode dev
 npm run desktop         # lancer en développement
 npm run dist:win         # générer l'installateur NSIS dans release/
 ```
-
-`npm run dist:win` reconstruit automatiquement ce binding natif corrigé avant de
-fabriquer l'installeur ; la commande explicite ci-dessus ne concerne donc que le
-lancement direct avec `npm run desktop`.
 
 L'installateur généré est `release/Klixa-Companion-Setup-<version>.exe`. Pour
 une diffusion publique sans avertissement SmartScreen, signer l'exécutable et
 l'installateur avec un certificat de signature de code avant publication. Voir
 [desktop/README.md](desktop/README.md) pour le parcours complet et la publication.
 
-Le provisioning RM75 utilise explicitement le mode Bluetooth Mesh **No OOB** : les
-échanges sont authentifiés contre la corruption, mais pas protégés contre un relais
-MITM actif. Effectuez l'appairage à proximité de la lampe, dans un environnement
-radio maîtrisé.
+## Lampes SmallRig : parties vers un appareil LAN
+
+Le support des lampes SmallRig RM75 (Bluetooth Mesh, reverse engineering) **n'est plus dans le compagnon
+ni dans Klixa** : il vit dans le projet séparé `klixa-smallrig-lan`, qui expose chaque lampe comme un
+appareil LAN de type `light` (voir [protocol/devices-messages.md](protocol/devices-messages.md)).
+
+**Migration depuis une version ≤ 0.5.x** : l'état mesh des lampes déjà appairées reste dans `config.json`
+(chiffré par Windows). Avant de les retrouver dans `klixa-smallrig-lan`, exporter cet état avec
+`npx electron ../klixa-smallrig-lan/tools/export-from-companion.cjs` (depuis ce dossier), application fermée — voir le README de `klixa-smallrig-lan`.
 
 ## Variables d'environnement
 
@@ -99,10 +99,6 @@ radio maîtrisé.
 | `HUE_APP_KEY` | Clé d'application Hue (`hue-application-key`), obtenue par appairage. Jamais fournie par le cloud. |
 | `HUE_LIGHT_IDS` | Lampes Hue utilisées avec Klixa (JSON ou liste séparée par virgules), choisies dans l'assistant Hue de l'app desktop (étape « Lampes »). Vide = jamais choisi : Klixa garde alors sa sélection précédente ; `[]` = choix explicite « aucune ». Klixa ne reçoit que ces lampes (commande `hue.lights`). |
 | `HUE_MAX_LIGHTS` / `HUE_CONCURRENCY` | Limite de lampes par commande (50) et de requêtes Hue simultanées (5). |
-| `SMALLRIG_ENABLED` | Active l'intégration lampes SmallRig RM75 (Bluetooth Mesh, défaut true). Nécessite un adaptateur Bluetooth actif sur la machine. En usage desktop, l'appairage (scan + provisioning) se fait depuis l'app Klixa Companion — voir [RM75_SPEC_DEV.md](RM75_SPEC_DEV.md). |
-| `SMALLRIG_MESH_STATE` | Clés réseau + lampes appairées (JSON), générées et gérées localement. Jamais fourni par le cloud ; sans intérêt à remplir à la main en usage desktop (persisté automatiquement). |
-| `SMALLRIG_MESH_STATE_FILE` | Fichier durable de l'état Mesh en mode headless. Obligatoire avant toute mutation/commande SmallRig. Ce fichier contient des clés secrètes et doit rester privé. |
-| `SMALLRIG_MAX_LAMPS` / `SMALLRIG_CONCURRENCY` | Limite de lampes appairées (50) et de commandes Bluetooth simultanées (3). |
 | `OBS_ENABLED` | Active l'intégration OBS native (défaut true). |
 | `OBS_WS_URL` | URL obs-websocket (défaut `ws://127.0.0.1:4455`). |
 | `OBS_WS_PASSWORD` | Mot de passe obs-websocket (si activé dans OBS). |

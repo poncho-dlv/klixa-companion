@@ -1,7 +1,7 @@
 {
   "name": "klixa-companion",
   "version": "0.5.12",
-  "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, lampes SmallRig, Streamer.bot) au serveur Klixa cloud via une connexion sortante.",
+  "description": "Agent local (hub) reliant les intégrations locales (machine à fumée, Hue, Streamer.bot, OBS, appareils LAN) au serveur Klixa cloud via une connexion sortante.",
   "author": "Klixa",
   "license": "Apache-2.0",
   "repository": {
@@ -15,18 +15,12 @@
   "scripts": {
     "start": "node src/index.js",
     "desktop": "electron desktop/main.js",
-    "predist:win": "npm run build:webbluetooth:win",
     "dist:win": "electron-builder --win nsis --publish never",
-    "build:webbluetooth:win": "node scripts/build-webbluetooth-win.mjs",
-    "diagnose:smallrig:gatt": "node scripts/diagnose-smallrig-gatt.mjs",
     "test": "node --import ./tests/setup.mjs --test",
     "test:coverage": "c8 node --import ./tests/setup.mjs --test",
     "lint": "eslint .",
     "knip": "knip",
     "dup": "jscpd .",
-    "smoke:webbluetooth": "node scripts/smoke-webbluetooth.mjs",
-    "smoke:webbluetooth:packaged": "node scripts/smoke-packaged-webbluetooth.mjs",
-    "postinstall": "patch-package",
     "prepare": "husky"
   },
   "dependencies": {
@@ -34,8 +28,6 @@
     "dotenv": "^16.4.5",
     "electron-updater": "^6.6.2",
     "obs-websocket-js": "^5.0.8",
-    "patch-package": "^8.0.1",
-    "webbluetooth": "3.7.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -59,22 +51,11 @@
     "files": [
       "desktop/**/*",
       "src/**/*",
-      "package.json",
-      "!node_modules/webbluetooth/build{,/**/*}",
-      "!node_modules/webbluetooth/SimpleBLE{,/**/*}",
-      "!node_modules/webbluetooth/src{,/**/*}",
-      "!node_modules/webbluetooth/test{,/**/*}",
-      "!node_modules/webbluetooth/docs{,/**/*}",
-      "!node_modules/webbluetooth/examples{,/**/*}",
-      "!node_modules/webbluetooth/lib{,/**/*}",
-      "!node_modules/webbluetooth/prebuilds/simpleble-*{,/**/*}"
+      "package.json"
     ],
     "asar": {
       "smartUnpack": false
     },
-    "asarUnpack": [
-      "node_modules/webbluetooth/prebuilds/klixa-simpleble-win32-x64/*.node"
-    ],
     "publish": {
       "provider": "github",
       "owner": "poncho-dlv",

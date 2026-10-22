@@ -2,11 +2,9 @@ import process from 'node:process';
 import { config } from './config.js';
 import { createLogger } from './logger.js';
 import { startCompanion } from './runtime.js';
-import { configureHeadlessSmallrigState } from './smallrig-state-file.js';
 import { configureHeadlessDeviceTokensState } from './device-tokens-state-file.js';
 
 const log = createLogger('main');
-configureHeadlessSmallrigState(config.smallrig);
 configureHeadlessDeviceTokensState(config.devices);
 const runtime = startCompanion(config);
 let shuttingDown = false;

@@ -40,7 +40,7 @@ export function isValidDeviceId(value) {
  * Registre des tokens device (deviceId -> { name, tokenHash, createdAt }). Persistance
  * déléguée à l'appelant (`onChange`, JSON sérialisé) pour rester identique en mode
  * headless (fichier, cf. device-tokens-state-file.js) et en mode desktop (ConfigStore
- * Electron, cf. desktop/main.js) — comme l'état Mesh SmallRig.
+ * Electron, cf. desktop/main.js).
  * @param {{ initialJson?: string, onChange?: (json: string) => (void|Promise<void>) }} [options]
  */
 export function createDeviceTokenStore({ initialJson = '', onChange } = {}) {

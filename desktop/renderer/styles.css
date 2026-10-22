@@ -193,27 +193,6 @@ h3{font-size:13px;color:var(--text-muted);margin:18px 0 8px;text-transform:upper
 .lamp-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-shrink:0;margin-left:4px}
 .lamp-empty{padding:18px 14px;text-align:center;color:var(--text-muted);font-size:13px}
 
-/* ── Panneau de pilotage SmallRig (couleur/température/RGBW/effet) : déplié sous
-   la ligne de la lampe par la classe .lamp-row--open, avec la même animation
-   grid-template-rows 0fr→1fr que le pattern el-panel de Klixa. ───────────── */
-.lamp-panel{display:grid;grid-template-rows:0fr;transition:grid-template-rows .2s ease}
-.lamp-row--open>.lamp-panel{grid-template-rows:1fr}
-.lamp-panel-inner{overflow:hidden}
-.lamp-panel-body{display:grid;gap:12px;padding:14px}
-.lamp-panel-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-/* [hidden] seul ne suffit pas : une regle auteur (meme moins specifique, ex. le
-   `label{display:grid}` global) l'emporte toujours sur la regle [hidden] du user-agent
-   dans la cascade (l'origine prime sur la specificite, cf. CSS Cascade). Il faut donc
-   re-affirmer display:none explicitement pour les champs caches selon le mode
-   couleur choisi (le repli/depli du panneau passe, lui, par .lamp-row--open). */
-.lamp-panel [hidden]{display:none}
-.lamp-panel-message{margin:0;min-height:16px;font-size:12px;color:var(--text-muted)}
-.lamp-panel input[type="range"]{width:100%;padding:0;background:transparent;border:none;height:20px;accent-color:var(--accent)}
-/* Les items de grille s'etirent par defaut (justify-items:stretch) : sans ca, les
-   boutons heritent width:auto de .lamp-list button mais s'etirent quand meme sur
-   toute la largeur de leur cellule de grille. */
-.lamp-panel-body>button{justify-self:start}
-
 /* ── Switch (repris de Klixa admin/css/forms.css) ──────────── */
 .switch-row{display:flex;align-items:center;gap:12px;cursor:pointer}
 .switch-label-text{min-width:0;flex:1;color:var(--text);font-size:14px}

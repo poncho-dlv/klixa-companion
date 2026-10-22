@@ -266,3 +266,36 @@ test('la limite maxDevices refuse une nouvelle connexion avec le code 4409', asy
     await stopHarness(harness);
   }
 });
+
+test('protocole v2 : un élément light annonce ses capacités, plage Kelvin et effets', async () => {
+  const harness = startHarness();
+  const { token } = await harness.tokenStore.generate('lamp-1', 'Lampe');
+  const port = await listen(harness.server);
+  try {
+    const ws = connectDevice(port, token);
+    await once(ws, 'open');
+    ws.send(JSON.stringify({
+      type: 'hello',
+      protocolVersion: 2,
+      deviceId: 'lamp-1',
+      elements: [{
+        id: 'lamp',
+        type: 'light',
+        actions: ['set', 'getState'],
+        capabilities: ['color', 'dimming', 'bidon'],
+        kelvin: { min: 2000, max: 6500 },
+        fxModes: [{ id: 'rainbow', label: 'Arc-en-ciel' }]
+      }]
+    }));
+    assert.deepEqual(await nextMessage(ws), { type: 'registered', ok: true });
+
+    const element = harness.hub.getElement('lamp-1', 'lamp');
+    assert.deepEqual(element.capabilities, ['color', 'dimming']);
+    assert.deepEqual(element.kelvin, { min: 2000, max: 6500 });
+    assert.deepEqual(element.fxModes, [{ id: 'rainbow', label: 'Arc-en-ciel' }]);
+    assert.equal(harness.hub.getElement('lamp-1', 'inconnu'), null);
+    ws.close();
+  } finally {
+    await stopHarness(harness);
+  }
+});
