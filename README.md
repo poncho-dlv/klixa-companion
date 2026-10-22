@@ -69,12 +69,12 @@ l'installateur avec un certificat de signature de code avant publication. Voir
 ## Lampes SmallRig : parties vers un appareil LAN
 
 Le support des lampes SmallRig RM75 (Bluetooth Mesh, reverse engineering) **n'est plus dans le compagnon
-ni dans Klixa** : il vit dans le dépôt [klixa-lan-devices](https://github.com/poncho-dlv/klixa-lan-devices) (`devices/smallrig`), qui expose chaque lampe comme un
-appareil LAN de type `light` (voir [protocol/devices-messages.md](protocol/devices-messages.md)).
+ni dans Klixa** : il vit dans le dépôt [klixa-lan-devices](https://github.com/poncho-dlv/klixa-lan-devices)
+(`devices/smallrig`), qui expose chaque lampe comme un appareil LAN de type `light` (voir
+[protocol/devices-messages.md](protocol/devices-messages.md)).
 
-**Migration depuis une version ≤ 0.5.x** : l'état mesh des lampes déjà appairées reste dans `config.json`
-(chiffré par Windows). Avant de les retrouver dans `devices/smallrig`, exporter cet état avec
-`npx electron ../klixa-lan-devices/devices/smallrig/tools/export-from-companion.cjs` (depuis ce dossier), application fermée — voir le README de ce dossier.
+**Depuis une version ≤ 0.5.x** : les lampes sont à **appairer à neuf** avec ce script (l'ancien état mesh est
+purgé de la configuration du compagnon au premier lancement de la nouvelle version).
 
 ## Variables d'environnement
 

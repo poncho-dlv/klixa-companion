@@ -5,9 +5,10 @@ import electron from 'electron';
 
 const { safeStorage } = electron;
 
-// SMALLRIG_MESH_STATE : clé HÉRITÉE (SmallRig a quitté le compagnon) — conservée chiffrée dans config.json
-// pour être exportée vers klixa-lan-devices (devices/smallrig/tools/export-from-companion.cjs), plus jamais lue ici.
-const secretKeys = new Set(['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN']);
+// Ancienne clé de l'état mesh SmallRig (support retiré du compagnon) : purgée de la config au chargement.
+const LEGACY_MESH_STATE_KEY = 'SMALLRIG_MESH_STATE';
+
+const secretKeys = new Set(['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'COMPANION_LOCAL_TOKEN']);
 
 function fsyncDirectory(directory) {
   if (process.platform === 'win32') return;
@@ -29,16 +30,11 @@ export class ConfigStore {
     try {
       fs.chmodSync(this.file, 0o600);
       const value = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      const migratePlaintextMesh = Boolean(
-        value.SMALLRIG_MESH_STATE
-        && !value.SMALLRIG_MESH_STATE.startsWith?.('encrypted:')
-        && this.storage?.isEncryptionAvailable?.()
-      );
+      // Le support SmallRig a quitté le compagnon : on retire l'ancien état mesh (chiffré) du fichier.
+      const hadLegacyMesh = LEGACY_MESH_STATE_KEY in value;
+      delete value[LEGACY_MESH_STATE_KEY];
       for (const key of secretKeys) value[key] = this.#decrypt(key, value[key]);
-      // Migration des versions ayant déjà écrit cet état avant qu'il soit classé
-      // secret. Une écriture atomique immédiate évite de le laisser en clair jusqu'à
-      // la prochaine modification de configuration.
-      if (migratePlaintextMesh) this.save(value);
+      if (hadLegacyMesh) this.save(value);
       return value;
     } catch (error) {
       if (error?.code === 'ENOENT') return {};
@@ -74,22 +70,12 @@ export class ConfigStore {
 
   #encrypt(key, value = '') {
     if (!value) return value;
-    if (!this.storage?.isEncryptionAvailable()) {
-      if (key === 'SMALLRIG_MESH_STATE') {
-        throw new Error('Stockage sécurisé indisponible : l’état Mesh SmallRig ne sera pas enregistré en clair');
-      }
-      return value;
-    }
+    if (!this.storage?.isEncryptionAvailable()) return value;
     return `encrypted:${this.storage.encryptString(value).toString('base64')}`;
   }
 
   #decrypt(key, value = '') {
-    if (!value.startsWith?.('encrypted:')) {
-      if (key === 'SMALLRIG_MESH_STATE' && value && !this.storage?.isEncryptionAvailable?.()) {
-        throw new Error('Stockage sécurisé indisponible : refus de charger un état Mesh SmallRig en clair');
-      }
-      return value;
-    }
+    if (!value.startsWith?.('encrypted:')) return value;
     try {
       return this.storage.decryptString(Buffer.from(value.slice(10), 'base64'));
     } catch (error) {
