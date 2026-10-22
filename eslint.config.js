@@ -30,7 +30,6 @@ export default [
       'release/**',
       'coverage/**',
       '.jscpd/**',
-      'rpi/**',
       'protocol/**',
     ],
   },

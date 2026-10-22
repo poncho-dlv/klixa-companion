@@ -6,7 +6,7 @@ import electron from 'electron';
 const { safeStorage } = electron;
 
 // SMALLRIG_MESH_STATE : clé HÉRITÉE (SmallRig a quitté le compagnon) — conservée chiffrée dans config.json
-// pour être exportée vers klixa-smallrig-lan (tools/export-from-companion.cjs), plus jamais lue ici.
+// pour être exportée vers klixa-lan-devices (devices/smallrig/tools/export-from-companion.cjs), plus jamais lue ici.
 const secretKeys = new Set(['COMPANION_TOKEN', 'OBS_WS_PASSWORD', 'SB_PASSWORD', 'HUE_APP_KEY', 'SMALLRIG_MESH_STATE', 'COMPANION_LOCAL_TOKEN']);
 
 function fsyncDirectory(directory) {

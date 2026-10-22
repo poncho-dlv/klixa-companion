@@ -6,7 +6,7 @@ compagnon → cloud, cf. `messages.md`, un niveau plus bas). Tous les messages s
 JSON (un objet par trame). Voir `docs/local-device-agent-plan.md` (repo Klixa) pour le
 contexte produit complet.
 
-Cette fonctionnalité généralise la machine à fumée (`rpi/`) : un device n'est plus câblé
+Cette fonctionnalité généralise la machine à fumée (dépôt [klixa-lan-devices](https://github.com/poncho-dlv/klixa-lan-devices)) : un device n'est plus câblé
 en dur dans le compagnon, il s'annonce lui-même avec ses éléments pilotables.
 
 ## Authentification
@@ -189,8 +189,8 @@ coupure ne sont pas mises en file (déclenchement physique → pas de rejeu tard
 Le protocole n'est que WS + JSON : n'importe quel runtime capable d'ouvrir une connexion
 WebSocket sortante peut y participer.
 
-- **Référence** : `rpi/klixa_device_agent.py` (Python, à venir — cf.
-  `docs/local-device-agent-plan.md` §7).
+- **Référence Python** : [`sdk/python/klixa_device_agent.py`](https://github.com/poncho-dlv/klixa-lan-devices/blob/main/sdk/python/klixa_device_agent.py)
+  du dépôt klixa-lan-devices ; **référence Node.js** : `devices/smallrig/src/device-agent.js` du même dépôt.
 - **Alternative** : firmware ESP32/ESP8266 (Arduino `WebSocketsClient` + `ArduinoJson`,
   ou MicroPython) — même `hello`/`registered`/`command`/`ack`, sans changement côté
   compagnon.

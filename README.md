@@ -29,10 +29,9 @@ le script/firmware qui se connecte AU compagnon, pas le contraire — même logi
   (`device-hub.js`, path `/devices/ws`). Se déploie en app Windows (Electron).
 - **Application desktop** (`desktop/`) — enrobage Electron du compagnon, avec
   écran de configuration et pairing. Voir [desktop/README.md](desktop/README.md).
-- **SDK appareils LAN** (`rpi/klixa_device_agent.py`) — module Python de référence pour
-  connecter un script/appareil tiers (Raspberry Pi, ESP...) au compagnon, avec
-  `rpi/smoke_relay.py` (machine à fumée) comme exemple concret. Voir
-  [rpi/README.md](rpi/README.md).
+- **Appareils LAN** — scripts et SDK pour connecter du matériel (Raspberry Pi, ESP, lampes…) au
+  compagnon : dépôt séparé [klixa-lan-devices](https://github.com/poncho-dlv/klixa-lan-devices) (SDK Python de référence, machine à fumée
+  commandée par un relais, lampes SmallRig).
 - **Protocole compagnon ↔ cloud** (`protocol/messages.md`) — contrat des messages
   entre le compagnon et le cloud.
 - **Protocole compagnon ↔ appareils LAN** (`protocol/devices-messages.md`) — contrat
@@ -70,12 +69,12 @@ l'installateur avec un certificat de signature de code avant publication. Voir
 ## Lampes SmallRig : parties vers un appareil LAN
 
 Le support des lampes SmallRig RM75 (Bluetooth Mesh, reverse engineering) **n'est plus dans le compagnon
-ni dans Klixa** : il vit dans le projet séparé `klixa-smallrig-lan`, qui expose chaque lampe comme un
+ni dans Klixa** : il vit dans le dépôt [klixa-lan-devices](https://github.com/poncho-dlv/klixa-lan-devices) (`devices/smallrig`), qui expose chaque lampe comme un
 appareil LAN de type `light` (voir [protocol/devices-messages.md](protocol/devices-messages.md)).
 
 **Migration depuis une version ≤ 0.5.x** : l'état mesh des lampes déjà appairées reste dans `config.json`
-(chiffré par Windows). Avant de les retrouver dans `klixa-smallrig-lan`, exporter cet état avec
-`npx electron ../klixa-smallrig-lan/tools/export-from-companion.cjs` (depuis ce dossier), application fermée — voir le README de `klixa-smallrig-lan`.
+(chiffré par Windows). Avant de les retrouver dans `devices/smallrig`, exporter cet état avec
+`npx electron ../klixa-lan-devices/devices/smallrig/tools/export-from-companion.cjs` (depuis ce dossier), application fermée — voir le README de ce dossier.
 
 ## Variables d'environnement
 
