@@ -64,17 +64,21 @@ export function kelvinToMirek(kelvin) {
 // `color` avant `color_temperature` : une lampe couleur expose aussi la température.
 // Pur + testé.
 export function classifyHueLight(light) {
-  if (light?.color) return { kind: 'color' };
-
-  if (light?.color_temperature) {
-    const schema = light.color_temperature.mirek_schema || {};
+  // Plage de température annoncée par le bridge (mirek_schema → Kelvin), `{}` si absente.
+  const temperatureRange = () => {
+    const schema = light?.color_temperature?.mirek_schema || {};
     const lowestMirek = Number(schema.mirek_minimum);
     const highestMirek = Number(schema.mirek_maximum);
-    const range = Number.isFinite(lowestMirek) && Number.isFinite(highestMirek) && lowestMirek > 0 && highestMirek > 0
+    return Number.isFinite(lowestMirek) && Number.isFinite(highestMirek) && lowestMirek > 0 && highestMirek > 0
       ? { minKelvin: Math.round(1000000 / highestMirek), maxKelvin: Math.round(1000000 / lowestMirek) }
       : {};
-    return { kind: 'tunable_white', ...range };
-  }
+  };
+
+  // Une lampe couleur expose aussi sa température : on remonte sa plage RÉELLE pour que Klixa
+  // propose le réglage en Kelvin (envoyé en température native, sans conversion RVB).
+  if (light?.color) return { kind: 'color', ...(light.color_temperature ? temperatureRange() : {}) };
+
+  if (light?.color_temperature) return { kind: 'tunable_white', ...temperatureRange() };
 
   if (light?.dimming) return { kind: 'dimmable' };
   return { kind: 'onoff' };

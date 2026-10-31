@@ -18,9 +18,16 @@ import { createConfig } from '../src/config.js';
 
 test('classifyHueLight: lampe couleur (color présent, même avec color_temperature)', () => {
   assert.deepEqual(
-    classifyHueLight({ dimming: {}, color: { xy: {} }, color_temperature: { mirek_schema: { mirek_minimum: 153, mirek_maximum: 500 } } }),
+    classifyHueLight({ dimming: {}, color: { xy: {} } }),
     { kind: 'color' }
   );
+  // Avec color_temperature : plage réelle remontée (mirek → Kelvin).
+  assert.deepEqual(
+    classifyHueLight({ dimming: {}, color: { xy: {} }, color_temperature: { mirek_schema: { mirek_minimum: 153, mirek_maximum: 500 } } }),
+    { kind: 'color', minKelvin: 2000, maxKelvin: 6536 }
+  );
+  // Température sans schéma exploitable : aucune plage inventée.
+  assert.deepEqual(classifyHueLight({ color: { xy: {} }, color_temperature: {} }), { kind: 'color' });
 });
 
 test('classifyHueLight: blanc réglable, bornes converties mirek → Kelvin', () => {
