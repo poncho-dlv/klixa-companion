@@ -2,7 +2,7 @@
 // elle qui ouvre la camera (webcam, ou "OBS Virtual Camera" pour partager la vraie webcam
 // avec OBS) et envoie les donnees de visage a l'overlay OBS via le serveur local.
 import { createFaceEngine } from './engine.js';
-import { SKINS } from './skins.js';
+import { SKINS, is3D } from './skins.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -16,6 +16,7 @@ const state = {
   overlays: 0,
   mirror: true,
   debug: false,
+  info3d: '',
   error: ''
 };
 
@@ -24,6 +25,155 @@ for (const [id, skin] of Object.entries(SKINS)) $('skin').add(new Option(skin.la
 $('skin').onchange = (e) => { state.override = e.target.value; };
 $('mirror').onchange = (e) => { state.mirror = e.target.checked; };
 $('debug').onchange = (e) => { state.debug = e.target.checked; };
+
+// --- Rendu 3D (a la demande) et calibrage ----------------------------------------------
+// La sortie 3D est dessinee dans un canvas WebGL cache, puis recopiee dans l'apercu.
+const CALIB_KEY = 'camskin.calib.';
+let renderer3d = null;
+let renderer3dLoading = false;
+function ensureRenderer3d() {
+  if (renderer3d || renderer3dLoading) return renderer3d;
+  renderer3dLoading = true;
+  import('./skin3d.js')
+    .then((module) => { renderer3d = module.createSkin3DRenderer({ canvas: $('stage3d') }); })
+    .catch((error) => { console.error('Rendu 3D indisponible', error); });
+  return null;
+}
+
+const CALIB_FIELDS = [
+  ['px', 'Position X', 'position', 0, -15, 15, 0.1], ['py', 'Position Y', 'position', 1, -15, 15, 0.1], ['pz', 'Position Z', 'position', 2, -15, 15, 0.1],
+  ['rx', 'Rotation X', 'rotation', 0, -180, 180, 1], ['ry', 'Rotation Y', 'rotation', 1, -180, 180, 1], ['rz', 'Rotation Z', 'rotation', 2, -180, 180, 1]
+];
+let calibSkin = null;
+
+// Reapplique les reglages de calibrage memorises (par navigateur) des que le modele est charge.
+function restoreCalibration(skinId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CALIB_KEY + skinId) ?? 'null');
+    if (saved) renderer3d.patchManifest(skinId, saved);
+  } catch { /* reglage memorise illisible : ignore */ }
+}
+
+function saveCalibration(skinId) {
+  const m = renderer3d.getManifest(skinId);
+  localStorage.setItem(CALIB_KEY + skinId, JSON.stringify({
+    transform: { position: m.position, rotation: m.rotation, scale: m.scale },
+    occluder: m.occluder,
+    ...(m.jaw ? { jaw: m.jaw } : {}),
+    ...(m.eyes ? { eyes: m.eyes } : {}),
+    ...(m.texture ? { texture: m.texture } : {}),
+    ...(m.stabilize ? { stabilize: m.stabilize } : {})
+  }));
+}
+
+function buildCalibration(skinId) {
+  const panel = $('calib-body');
+  const manifest = renderer3d.getManifest(skinId);
+  panel.replaceChildren();
+  const addRow = (label, min, max, step, value, onInput) => {
+    const row = document.createElement('label');
+    const name = document.createElement('span');
+    name.textContent = label;
+    const input = document.createElement('input');
+    Object.assign(input, { type: 'range', min, max, step, value });
+    const out = document.createElement('output');
+    out.textContent = String(value);
+    input.oninput = () => {
+      out.textContent = input.value;
+      onInput(Number(input.value));
+      saveCalibration(skinId);
+    };
+    row.append(name, input, out);
+    panel.append(row);
+  };
+  for (const [, label, key, index, min, max, step] of CALIB_FIELDS) {
+    addRow(label, min, max, step, manifest[key][index], (value) => {
+      const next = [...renderer3d.getManifest(skinId)[key]];
+      next[index] = value;
+      renderer3d.patchManifest(skinId, { transform: { [key]: next } });
+    });
+  }
+  addRow('Echelle', 0.2, 5, 0.01, manifest.scale, (value) => renderer3d.patchManifest(skinId, { transform: { scale: value } }));
+  if (manifest.jaw) {
+    addRow('Machoire : gain', 0.5, 6, 0.1, manifest.jaw.gain, (value) => {
+      renderer3d.patchManifest(skinId, { jaw: { ...renderer3d.getManifest(skinId).jaw, gain: value } });
+    });
+    addRow('Machoire : gain levres', 0, 12, 0.1, manifest.jaw.lipGain, (value) => {
+      renderer3d.patchManifest(skinId, { jaw: { ...renderer3d.getManifest(skinId).jaw, lipGain: value } });
+    });
+    addRow('Machoire : courbe', 0.3, 1.5, 0.05, manifest.jaw.curve, (value) => {
+      renderer3d.patchManifest(skinId, { jaw: { ...renderer3d.getManifest(skinId).jaw, curve: value } });
+    });
+    addRow('Machoire : angle max', 5, 60, 1, manifest.jaw.maxAngleDeg, (value) => {
+      renderer3d.patchManifest(skinId, { jaw: { ...renderer3d.getManifest(skinId).jaw, maxAngleDeg: value } });
+    });
+  }
+  if (manifest.eyes) {
+    addRow('Regard : gain', 0.5, 4, 0.1, manifest.eyes.gain, (value) => {
+      renderer3d.patchManifest(skinId, { eyes: { ...renderer3d.getManifest(skinId).eyes, gain: value } });
+    });
+  }
+  if (manifest.stabilize) {
+    addRow('Nez : maintien tete', 0, 1, 0.05, manifest.stabilize.noseHold, (value) => {
+      renderer3d.patchManifest(skinId, { stabilize: { noseHold: value } });
+    });
+  }
+  if (manifest.texture) {
+    for (const [label, key, min, max, step] of [['Peau : relief', 'bump', 0, 1.5, 0.05], ['Peau : taches', 'blotch', 0, 1, 0.05], ['Peau : echelle', 'scale', 0.3, 3, 0.05]]) {
+      addRow(label, min, max, step, manifest.texture[key], (value) => {
+        renderer3d.patchManifest(skinId, { texture: { ...renderer3d.getManifest(skinId).texture, [key]: value } });
+      });
+    }
+  }
+  const occ = manifest.occluder;
+  for (const [i, axis] of ['X', 'Y', 'Z'].entries()) {
+    addRow(`Cache tete ${axis}`, 1, 20, 0.1, occ.radii[i], (value) => {
+      const radii = [...renderer3d.getManifest(skinId).occluder.radii];
+      radii[i] = value;
+      renderer3d.patchManifest(skinId, { occluder: { radii } });
+    });
+  }
+  for (const [i, axis] of ['X', 'Y', 'Z'].entries()) {
+    addRow(`Cache tete pos ${axis}`, -15, 15, 0.1, occ.position[i], (value) => {
+      const position = [...renderer3d.getManifest(skinId).occluder.position];
+      position[i] = value;
+      renderer3d.patchManifest(skinId, { occluder: { position } });
+    });
+  }
+}
+
+$('calib-debug').onchange = (e) => renderer3d?.setDebug(e.target.checked);
+$('calib-copy').onclick = async () => {
+  if (!calibSkin || !renderer3d) return;
+  const m = renderer3d.getManifest(calibSkin);
+  const out = { model: m.model, transform: { position: m.position, rotation: m.rotation, scale: m.scale }, occluder: m.occluder, morphGain: m.morphGain, light: m.light };
+  if (m.jaw) out.jaw = m.jaw;
+  if (m.eyes) out.eyes = m.eyes;
+  if (m.breath) out.breath = m.breath;
+  if (m.texture) out.texture = m.texture;
+  if (m.stabilize) out.stabilize = m.stabilize;
+  if (Object.keys(m.morphGains).length) out.morphGains = m.morphGains;
+  await navigator.clipboard.writeText(JSON.stringify(out, null, 2));
+  $('calib-copy').textContent = 'Copie !';
+  setTimeout(() => { $('calib-copy').textContent = 'Copier le manifeste'; }, 1500);
+};
+$('calib-reset').onclick = () => {
+  if (!calibSkin) return;
+  localStorage.removeItem(CALIB_KEY + calibSkin);
+  location.reload();
+};
+
+// Panneau visible uniquement pour un skin 3D charge ; reconstruit quand le skin change.
+function syncCalibration(skinId) {
+  const wanted = skinId && is3D(SKINS[skinId]) && renderer3d?.isReady(skinId) ? skinId : null;
+  if (wanted === calibSkin) return;
+  calibSkin = wanted;
+  $('calib').hidden = !wanted;
+  if (wanted) {
+    restoreCalibration(wanted);
+    buildCalibration(wanted);
+  }
+}
 
 // --- Liaison avec le serveur local (etat du skin, envoi des visages) -------------------
 let socket = null;
@@ -105,7 +255,21 @@ function render(face, landmarks) {
   }
   ctx.drawImage(video, 0, 0, w, h);
   const skin = state.override || state.serverSkin;
-  if (face && skin) SKINS[skin].draw(ctx, face);
+  let drew3d = false;
+  if (face && skin) {
+    const def = SKINS[skin];
+    if (is3D(def)) {
+      const renderer = ensureRenderer3d();
+      drew3d = Boolean(renderer?.render(face, skin, def.model));
+      state.info3d = renderer ? `3D ${renderer.status(skin)}${face.pose ? ` z=${face.pose[14]}` : ' sans pose'}` : '3D chargement du moteur';
+    } else {
+      def.draw(ctx, face);
+    }
+  }
+  // Le canvas WebGL est superpose a l'apercu (comme dans l'overlay OBS), pas recopie dedans.
+  $('stage3d').classList.toggle('mirror', state.mirror);
+  if (!drew3d) renderer3d?.clear();
+  syncCalibration(skin && is3D(SKINS[skin]) ? skin : null);
   if (landmarks) {
     ctx.fillStyle = 'rgba(0,255,255,.8)';
     for (const p of landmarks) ctx.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
@@ -137,7 +301,7 @@ async function main() {
     const now = performance.now();
     if (now - stats.lastLog >= 1000) {
       const avg = stats.inferMs.reduce((s, v) => s + v, 0) / (stats.inferMs.length || 1);
-      stats.text = `${engine.delegate} - ${(stats.frames / ((now - stats.lastLog) / 1000)).toFixed(0)} fps - suivi ${avg.toFixed(1)} ms - ${video.videoWidth}x${video.videoHeight} - OBS : ${state.overlays} overlay`;
+      stats.text = `${engine.delegate} - ${(stats.frames / ((now - stats.lastLog) / 1000)).toFixed(0)} fps - suivi ${avg.toFixed(1)} ms - ${video.videoWidth}x${video.videoHeight} - OBS : ${state.overlays} overlay${state.info3d ? ` - ${state.info3d}` : ''}`;
       stats.frames = 0;
       stats.inferMs = [];
       stats.lastLog = now;

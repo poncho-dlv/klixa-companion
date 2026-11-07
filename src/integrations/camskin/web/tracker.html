@@ -7,6 +7,7 @@
 </head>
 <body class="tracker">
 <canvas id="stage"></canvas>
+<canvas id="stage3d"></canvas>
 <video id="cam" playsinline muted></video>
 <div id="ui">
   <select id="device"></select>
@@ -15,6 +16,15 @@
   <label><input type="checkbox" id="debug"> Points</label>
   <span id="status">...</span>
 </div>
+<details id="calib" hidden>
+  <summary>Calibrage 3D</summary>
+  <div id="calib-body"></div>
+  <div id="calib-actions">
+    <label><input type="checkbox" id="calib-debug"> Voir le cache de tete</label>
+    <button type="button" id="calib-copy">Copier le manifeste</button>
+    <button type="button" id="calib-reset">Reinitialiser</button>
+  </div>
+</details>
 <script type="module" src="/tracker.js"></script>
 </body>
 </html>

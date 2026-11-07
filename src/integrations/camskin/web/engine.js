@@ -11,11 +11,15 @@ const OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 36
 const SMOOTH = 0.55;
 const lerp = (a, b, k) => a + (b - a) * k;
 const round = (n) => Math.round(n * 10) / 10;
+const round4 = (n) => Math.round(n * 10000) / 10000;
+
+// Blendshapes sous ce seuil omis de la trame (l'overlay les traite comme 0) : allege le flux.
+const BLEND_MIN = 0.01;
 
 async function createLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks('/vendor/wasm');
   const base = { modelAssetPath: '/models/face_landmarker.task' };
-  const options = { runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true };
+  const options = { runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true };
   try {
     return { landmarker: await FaceLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...base, delegate: 'GPU' } }), delegate: 'GPU' };
   } catch (error) {
@@ -33,7 +37,7 @@ export async function createFaceEngine() {
 
   // Repere visage derive des landmarks, lisse par moyenne exponentielle. Coordonnees en
   // pixels de l'image video (w x h) : la sortie met a l'echelle selon sa propre taille.
-  function buildFace(lms, blend, w, h) {
+  function buildFace(lms, blend, w, h, matrix) {
     const px = (i) => ({ x: lms[i].x * w, y: lms[i].y * h });
     const a = px(L.eyeA);
     const b = px(L.eyeB);
@@ -63,7 +67,7 @@ export async function createFaceEngine() {
         }
       : raw;
     smooth = { ...face };
-    return {
+    const out = {
       w: w,
       h: h,
       cx: round(face.cx),
@@ -76,6 +80,16 @@ export async function createFaceEngine() {
       look: { x: Math.round(face.look.x * 100) / 100, y: Math.round(face.look.y * 100) / 100 },
       oval: OVAL.map((i) => ({ x: round(lms[i].x * w), y: round(lms[i].y * h) }))
     };
+    // Pose 3D (matrice 4x4 colonne-major, repere "visage canonique" en cm) et blendshapes : pour
+    // les skins 3D. Le lissage est fait par le rendu 3D, a la cadence d'affichage.
+    if (matrix) out.pose = Array.from(matrix, round4);
+    // Ecart reel des levres (points interieurs 13/14) rapporte a l'ecart des yeux : mesure plus fine
+    // des petites ouvertures que le blendshape jawOpen.
+    out.lip = Math.round((Math.hypot(top.x - bottom.x, top.y - bottom.y) / Math.max(1, raw.u)) * 1000) / 1000;
+    out.blend = Object.fromEntries(
+      Object.entries(blend).filter(([name, score]) => name !== '_neutral' && score >= BLEND_MIN).map(([name, score]) => [name, Math.round(score * 1000) / 1000])
+    );
+    return out;
   }
 
   return {
@@ -93,7 +107,7 @@ export async function createFaceEngine() {
         return { face: null, landmarks: null };
       }
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));
-      return { face: buildFace(lms, blend, w, h), landmarks: withLandmarks ? lms : null };
+      return { face: buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data), landmarks: withLandmarks ? lms : null };
     }
   };
 }

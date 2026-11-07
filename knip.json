@@ -7,7 +7,7 @@
     "src/integrations/camskin/web/overlay.js",
     "src/integrations/camskin/web/tracker.js"
   ],
-  "ignoreUnresolved": ["/vendor/vision_bundle.mjs"],
+  "ignoreUnresolved": ["/vendor/vision_bundle.mjs", "/vendor-three/three.module.js", "/vendor-three-addons/loaders/GLTFLoader.js"],
   "project": [
     "src/**/*.js",
     "desktop/**/*.js",

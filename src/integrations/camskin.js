@@ -8,6 +8,7 @@ import { createLogger } from '../logger.js';
 import { t } from '../i18n/core.js';
 import { isAllowedOrigin, isAllowedRequestHost } from '../local-server.js';
 import { SKINS } from './camskin/web/skins.js';
+import { sanitizePoseAndBlend } from './camskin/web/skin-manifest.js';
 
 const log = createLogger('camskin');
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +25,14 @@ const TYPES = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.wasm': 'application/wasm',
-  '.task': 'application/octet-stream'
+  '.task': 'application/octet-stream',
+  '.json': 'application/json; charset=utf-8',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.bin': 'application/octet-stream',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp'
 };
 
 // Pages servies a elles-memes : aucun reseau exterieur. `wasm-unsafe-eval` est requis par
@@ -45,6 +53,23 @@ function resolveVendorDir() {
   } catch {
     return path.resolve(directory, '..', '..', 'node_modules', '@mediapipe', 'tasks-vision');
   }
+}
+
+function resolveThreeDir(...parts) {
+  try {
+    // `three` n'expose pas son package.json : on remonte depuis l'entree CommonJS (build/three.cjs).
+    return path.join(path.dirname(require.resolve('three')), '..', ...parts);
+  } catch {
+    return path.resolve(directory, '..', '..', '..', 'node_modules', 'three', ...parts);
+  }
+}
+
+// Les modules d'exemples de three.js (GLTFLoader...) importent `'three'` par son nom nu, que le
+// navigateur ne sait pas resoudre sans import map (un import map en ligne serait bloque par la
+// CSP). On reecrit donc cet unique specificateur vers le fichier servi localement.
+const THREE_BARE_IMPORT = /(from\s*)(['"])three\2/g;
+function rewriteThreeImports(source) {
+  return source.replace(THREE_BARE_IMPORT, '$1$2/vendor-three/three.module.js$2');
 }
 
 /** Skins disponibles (id + libelle), dans l'ordre de la page. */
@@ -100,7 +125,11 @@ export function sanitizeFace(raw) {
   if (!Array.isArray(raw.oval) || raw.oval.length > MAX_OVAL_POINTS) return null;
   const oval = raw.oval.map(point);
   if (oval.includes(null)) return null;
-  return { w, h, cx, cy, u, angle, jaw, nose, mouth, look, oval };
+  const face = { w, h, cx, cy, u, angle, jaw, nose, mouth, look, oval };
+  // Pose 3D et blendshapes : facultatifs (skins 3D), refuses s'ils sont mal formes.
+  const extra = sanitizePoseAndBlend(raw);
+  if (!extra) return null;
+  return { ...face, ...extra };
 }
 
 /**
@@ -117,10 +146,13 @@ export function createCamskinIntegration(cfg = {}, { emitEvent } = {}) {
   const webDir = path.join(directory, 'camskin', 'web');
   const mounts = [
     ['/vendor/', resolveVendorDir()],
+    ['/vendor-three/', resolveThreeDir('build')],
+    ['/vendor-three-addons/', resolveThreeDir('examples', 'jsm')],
     ['/models/', cfg.modelsDir || path.resolve(directory, '..', '..', 'assets', 'camskin')],
     ['/', webDir]
   ];
 
+  const threeAddonsDir = mounts.find(([prefix]) => prefix === '/vendor-three-addons/')[1];
   const state = { skin: null, expiresAt: null };
   let timer = null;
   let demand = false;
@@ -225,6 +257,10 @@ export function createCamskinIntegration(cfg = {}, { emitEvent } = {}) {
     };
     if (path.extname(file) === '.html') headers['Content-Security-Policy'] = PAGE_CSP;
     res.writeHead(200, headers);
+    if (file.startsWith(threeAddonsDir + path.sep) && path.extname(file) === '.js') {
+      res.end(rewriteThreeImports(fs.readFileSync(file, 'utf8')));
+      return;
+    }
     fs.createReadStream(file).pipe(res);
   });
 

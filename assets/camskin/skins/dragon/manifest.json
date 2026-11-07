@@ -1,0 +1,38 @@
+{
+  "model": "dragon.glb",
+  "transform": {
+    "position": [
+      0,
+      0,
+      0
+    ],
+    "rotation": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1
+  },
+  "occluder": {
+    "enabled": true,
+    "position": [
+      0,
+      0,
+      -3
+    ],
+    "radii": [
+      7,
+      9.5,
+      8
+    ]
+  },
+  "jaw": {
+    "node": "Jaw",
+    "axis": [
+      1,
+      0,
+      0
+    ],
+    "maxAngleDeg": 22
+  }
+}

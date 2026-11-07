@@ -27,45 +27,10 @@ function polygon(ctx, pts, fill) {
   ctx.fill();
 }
 
+// Grenouille : skin 3D (masque de tete complet), genere par scripts/blender/make_frog.py.
 const frog = {
   label: 'Grenouille',
-  draw(ctx, f) {
-    // Teinte verte sur l'ovale du visage (coordonnees monde, hors repere local).
-    ctx.save();
-    ctx.beginPath();
-    f.oval.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(80, 180, 60, 0.55)';
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(f.cx, f.cy);
-    ctx.rotate(f.angle);
-    const u = f.u;
-    for (const side of [-1, 1]) {
-      // Gros yeux globuleux au sommet du front.
-      circle(ctx, side * 0.62 * u, -1.05 * u, 0.5 * u, '#6cc24a', '#2f7a1f');
-      circle(ctx, side * 0.62 * u, -1.05 * u, 0.34 * u, '#ffffff');
-      circle(ctx, side * 0.62 * u + f.look.x * 0.1 * u, -1.05 * u + f.look.y * 0.1 * u, 0.17 * u, '#111');
-      // Narines.
-      circle(ctx, side * 0.14 * u, 0.55 * u, 0.045 * u, '#2f7a1f');
-    }
-    ctx.restore();
-
-    // Langue quand la bouche est ouverte.
-    if (f.jaw > 0.35) {
-      ctx.save();
-      ctx.translate(f.mouth.x, f.mouth.y);
-      ctx.rotate(f.angle);
-      const len = f.u * (0.6 + f.jaw * 1.4);
-      ctx.fillStyle = '#e8536f';
-      ctx.beginPath();
-      ctx.roundRect(-f.u * 0.12, 0, f.u * 0.24, len, f.u * 0.12);
-      ctx.fill();
-      ctx.restore();
-    }
-  },
+  model: '/models/skins/frog/manifest.json',
 };
 
 const cat = {
@@ -125,4 +90,16 @@ const flower = {
   },
 };
 
-export const SKINS = { frog, cat, flower };
+// Skin 3D : pas de `draw`, un manifeste (voir skin-manifest.js) decrit le modele glTF et son
+// ancrage. Rendu par skin3d.js. Modele provisoire, a remplacer par le vrai dragon.
+const dragon = {
+  label: 'Dragon',
+  model: '/models/skins/dragon/manifest.json',
+};
+
+export const SKINS = { frog, cat, flower, dragon };
+
+/** Vrai si le skin est rendu en 3D (manifeste + modele glTF) plutot qu'en dessin 2D. */
+export function is3D(skin) {
+  return typeof skin?.model === 'string';
+}

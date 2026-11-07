@@ -1,0 +1,72 @@
+{
+  "model": "frog.glb",
+  "transform": {
+    "position": [
+      0,
+      0,
+      0
+    ],
+    "rotation": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1
+  },
+  "occluder": {
+    "enabled": false,
+    "position": [
+      0,
+      0,
+      -3
+    ],
+    "radii": [
+      7,
+      9.5,
+      8
+    ]
+  },
+  "jaw": {
+    "node": "Jaw",
+    "axis": [
+      1,
+      0,
+      0
+    ],
+    "maxAngleDeg": 30,
+    "gain": 2.6,
+    "lipGain": 4.5,
+    "curve": 0.7
+  },
+  "eyes": {
+    "left": "EyeLeft",
+    "right": "EyeRight",
+    "maxYawDeg": 28,
+    "maxPitchDeg": 20,
+    "gain": 1.4
+  },
+  "breath": {
+    "morph": "nostrilBreath",
+    "periodSec": 3.6,
+    "amount": 0.6
+  },
+  "texture": {
+    "materials": [
+      "peau"
+    ],
+    "scale": 1,
+    "blotch": 0.45,
+    "bump": 0.35
+  },
+  "stabilize": {
+    "noseHold": 0.85
+  },
+  "morphGains": {
+    "eyeBlinkLeft": 1.6,
+    "eyeBlinkRight": 1.6,
+    "noseSneerLeft": 2.4,
+    "noseSneerRight": 2.4,
+    "mouthUpperUpLeft": 2.0,
+    "mouthUpperUpRight": 2.0
+  }
+}

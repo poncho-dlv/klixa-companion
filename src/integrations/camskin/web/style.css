@@ -1,9 +1,16 @@
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 13px system-ui, sans-serif; }
 body.tracker { background: #111; }
 #cam { display: none; }
-#stage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-#stage.mirror { transform: scaleX(-1); }
+#stage, #stage3d { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+#stage.mirror, #stage3d.mirror { transform: scaleX(-1); }
 #ui { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 6px 10px; background: rgba(0,0,0,.65); color: #fff; border-radius: 8px; }
 #ui label { display: inline-flex; gap: 4px; align-items: center; }
 #status { opacity: .85; }
+#stage3d { pointer-events: none; }
+#calib { position: absolute; right: 8px; bottom: 8px; width: 300px; max-height: 70%; overflow: auto; padding: 6px 10px;
+  background: rgba(0,0,0,.72); color: #fff; border-radius: 8px; }
+#calib summary { cursor: pointer; font-weight: 600; }
+#calib-body label { display: grid; grid-template-columns: 110px 1fr 44px; gap: 6px; align-items: center; margin: 3px 0; }
+#calib-body output { text-align: right; opacity: .8; }
+#calib-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }

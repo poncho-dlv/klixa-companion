@@ -25,7 +25,7 @@ function get(port, path, headers = {}) {
 
 test('listSkins expose les skins de la page avec leur libelle', () => {
   const skins = listSkins();
-  assert.deepEqual(skins.map((s) => s.id), ['frog', 'cat', 'flower']);
+  assert.deepEqual(skins.map((s) => s.id), ['frog', 'cat', 'flower', 'dragon']);
   assert.ok(skins.every((s) => s.label));
 });
 
@@ -34,7 +34,7 @@ test('normalizeSkin : vide / none = aucun skin, inconnu = erreur', () => {
   assert.equal(normalizeSkin('none'), null);
   assert.equal(normalizeSkin(undefined), null);
   assert.equal(normalizeSkin(' Frog '), 'frog');
-  assert.throws(() => normalizeSkin('dragon'), (err) => err.code === 'INVALID_SKIN');
+  assert.throws(() => normalizeSkin('licorne'), (err) => err.code === 'INVALID_SKIN');
   assert.throws(() => normalizeSkin('__proto__'), (err) => err.code === 'INVALID_SKIN');
 });
 
@@ -68,7 +68,7 @@ test('set-skin refuse un skin inconnu sans modifier l\'etat', async () => {
   const camskin = await start();
   try {
     await camskin.commands['camskin.set-skin']({ skin: 'frog' });
-    await assert.rejects(camskin.commands['camskin.set-skin']({ skin: 'dragon' }));
+    await assert.rejects(camskin.commands['camskin.set-skin']({ skin: 'licorne' }));
     assert.equal((await camskin.commands['camskin.status']()).skin, 'frog');
   } finally {
     await camskin.stop();
@@ -116,6 +116,19 @@ test('le serveur sert la page, le modele et le wasm ; refuse la traversee de che
     const wasm = await get(camskin.port, '/vendor/wasm/vision_wasm_internal.wasm');
     assert.equal(wasm.status, 200);
     assert.equal(wasm.headers['content-type'], 'application/wasm');
+    // three.js (rendu des skins 3D) : le module principal et les addons sont servis localement.
+    const three = await get(camskin.port, '/vendor-three/three.module.js');
+    assert.equal(three.status, 200);
+    assert.match(three.headers['content-type'], /text\/javascript/);
+    const loaderSource = await get(camskin.port, '/vendor-three-addons/loaders/GLTFLoader.js');
+    assert.equal(loaderSource.status, 200);
+    assert.doesNotMatch(loaderSource.body, /from\s*'three'/, 'l import nu "three" est reecrit (pas d import map : CSP)');
+    assert.match(loaderSource.body, /from\s*'\/vendor-three\/three\.module\.js'/);
+    const manifest = await get(camskin.port, '/models/skins/dragon/manifest.json');
+    assert.equal(manifest.status, 200);
+    assert.match(manifest.headers['content-type'], /application\/json/);
+    assert.equal((await get(camskin.port, '/models/skins/dragon/dragon.glb')).headers['content-type'], 'model/gltf-binary');
+    assert.equal((await get(camskin.port, '/vendor-three-addons/..%2f..%2fpackage.json')).status, 404);
     assert.equal((await get(camskin.port, '/..%2f..%2fpackage.json')).status, 404);
     assert.equal((await get(camskin.port, '/vendor/../../package.json')).status, 404);
     const state = await get(camskin.port, '/state');
@@ -165,6 +178,19 @@ test('sanitizeFace accepte un visage valide et refuse les formes invalides', () 
   assert.equal(sanitizeFace({ ...validFace(), oval: [{ x: 'a', y: 1 }] }), null);
   // Les champs inconnus ne sont jamais relayes.
   assert.equal(sanitizeFace({ ...validFace(), extra: '<script>' }).extra, undefined);
+});
+
+test('sanitizeFace : pose 3D et blendshapes facultatifs, bornes strictes', () => {
+  const pose = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -45, 1];
+  const face = { ...validFace(), pose, blend: { jawOpen: 0.5, eyeBlinkLeft: 1 } };
+  assert.deepEqual(sanitizeFace(face), face);
+  assert.equal(sanitizeFace({ ...validFace(), pose: pose.slice(1) }), null, '16 valeurs exactement');
+  assert.equal(sanitizeFace({ ...validFace(), pose: pose.map((n, i) => (i === 3 ? NaN : n)) }), null);
+  assert.equal(sanitizeFace({ ...validFace(), pose: pose.map((n, i) => (i === 14 ? 1e9 : n)) }), null);
+  assert.equal(sanitizeFace({ ...validFace(), blend: { inconnu: 0.5 } }), null, 'blendshape hors liste');
+  assert.equal(sanitizeFace({ ...validFace(), blend: { jawOpen: 2 } }), null);
+  assert.equal(sanitizeFace({ ...validFace(), blend: [0.5] }), null);
+  assert.equal(sanitizeFace({ ...validFace(), blend: { jawOpen: 'x' } }), null);
 });
 
 test('WebSocket : l overlay recoit letat courant puis chaque changement', async () => {
@@ -269,7 +295,7 @@ test('les commandes sont accessibles depuis le cloud via le registre', async () 
     const result = await registry.dispatch('camskin.set-skin', { skin: 'cat', durationMs: 1000 }, { source: 'cloud' });
     assert.equal(result.skin, 'cat');
     const skins = await registry.dispatch('camskin.list-skins', {}, { source: 'cloud' });
-    assert.equal(skins.skins.length, 3);
+    assert.equal(skins.skins.length, 4);
   } finally {
     await registry.stop();
   }
