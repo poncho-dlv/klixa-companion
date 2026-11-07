@@ -53,9 +53,10 @@ async function listCameras(selectedId) {
 
 async function openCamera(deviceId) {
   video.srcObject?.getTracks().forEach((t) => t.stop());
-  // Resolution modeste : le suivi n'a pas besoin de plus, et ca allege la machine.
+  // resizeMode 'none' : sans ca Chrome recadre/etire l'image vers le ratio demande (16:9) au lieu
+  // de garder le format natif de la camera (4:3...), d'ou un ratio different de celui d'OBS.
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 30 } },
+    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, resizeMode: 'none' },
     audio: false
   });
   video.srcObject = stream;

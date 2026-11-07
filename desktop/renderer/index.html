@@ -109,8 +109,9 @@
             </div>
             <label class="toggle switch-row"><input name="CAMSKIN_ENABLED" type="checkbox"><span class="switch-label-text" data-i18n="camskin.enable">Activer les skins caméra</span></label>
             <label><span data-i18n="common.port">Port</span><input name="CAMSKIN_PORT" id="camskinPort" type="number" min="1" max="65535" placeholder="4777"></label>
-            <label><span data-i18n="camskin.obsUrl">URL de la Source navigateur OBS</span><input id="camskinUrl" readonly></label>
-            <button type="button" id="camskinCopyBtn" data-i18n="camskin.copyUrl">Copier l’URL</button>
+            <label><span data-i18n="camskin.obsUrl">URL de la Source navigateur OBS</span>
+              <span class="input-with-btn"><input id="camskinUrl" readonly><button type="button" id="camskinCopyBtn" class="inline-btn" data-i18n="camskin.copyUrl">Copier l’URL</button></span>
+            </label>
             <button type="button" id="camskinPreviewBtn" data-i18n="camskin.preview">Ouvrir l’aperçu caméra</button>
             <button type="submit" class="primary page-save-btn" data-integration="camskin" data-i18n="common.save">Enregistrer</button>
           </section>

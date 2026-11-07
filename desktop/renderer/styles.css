@@ -232,3 +232,7 @@ h3{font-size:13px;color:var(--text-muted);margin:18px 0 8px;text-transform:upper
 .lamp-row--check>.lamp-line{cursor:pointer;user-select:none;margin:0;color:var(--text)}
 .lamp-row--check>.lamp-line:hover{background:rgba(255,255,255,.025)}
 .lamp-row--check input[type=checkbox]{width:auto;margin:0;flex-shrink:0}
+
+.input-with-btn{position:relative;display:block}
+.input-with-btn input{padding-right:120px}
+.input-with-btn .inline-btn{position:absolute;top:50%;right:6px;transform:translateY(-50%);width:auto;margin:0;padding:5px 10px;font-size:.8rem;border-radius:var(--r-sm)}
