@@ -193,6 +193,49 @@ def add_shape_key(obj, name, transform):
     return key
 
 
+def merge_blend(objs, name, voxel=0.3, iterations=7, keep_y=None):
+    """Fusionne des volumes en un seul (union par remaillage voxel) et adoucit les raccords.
+
+    Les pieces qui se croisent (crane + museau, arcades, pommettes...) forment sinon des aretes
+    vives a leur intersection. Apres l'union, un lissage de Taubin (sans retrecissement) arrondit
+    ces raccords ; les sommets a la hauteur `keep_y` (bord de la bouche, qui doit rester net pour
+    la couture avec la machoire) ne bougent pas.
+    """
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
+    obj.name = name
+    obj.data.name = name
+    mod = obj.modifiers.new("union", "REMESH")
+    mod.mode = "VOXEL"
+    mod.voxel_size = voxel
+    mod.use_smooth_shade = True
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    fixed = {v.index for v in bm.verts if keep_y is not None and abs(v.co.z - keep_y) < 0.08}
+    for _ in range(iterations):
+        for lam in (0.5, -0.53):
+            moved = {}
+            for v in bm.verts:
+                if v.index in fixed or not v.link_edges:
+                    continue
+                avg = sum((e.other_vert(v).co for e in v.link_edges), Vector()) / len(v.link_edges)
+                moved[v.index] = v.co + lam * (avg - v.co)
+            for i, co in moved.items():
+                bm.verts[i].co = co
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.polygons.foreach_set("use_smooth", [True] * len(obj.data.polygons))
+    obj.data.update()
+    return obj
+
+
 # --- Yeux --------------------------------------------------------------------------------
 def build_eye(sx, pos, globe_dz, globe_r, globe_mat, pupil, lid_radius, lid_open_cut,
               bump=None, iris=None, gaze=(0.12, 0.1, 1.0)):
@@ -296,7 +339,7 @@ def export_glb(out_dir, filename):
     print("EXPORT", path, os.path.getsize(path), "octets")
 
 
-def render_previews(prefix, jaw, jaw_deg=22, views=None):
+def render_previews(prefix, jaw, jaw_deg=22, views=None, dist=62):
     """Rend des apercus PNG (Eevee) dans --render DOSSIER ; `--hide prefixe` masque des objets."""
     if not RENDER_DIR:
         return
@@ -326,7 +369,7 @@ def render_previews(prefix, jaw, jaw_deg=22, views=None):
     for label, yaw, pitch, open_deg in views or (("face", 0, 0, 0), ("trois-quarts", 35, 8, 0), ("bouche", 0, 0, jaw_deg), ("profil", 85, 0, 0)):
         yr, pr = math.radians(yaw), math.radians(pitch)
         # Repere Blender : la face regarde -Y ; la camera est devant (-Y), tournee de `yaw` autour de Z.
-        pos = target + Vector((math.sin(yr) * math.cos(pr), -math.cos(yr) * math.cos(pr), math.sin(pr))) * 62
+        pos = target + Vector((math.sin(yr) * math.cos(pr), -math.cos(yr) * math.cos(pr), math.sin(pr))) * dist
         cam.location = pos
         cam.rotation_euler = (target - pos).to_track_quat("-Z", "Y").to_euler()
         jaw.rotation_euler = (math.radians(open_deg), 0, 0)

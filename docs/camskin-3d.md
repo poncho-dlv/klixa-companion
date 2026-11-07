@@ -73,6 +73,8 @@ keys nommées comme les blendshapes MediaPipe (`eyeBlinkLeft/Right`, `cheekPuff`
 repos doit être à 0 : `add_shape_key` s'en charge), ne jamais éditer la clé `Basis`, et l'export
 n'est pas identique au bit près d'une exécution à l'autre.
 
+Des volumes qui se croisent (crâne + museau, arcades, pommettes) laissent des arêtes vives à leur intersection : `camskin_lib.merge_blend` les fusionne en un seul maillage (union par remaillage voxel) puis les adoucit (lissage de Taubin) en gardant net le bord de la bouche, qui doit coller à la mâchoire. Les clés de forme sont ajoutées après la fusion. Attention : chaque shape key duplique les sommets, un voxel trop fin (0,3 cm) fait passer le `.glb` à plus de 5 Mo.
+
 Les hauteurs du visage sont alignées sur le modèle canonique MediaPipe (pointe du nez y≈-3,4 cm,
 bouche y≈-6,2 cm) et la tête est assez grande pour couvrir cheveux, casque et cou.
 

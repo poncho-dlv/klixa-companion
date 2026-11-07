@@ -14,6 +14,8 @@ import math
 import os
 import sys
 
+import bpy
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camskin_lib as lib  # noqa: E402
 from camskin_lib import Vector, add_ellipsoid, add_tube, bezier  # noqa: E402
@@ -38,8 +40,8 @@ SMILE = (0.4, 11.0, 5.0, MOUTH_Y)  # bouche presque droite, menacante
 # Museau long : ellipsoide carre (squash). Tous les reperes qui en dependent (bout, bord de la
 # bouche, narines, arete nasale, dents, machoire) sont deduits de ces parametres : pour allonger
 # ou raccourcir le museau, ne changer que MRZ / MZC.
-MZC, MRX, MRY, MRZ, MY = 9.0, 6.0, 3.5, 13.5, -3.0  # centre z, rayons, centre y
-SQUASH_M = (0.85, 0.8, 0.9)
+MZC, MRX, MRY, MRZ, MY = 9.0, 5.8, 7.2, 13.5, 0.4  # centre z, rayons, centre y
+SQUASH_M = (0.85, 0.8, 1.45)
 
 
 def muzzle_front(x, y):
@@ -49,18 +51,18 @@ def muzzle_front(x, y):
     return MZC + MRZ * val ** (SQUASH_M[2] / 2)
 
 
-NOSE_Y, NOSTRIL_X = -1.4, 1.9
-NOSTRIL_Z = muzzle_front(NOSTRIL_X, NOSE_Y) - 0.15
+NOSE_Y, NOSTRIL_X = 0.6, 2.4
+NOSTRIL_Z = muzzle_front(NOSTRIL_X, NOSE_Y) - 0.9
 PLANE_FRONT = muzzle_front(0, MOUTH_Y)  # bout du museau au niveau de la bouche
 RIM = math.sqrt(1 - ((MOUTH_Y - MY) / MRY) ** 2)  # le museau se resserre a la hauteur de la bouche
 # Machoire : meme longueur que le museau (avant = bout du museau, arriere = arriere du crane).
 JAW_BACK, JAW_TOP = -7.5, math.sqrt(1 - (1.8 / 4.6) ** 2)
 JAW_ZC = (PLANE_FRONT + JAW_BACK) / 2
 JAW_RZ = (PLANE_FRONT - JAW_BACK) / (2 * JAW_TOP)
-BRIDGE = ((0, 11.0, 7.0), (0, 4.2, (7.0 + muzzle_front(0, -1.0)) / 2 + 1.2), (0, -1.0, muzzle_front(0, -1.0) - 0.5))
+BRIDGE = ((0, 11.5, 4.0), (0, 9.5, 11.0), (0, 1.8, muzzle_front(0, 1.8) - 0.4))
 
 # Cranes et museau : dome large (couvre cheveux et casque), museau long en coin.
-head = add_ellipsoid("Tete", (0, 3.4, -1.2), (12.6, 12.4, 10.4), ["peau", "bouche"],
+head = add_ellipsoid("Tete", (0, 3.4, -2.2), (12.6, 12.4, 10.0), ["peau", "bouche"],
                      cut=("y", MOUTH_Y, "+"), cap_mat=1, smile=SMILE, squash=(0.68, 0.78, 0.7))
 muzzle = add_ellipsoid("Museau", (0, MY, MZC), (MRX, MRY, MRZ), ["peau", "bouche"],
                        cut=("y", MOUTH_Y, "+"), cap_mat=1, smile=SMILE, squash=SQUASH_M)
@@ -149,8 +151,14 @@ for z, y, s in ((2.5, 15.6, 0.7), (0.0, 16.6, 0.95), (-2.6, 16.5, 1.15), (-5.2, 
     pts = bezier((0, y - 0.6, z), (0, y + 2.4 * s, z - 1.0), (0, y + 4.2 * s, z - 3.4 * s), 8)
     add_tube("Crete", pts, [1.2 * s * (1 - i / 7) ** 0.9 + 0.04 for i in range(8)], ["corne"], segments=10)
 
-lib.add_cheek_key(head)
-lib.add_nose_keys(muzzle, nostrils, NOSE_Y, NOSTRIL_X, NOSTRIL_Z, MOUTH_Y)
+# Raccords doux : le museau, les arcades, les pommettes, les orbites et l'arete nasale forment un
+# seul volume avec le crane (sinon : aretes vives et diagonales aux intersections).
+SKULL_PREFIXES = ("Arcade", "Pommette", "Bosse")
+skull_parts = [o for o in bpy.data.objects if o.name in ("Tete", "Museau", "AreteNasale") or o.name.startswith(SKULL_PREFIXES)]
+skull = lib.merge_blend(skull_parts, "Crane", voxel=0.5, iterations=10, keep_y=MOUTH_Y)
+
+lib.add_cheek_key(skull)
+lib.add_nose_keys(skull, nostrils, NOSE_Y, NOSTRIL_X, NOSTRIL_Z, MOUTH_Y)
 
 lib.export_glb(os.path.join(lib.ROOT, "assets", "camskin", "skins", "dragon"), "dragon.glb")
-lib.render_previews("dragon", jaw, jaw_deg=26)
+lib.render_previews("dragon", jaw, jaw_deg=26, dist=88)
