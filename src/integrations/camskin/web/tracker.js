@@ -119,7 +119,7 @@ function buildCalibration(skinId) {
     });
   }
   if (manifest.texture) {
-    for (const [label, key, min, max, step] of [['Peau : relief', 'bump', 0, 1.5, 0.05], ['Peau : taches', 'blotch', 0, 1, 0.05], ['Peau : echelle', 'scale', 0.3, 3, 0.05]]) {
+    for (const [label, key, min, max, step] of [['Peau : relief', 'bump', 0, 1.5, 0.05], ['Peau : taches', 'blotch', 0, 1, 0.05], ['Peau : ecailles', 'scales', 0, 1, 0.05], ['Peau : echelle', 'scale', 0.3, 3, 0.05]]) {
       addRow(label, min, max, step, manifest.texture[key], (value) => {
         renderer3d.patchManifest(skinId, { texture: { ...renderer3d.getManifest(skinId).texture, [key]: value } });
       });

@@ -117,7 +117,7 @@ test('gazeAngles : yaw vers +X pour "Out" a gauche et "In" a droite, pitch negat
 test('normalizeSkinManifest : respiration (breath) et texture de peau', () => {
   const m = normalizeSkinManifest({ model: 'a.glb', breath: { morph: 'nostrilBreath' }, texture: { materials: ['peau'] } });
   assert.deepEqual(m.breath, { morph: 'nostrilBreath', periodSec: 3.6, amount: 0.6 });
-  assert.deepEqual(m.texture, { materials: ['peau'], scale: 1, blotch: 0.45, bump: 0.35 });
+  assert.deepEqual(m.texture, { materials: ['peau'], scale: 1, blotch: 0.45, bump: 0.35, scales: 0 });
   assert.equal(normalizeSkinManifest({ model: 'a.glb' }).breath, null);
   assert.equal(normalizeSkinManifest({ model: 'a.glb' }).texture, null);
   assert.equal(normalizeSkinManifest({ model: 'a.glb', breath: { morph: 'x', periodSec: 99, amount: 5 } }).breath.periodSec, 12);

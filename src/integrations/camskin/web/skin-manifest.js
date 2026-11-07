@@ -53,7 +53,7 @@ function optionalNumber(value, fallback, min, max) {
  *   stabilize: { noseHold: number }|null, morphGains: Record<string, number>,
  *   eyes: { left: string|null, right: string|null, maxYawDeg: number, maxPitchDeg: number, gain: number }|null,
  *   breath: { morph: string, periodSec: number, amount: number }|null,
- *   texture: { materials: string[], scale: number, blotch: number, bump: number }|null,
+ *   texture: { materials: string[], scale: number, blotch: number, bump: number, scales: number }|null,
  *   morphGain: number, light: { ambient: number, key: number } }}
  * @throws {Error} manifeste invalide
  */
@@ -109,7 +109,8 @@ export function normalizeSkinManifest(raw) {
       materials: list.slice(0, 8),
       scale: optionalNumber(raw.texture.scale, 1, 0.2, 5),
       blotch: optionalNumber(raw.texture.blotch, 0.45, 0, 1),
-      bump: optionalNumber(raw.texture.bump, 0.35, 0, 2)
+      bump: optionalNumber(raw.texture.bump, 0.35, 0, 2),
+      scales: optionalNumber(raw.texture.scales, 0, 0, 1)
     };
   }
   let stabilize = null;

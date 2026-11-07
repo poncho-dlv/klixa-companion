@@ -54,9 +54,10 @@
     "materials": [
       "peau"
     ],
-    "scale": 1,
-    "blotch": 0.5,
-    "bump": 0.28
+    "scale": 1.1,
+    "blotch": 0.8,
+    "bump": 0.3,
+    "scales": 0.75
   },
   "stabilize": {
     "noseHold": 0.85

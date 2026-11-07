@@ -81,11 +81,12 @@ def make_object(name, bm, mats, parent=None, origin=(0, 0, 0)):
 
 
 def ellipsoid_bm(center, radii, segments=40, rings=24, cut=None, mat_index=0, cap_mat=None,
-                 smile=None, lower_mat=None, rot=None):
+                 smile=None, lower_mat=None, rot=None, squash=None):
     """Ellipsoide (repere glTF).
 
     - `cut=(axe, valeur, garder)` coupe par un plan et rebouche ('+' garde le dessus, '-' le dessous) ;
     - `rot=(rx, ry, rz)` en degres : rotation autour du centre, avant la coupe ;
+    - `squash=(kx, ky, kz)` : exposants < 1 qui carrent l'ellipsoide (boite arrondie, formes plus anguleuses) ;
     - `lower_mat=(seuil, index)` : faces dont le centre est sous `seuil` (en Y) prennent ce materiau ;
     - `smile=(amplitude, largeur, etendue, y_bouche)` releve les commissures de la bouche. Meme
       deformation pour la tete, le museau et la machoire : la couture reste fermee.
@@ -95,7 +96,10 @@ def ellipsoid_bm(center, radii, segments=40, rings=24, cut=None, mat_index=0, ca
     rotation = Euler([math.radians(a) for a in rot], "XYZ").to_matrix() if rot else None
     for v in bm.verts:
         # create_uvsphere a +Z pour axe polaire : on le remappe pour que +Y soit le pole.
-        local = Vector((v.co.x * radii[0], v.co.z * radii[1], -v.co.y * radii[2]))
+        unit = Vector((v.co.x, v.co.z, -v.co.y))
+        if squash:
+            unit = Vector([math.copysign(abs(u) ** k, u) for u, k in zip(unit, squash)])
+        local = Vector((unit.x * radii[0], unit.y * radii[1], unit.z * radii[2]))
         if rotation is not None:
             local = rotation @ local
         v.co = Vector(center) + local

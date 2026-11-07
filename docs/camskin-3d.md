@@ -82,8 +82,8 @@ bouche y≈-6,2 cm) et la tête est assez grande pour couvrir cheveux, casque et
   et de l'écart réel des lèvres `x lipGain` l'emporte ; `curve` < 1 amplifie les faibles ouvertures.
 - `eyes` : `{ left, right, maxYawDeg, maxPitchDeg, gain }` — nœuds de globes pilotés par `eyeLook*`.
 - `breath` : `{ morph, periodSec, amount }` — morph target animé par le temps (narines).
-- `texture` : `{ materials[], scale, blotch, bump }` — peau procédurale (taches, grain, verrues) injectée
-  dans les matériaux nommés, sans UV ni image.
+- `texture` : `{ materials[], scale, blotch, bump, scales }` — peau procédurale (taches, grain, verrues, et
+  écailles cellulaires avec `scales` > 0) injectée dans les matériaux nommés, sans UV ni image.
 - `stabilize.noseHold` : MediaPipe calcule la pose avec des points du nez, un froncement fait glisser
   toute la tête ; la pose reste proche de la dernière pose saine pendant `noseSneer*`.
 - `morphGains` : gain par blendshape (ex. `eyeBlinkLeft: 1.6`, car `eyeBlink` dépasse rarement 0,8).

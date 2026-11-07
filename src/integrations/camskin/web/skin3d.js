@@ -27,6 +27,17 @@ float skinNoise(vec3 x) {
   vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(mix(skinHash(i), skinHash(i + vec3(1, 0, 0)), f.x), mix(skinHash(i + vec3(0, 1, 0)), skinHash(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(skinHash(i + vec3(0, 0, 1)), skinHash(i + vec3(1, 0, 1)), f.x), mix(skinHash(i + vec3(0, 1, 1)), skinHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+// Bruit cellulaire 3D : (distance au centre le plus proche, au second, identifiant de la cellule).
+vec3 skinCell(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); float d1 = 8.0; float d2 = 8.0; float id = 0.0;
+  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
+    vec3 g = vec3(float(x), float(y), float(z));
+    vec3 o = vec3(skinHash(i + g), skinHash(i + g + 7.1), skinHash(i + g + 13.3));
+    vec3 r = g + o - f; float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; id = o.x; } else if (d < d2) { d2 = d; }
+  }
+  return vec3(sqrt(d1), sqrt(d2), id);
 }`;
 
 function patchSkinMaterial(material, uniforms) {
@@ -36,7 +47,7 @@ function patchSkinMaterial(material, uniforms) {
       .replace('#include <common>', '#include <common>\nvarying vec3 vSkinPos;\nuniform vec3 uSkinOffset;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkinPos = position + uSkinOffset;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vSkinPos;\nuniform float uSkinScale;\nuniform float uSkinBlotch;\nuniform float uSkinBump;\n${SKIN_NOISE}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vSkinPos;\nuniform float uSkinScale;\nuniform float uSkinBlotch;\nuniform float uSkinBump;\nuniform float uSkinScales;\n${SKIN_NOISE}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float sBig = skinNoise(vSkinPos * 0.38 * uSkinScale + 3.1);
         float sMid = skinNoise(vSkinPos * 1.7 * uSkinScale);
@@ -47,9 +58,15 @@ function patchSkinMaterial(material, uniforms) {
         float sBlotch = smoothstep(0.42, 0.72, sBig) * uSkinBlotch;
         diffuseColor.rgb *= mix(1.0, 0.58, sBlotch);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.12, 0.7), sWart * 0.55);
-        diffuseColor.rgb *= 0.92 + 0.16 * sMid;`)
+        diffuseColor.rgb *= 0.92 + 0.16 * sMid;
+        float sScale = 1.0;
+        if (uSkinScales > 0.001) {
+          vec3 sCellInfo = skinCell(vSkinPos * 0.6 * uSkinScale);
+          sScale = smoothstep(0.0, 0.24, sCellInfo.y - sCellInfo.x);
+          diffuseColor.rgb *= mix(1.0, mix(0.45, 1.0, sScale) * (0.8 + 0.4 * sCellInfo.z), uSkinScales);
+        }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        float sH = skinNoise(vSkinPos * 4.2 * uSkinScale) * 0.16 + sMid * 0.1 + sWart;
+        float sH = skinNoise(vSkinPos * 4.2 * uSkinScale) * 0.16 + sMid * 0.1 + sWart + uSkinScales * sScale * 1.4;
         vec3 sSx = dFdx(-vViewPosition);
         vec3 sSy = dFdy(-vViewPosition);
         vec3 sR1 = cross(sSy, normal);
@@ -118,6 +135,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     entry.textureUniforms.uSkinScale.value = t?.scale ?? 1;
     entry.textureUniforms.uSkinBlotch.value = t?.blotch ?? 0;
     entry.textureUniforms.uSkinBump.value = t?.bump ?? 0;
+    entry.textureUniforms.uSkinScales.value = t?.scales ?? 0;
   }
 
   function applyOccluder(entry) {
@@ -141,7 +159,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
       entry.root = new THREE.Group();
       entry.root.add(gltf.scene);
       entry.morphs = [];
-      entry.textureUniforms = { uSkinScale: { value: 1 }, uSkinBlotch: { value: 0 }, uSkinBump: { value: 0 } };
+      entry.textureUniforms = { uSkinScale: { value: 1 }, uSkinBlotch: { value: 0 }, uSkinBump: { value: 0 }, uSkinScales: { value: 0 } };
       gltf.scene.updateMatrixWorld(true);
       const sceneInverse = gltf.scene.matrixWorld.clone().invert();
       entry.jawNode = null;
