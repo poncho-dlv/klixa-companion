@@ -57,20 +57,33 @@ navigateur pour l'aperçu ; **« Copier le manifeste »** produit le JSON à col
 
 ## Générer un modèle avec Blender (sans modéliser à la main)
 
-`scripts/blender/make_frog.py` construit la grenouille par code (ellipsoïdes, matériaux, nœud `Jaw`,
-shape keys `eyeBlinkLeft/Right` et `cheekPuff`) et exporte `assets/camskin/skins/frog/frog.glb` :
+`scripts/blender/make_frog.py` et `make_dragon.py` construisent les skins par code et exportent le
+`.glb` ; les outils communs (primitives, yeux, clés de forme, export, aperçus) sont dans
+`scripts/blender/camskin_lib.py`.
 
 ```
-"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" -b -P scripts/blender/make_frog.py -- --render <dossier>
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P scripts/blender/make_dragon.py -- --render <dossier>
 ```
 
-`--render` produit des aperçus PNG (face, trois-quarts, bouche ouverte, profil) pour contrôler le
-résultat ; `--hide <prefixe>` masque des objets dans ces aperçus (debug). Piège : Blender crée
-les shape keys à la valeur **1.0** ; le script les remet à 0 (sinon l'export les garde actives).
-Les coordonnées sont écrites en repère glTF puis converties en Z-up pour Blender.
+`--render` produit des aperçus PNG (face, trois-quarts, bouche ouverte, profil) ; `--hide <prefixe>`
+masque des objets dans ces aperçus (debug). Conventions à respecter pour qu'un skin soit animé
+sans code : nœud `Jaw` (mâchoire), nœuds `EyeLeft`/`EyeRight` (globes, +X = œil « Left »), shape
+keys nommées comme les blendshapes MediaPipe (`eyeBlinkLeft/Right`, `cheekPuff`, `noseSneer*`,
+`mouthUpperUp*`) et `nostrilBreath`. Pièges : Blender crée les shape keys à la valeur **1.0** (le
+repos doit être à 0 : `add_shape_key` s'en charge), ne jamais éditer la clé `Basis`, et l'export
+n'est pas identique au bit près d'une exécution à l'autre.
 
-## Modèle provisoire (dragon)
+Les hauteurs du visage sont alignées sur le modèle canonique MediaPipe (pointe du nez y≈-3,4 cm,
+bouche y≈-6,2 cm) et la tête est assez grande pour couvrir cheveux, casque et cou.
 
-`assets/camskin/skins/dragon/` est généré par `node scripts/make-placeholder-skin.mjs`
-(cornes, crête, menton articulé) : il valide la chaîne et sera remplacé par un vrai modèle.
-Le script n'écrase jamais un `manifest.json` déjà calibré.
+## Champs avancés du manifeste
+
+- `jaw.gain` / `jaw.lipGain` / `jaw.curve` : ouverture de la mâchoire. Le plus grand de `jawOpen x gain`
+  et de l'écart réel des lèvres `x lipGain` l'emporte ; `curve` < 1 amplifie les faibles ouvertures.
+- `eyes` : `{ left, right, maxYawDeg, maxPitchDeg, gain }` — nœuds de globes pilotés par `eyeLook*`.
+- `breath` : `{ morph, periodSec, amount }` — morph target animé par le temps (narines).
+- `texture` : `{ materials[], scale, blotch, bump }` — peau procédurale (taches, grain, verrues) injectée
+  dans les matériaux nommés, sans UV ni image.
+- `stabilize.noseHold` : MediaPipe calcule la pose avec des points du nez, un froncement fait glisser
+  toute la tête ; la pose reste proche de la dernière pose saine pendant `noseSneer*`.
+- `morphGains` : gain par blendshape (ex. `eyeBlinkLeft: 1.6`, car `eyeBlink` dépasse rarement 0,8).

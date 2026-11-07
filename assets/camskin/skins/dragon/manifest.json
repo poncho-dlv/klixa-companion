@@ -14,7 +14,7 @@
     "scale": 1
   },
   "occluder": {
-    "enabled": true,
+    "enabled": false,
     "position": [
       0,
       0,
@@ -33,6 +33,40 @@
       0,
       0
     ],
-    "maxAngleDeg": 22
+    "maxAngleDeg": 30,
+    "gain": 2.6,
+    "lipGain": 4.5,
+    "curve": 0.7
+  },
+  "eyes": {
+    "left": "EyeLeft",
+    "right": "EyeRight",
+    "maxYawDeg": 24,
+    "maxPitchDeg": 16,
+    "gain": 1.4
+  },
+  "breath": {
+    "morph": "nostrilBreath",
+    "periodSec": 3.2,
+    "amount": 0.6
+  },
+  "texture": {
+    "materials": [
+      "peau"
+    ],
+    "scale": 1,
+    "blotch": 0.5,
+    "bump": 0.28
+  },
+  "stabilize": {
+    "noseHold": 0.85
+  },
+  "morphGains": {
+    "eyeBlinkLeft": 1.6,
+    "eyeBlinkRight": 1.6,
+    "noseSneerLeft": 2.4,
+    "noseSneerRight": 2.4,
+    "mouthUpperUpLeft": 2.0,
+    "mouthUpperUpRight": 2.0
   }
 }
