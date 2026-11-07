@@ -149,7 +149,6 @@ export default {
   },
   tray: {
     open: 'Ouvrir Klixa Companion',
-    cameraPreview: 'Aperçu caméra (skins)',
     openLogs: 'Ouvrir les logs',
     about: 'À propos',
     quit: 'Quitter'

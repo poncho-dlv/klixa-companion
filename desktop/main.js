@@ -699,7 +699,6 @@ function configureUpdates() {
 function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: t('tray.open'), click: showWindow },
-    { label: t('tray.cameraPreview'), click: openCameraPreview },
     { label: t('tray.openLogs'), click: () => shell.openPath(logDir) },
     { label: t('tray.about'), click: showAboutDialog },
     { type: 'separator' },
