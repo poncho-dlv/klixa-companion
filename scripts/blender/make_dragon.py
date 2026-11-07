@@ -55,10 +55,37 @@ NOSE_Y, NOSTRIL_X = 0.6, 2.4
 NOSTRIL_Z = muzzle_front(NOSTRIL_X, NOSE_Y) - 0.9
 PLANE_FRONT = muzzle_front(0, MOUTH_Y)  # bout du museau au niveau de la bouche
 RIM = math.sqrt(1 - ((MOUTH_Y - MY) / MRY) ** 2)  # le museau se resserre a la hauteur de la bouche
-# Machoire : meme longueur que le museau (avant = bout du museau, arriere = arriere du crane).
-JAW_BACK, JAW_TOP = -7.5, math.sqrt(1 - (1.8 / 4.6) ** 2)
-JAW_ZC = (PLANE_FRONT + JAW_BACK) / 2
-JAW_RZ = (PLANE_FRONT - JAW_BACK) / (2 * JAW_TOP)
+# Machoire inferieure = meme forme que le museau : un volume arriere large (il couvre menton et cou)
+# + un volume avant en coin, a bout pointu, aligne sur le bout du museau ; fusionnes en un seul.
+JB_ZC, JB_RZ = -1.5, 7.0
+JF_RZ, JF_SQUASH = 17.0, (0.85, 0.9, 1.45)
+JF_CY, JF_RY = MOUTH_Y - 2.4, 4.0
+JF_ZC = PLANE_FRONT - JF_RZ * (1 - ((MOUTH_Y - JF_CY) / JF_RY) ** (2 / JF_SQUASH[1])) ** (JF_SQUASH[2] / 2)
+JAW_PIECES = (  # (centre y, rayons, centre z, squash)
+    (MOUTH_Y - 1.8, (10.3, 4.6, JB_RZ), JB_ZC, (1.0, 1.0, 1.0)),
+    (JF_CY, (6.4, JF_RY, JF_RZ), JF_ZC, JF_SQUASH),
+)
+
+
+def jaw_half_width(z):
+    """Demi-largeur de la machoire au niveau de la bouche, a la profondeur z."""
+    best = 0.0
+    for cy, (rx, ry, rz), zc, (kx, ky, kz) in JAW_PIECES:
+        val = 1 - (abs(z - zc) / rz) ** (2 / kz) - ((MOUTH_Y - cy) / ry) ** (2 / ky)
+        if val > 0:
+            best = max(best, rx * val ** (kx / 2))
+    return best
+
+
+def jaw_bottom(x, z):
+    """Hauteur du dessous de la machoire en (x, z), ou None hors de la machoire."""
+    lowest = None
+    for cy, (rx, ry, rz), zc, (kx, ky, kz) in JAW_PIECES:
+        val = 1 - (abs(x) / rx) ** (2 / kx) - (abs(z - zc) / rz) ** (2 / kz)
+        if val > 0:
+            y = cy - ry * val ** (ky / 2)
+            lowest = y if lowest is None else min(lowest, y)
+    return lowest
 BRIDGE = ((0, 11.5, 4.0), (0, 9.5, 11.0), (0, 1.8, muzzle_front(0, 1.8) - 0.4))
 
 # Cranes et museau : dome large (couvre cheveux et casque), museau long en coin.
@@ -95,9 +122,14 @@ for side in (-1, 1):
 
 # Machoire : noeud "Jaw", ventre ocre, langue, dents inferieures, piques de machoire.
 jaw = lib.add_empty("Jaw", JAW_PIVOT)
-add_ellipsoid("Machoire", (0, MOUTH_Y - 1.8, JAW_ZC), (10.3, 4.6, JAW_RZ), ["peau", "bouche", "ventre"], parent=jaw,
-              origin=JAW_PIVOT, cut=("y", MOUTH_Y, "-"), cap_mat=1, smile=SMILE, lower_mat=(MOUTH_Y - 2.4, 2))
-add_ellipsoid("Langue", (0, MOUTH_Y - 0.2, JAW_ZC + 4.2), (2.4, 0.9, JAW_RZ * 0.6), ["langue"], parent=jaw, origin=JAW_PIVOT)
+jaw_parts = [
+    add_ellipsoid(f"MachoirePiece{i}", (0, cy, zc), radii, ["peau", "bouche", "ventre"], parent=jaw, origin=JAW_PIVOT,
+                  cut=("y", MOUTH_Y, "-"), cap_mat=1, smile=SMILE, lower_mat=(MOUTH_Y - 2.4, 2), squash=squash)
+    for i, (cy, radii, zc, squash) in enumerate(JAW_PIECES)
+]
+# keep_y=0 : le plan de la bouche est a la hauteur du pivot, donc a z=0 dans le repere local de la machoire.
+lib.merge_blend(jaw_parts, "Machoire", voxel=0.5, iterations=10, keep_y=0.0)
+add_ellipsoid("Langue", (0, MOUTH_Y - 0.2, PLANE_FRONT * 0.35), (2.2, 0.9, PLANE_FRONT * 0.5), ["langue"], parent=jaw, origin=JAW_PIVOT)
 # Cou : cache la gorge et le haut du cou de la personne (fixe, ne suit pas la bouche).
 add_ellipsoid("Cou", (0, -12.4, -3.0), (8.6, 5.4, 7.6), ["peau"])
 
@@ -110,16 +142,16 @@ for sx in (-1, 1):
         base = Vector((sx * x, -5.9, z))
         add_tube(f"DentHaut{tag}{k}", [base, base + Vector((0, -length * 0.55, 0.1)), base + Vector((0, -length, 0.15))],
                  [0.5, 0.3, 0.03], ["dent"], segments=8)
-    for k, (deg, length) in enumerate(((8, 2.5), (16, 2.2), (24, 1.9), (32, 1.6), (40, 1.3))):
-        a = math.radians(deg)
-        x, z = 9.6 * math.sin(a), JAW_ZC + JAW_TOP * JAW_RZ * math.cos(a)
+    for k, (dz, length) in enumerate(((1.4, 2.5), (3.6, 2.2), (5.8, 1.9), (8.0, 1.6), (10.2, 1.3))):
+        z = PLANE_FRONT - dz
+        x = max(0.6, jaw_half_width(z) - 0.5)
         base = Vector((sx * x, -6.4, z))
         add_tube(f"DentBas{tag}{k}", [base, base + Vector((0, length * 0.55, 0.1)), base + Vector((0, length, 0.15))],
                  [0.5, 0.3, 0.03], ["dent"], parent=jaw, origin=JAW_PIVOT, segments=8)
     # Piques de machoire : ils partent du flanc vers l'exterieur et l'arriere (suivent la bouche).
     for k, deg in enumerate((55, 75, 95, 115, 135)):
         a = math.radians(deg)
-        base = Vector((sx * 10.0 * math.sin(a), MOUTH_Y - 1.7, JAW_ZC + 0.98 * JAW_RZ * math.cos(a)))
+        base = Vector((sx * 10.0 * math.sin(a), MOUTH_Y - 1.7, JB_ZC + 0.98 * JB_RZ * math.cos(a)))
         size = 1.0 - 0.1 * k
         tip = base + Vector((sx * 3.8 * size, -1.6 * size, -3.4 * size))
         mid = (base + tip) / 2 + Vector((0, 0.5, 0))
@@ -129,7 +161,9 @@ for sx in (-1, 1):
 for k, (z, s) in enumerate(((PLANE_FRONT - 1.0, 0.7), (PLANE_FRONT - 4.0, 0.85), (PLANE_FRONT - 7.5, 0.95),
                            (PLANE_FRONT - 11.0, 1.05), (PLANE_FRONT - 14.5, 1.0), (PLANE_FRONT - 18.0, 0.85))):
     for x in (0.0,) if z > PLANE_FRONT - 5 else (-3.0, 3.0):
-        local_y = (MOUTH_Y - 1.8) - 4.6 * math.sqrt(max(0.0, 1 - (x / 10.3) ** 2 - ((z - JAW_ZC) / JAW_RZ) ** 2))
+        local_y = jaw_bottom(x, z)
+        if local_y is None:
+            continue
         base = Vector((x, local_y + 0.5, z))
         tip = base + Vector((x * 0.15, -3.3 * s, -1.4 * s))
         add_tube(f"PiqueMenton{k}{'' if x == 0 else ('G' if x < 0 else 'D')}", bezier(base, (base + tip) / 2 + Vector((0, 0, 0.5)), tip, 7),
