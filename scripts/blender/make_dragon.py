@@ -109,8 +109,8 @@ for side in (-1, 1):
     tag = "G" if side < 0 else "D"
     lib.build_eye(side, pos=(6.3, 9.2, 4.4), globe_dz=1.5, globe_r=2.6, globe_mat="oeil",
                   bump=((3.7, 3.3, 3.6), (0, -0.2, 0.0)),
-                  pupil=((0.3, 1.5, 0.2), 2.42, "pupille"),
-                  lid_radius=2.95, lid_open_cut=1.4)
+                  pupil=((0.32, 1.25, 0.2), 2.46, "pupille"),
+                  lid_radius=3.1, lid_open_cut=1.4)
     add_ellipsoid(f"Arcade{tag}", (side * 6.6, 11.6, 5.4), (4.4, 1.3, 2.9), ["peau"], rot=(-12, 0, side * 30))
     add_ellipsoid(f"ArcadeCoin{tag}", (side * 9.6, 10.6, 3.2), (2.2, 1.0, 2.0), ["peau"], rot=(-8, 0, side * 40))
     # Arete de pommette : de l'angle de l'oeil vers l'angle de la machoire.
