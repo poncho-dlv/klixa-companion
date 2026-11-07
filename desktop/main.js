@@ -15,7 +15,7 @@ import electronUpdaterPkg from 'electron-updater';
 import { createLogger, setLogFile } from '../src/logger.js';
 import { t, setLanguage, resolveLanguage } from '../src/i18n/core.js';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } = electron;
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const logDir = path.join(app.getPath('userData'), 'logs');
 setLogFile(path.join(logDir, 'companion.log'));
@@ -63,6 +63,70 @@ function trayImage() {
 function showWindow() {
   window?.show();
   window?.focus();
+}
+
+// --- Skins camera : fenetre de suivi du visage -------------------------------------------
+// La page `tracker.html` (servie par l'integration camskin) ouvre la camera, fait le suivi
+// et envoie les donnees a l'overlay OBS. Elle vit dans une fenetre du compagnon : cachee
+// tant qu'un skin est actif, visible (apercu) a la demande, detruite des qu'elle ne sert
+// plus (la camera est alors liberee). `backgroundThrottling: false` : sans ca, Chromium
+// ralentit une fenetre cachee a ~1 image/s.
+let trackerWindow = null;
+let trackingDemand = false;
+let camskinPort = 4777;
+
+function isCamskinOrigin(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname === '127.0.0.1' && url.port === String(camskinPort);
+  } catch {
+    return false;
+  }
+}
+
+function ensureTrackerWindow() {
+  if (trackerWindow && !trackerWindow.isDestroyed()) return trackerWindow;
+  trackerWindow = new BrowserWindow({
+    width: 960,
+    height: 600,
+    title: t('camskin.previewTitle'),
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false
+    }
+  });
+  trackerWindow.setMenuBarVisibility(false);
+  trackerWindow.loadURL(`http://127.0.0.1:${camskinPort}/tracker.html`);
+  trackerWindow.on('close', (event) => {
+    // Un skin est actif : on garde le suivi, la fenetre se cache seulement.
+    if (!quitting && trackingDemand) {
+      event.preventDefault();
+      trackerWindow.hide();
+    }
+  });
+  trackerWindow.on('closed', () => { trackerWindow = null; });
+  trackerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  trackerWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  return trackerWindow;
+}
+
+// Appelee par l'integration camskin : un skin vient d'etre active (true) ou retire (false).
+function setTrackingDemand(needed) {
+  trackingDemand = needed;
+  if (needed) {
+    ensureTrackerWindow();
+  } else if (trackerWindow && !trackerWindow.isDestroyed() && !trackerWindow.isVisible()) {
+    trackerWindow.destroy();
+  }
+}
+
+function openCameraPreview() {
+  const preview = ensureTrackerWindow();
+  preview.show();
+  preview.focus();
 }
 
 function createWindow() {
@@ -161,6 +225,8 @@ function buildRuntimeConfig(values) {
     const current = store.load();
     store.save({ ...current, DEVICES_TOKENS_JSON: tokensJson });
   };
+  camskinPort = runtimeConfig.camskin.port;
+  runtimeConfig.camskin.onTrackingDemand = setTrackingDemand;
   return runtimeConfig;
 }
 
@@ -172,6 +238,8 @@ async function restartRuntime(values) {
   // valeurs a jour, et remettre a {} entre-temps ferait clignoter chaque section en
   // « Desactive » a chaque sauvegarde de config, ce qu'on veut justement eviter.
   await runtime?.stop();
+  // Le runtime (et donc le skin actif) repart de zero : plus de demande de suivi.
+  setTrackingDemand(false);
   try {
     runtime = startCompanion(
       buildRuntimeConfig(values),
@@ -316,6 +384,14 @@ function registerIpc() {
     const huePort = Number.parseInt(submitted.HUE_BRIDGE_PORT || '443', 10);
     if (!Number.isInteger(huePort) || huePort < 1 || huePort > 65535) throw new Error(t('errors.huePortInvalid'));
     normalizedSubmitted.HUE_BRIDGE_PORT = String(huePort);
+    // Port de la page des skins camera (vide = defaut 4777).
+    if (String(submitted.CAMSKIN_PORT ?? '').trim() !== '') {
+      const camskinPortValue = Number.parseInt(submitted.CAMSKIN_PORT, 10);
+      if (!Number.isInteger(camskinPortValue) || camskinPortValue < 1 || camskinPortValue > 65535) throw new Error(t('errors.camskinPortInvalid'));
+      normalizedSubmitted.CAMSKIN_PORT = String(camskinPortValue);
+    } else {
+      normalizedSubmitted.CAMSKIN_PORT = '';
+    }
     // Sélection des lampes Hue utilisées avec Klixa (assistant du compagnon) : chaîne vide =
     // jamais choisie (Klixa garde sa sélection d'avant), sinon tableau JSON d'identifiants
     // normalisé (dédupliqué, borné) — un choix explicite peut être `[]`.
@@ -370,7 +446,7 @@ function registerIpc() {
     // plus necessaire (il couperait la liaison cloud pour rien) des qu'on sait laquelle
     // reconfigurer isolement. Reste sur restartRuntime seulement le pairing/disconnect
     // (qui changent CLOUD_WS_URL/COMPANION_TOKEN eux-memes, hors de ce handler).
-    if (['obs', 'streamerbot', 'hue'].includes(integrationId) && runtime?.reconfigureIntegration) {
+    if (['obs', 'streamerbot', 'hue', 'camskin'].includes(integrationId) && runtime?.reconfigureIntegration) {
       await runtime.reconfigureIntegration(integrationId, buildRuntimeConfig(next));
     } else {
       await restartRuntime(next);
@@ -461,6 +537,7 @@ function registerIpc() {
     await restartRuntime(next);
     return publicConfig(next);
   });
+  ipcMain.handle('camskin:preview', () => openCameraPreview());
   ipcMain.handle('update:status', () => updateState);
   ipcMain.handle('update:install', () => {
     const { autoUpdater } = electronUpdaterPkg;
@@ -622,6 +699,7 @@ function configureUpdates() {
 function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: t('tray.open'), click: showWindow },
+    { label: t('tray.cameraPreview'), click: openCameraPreview },
     { label: t('tray.openLogs'), click: () => shell.openPath(logDir) },
     { label: t('tray.about'), click: showAboutDialog },
     { type: 'separator' },
@@ -636,6 +714,14 @@ function applyTrayLanguage() {
 app.whenReady().then(async () => {
   app.setAppUserModelId('live.klixa.companion');
   store = new ConfigStore(app.getPath('userData'));
+  // Seule la page locale des skins camera peut utiliser la camera (le reste de l'app n'en a
+  // aucun besoin) : on remplace l'autorisation implicite d'Electron par une liste blanche.
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    callback(permission === 'media' && isCamskinOrigin(details.requestingUrl));
+  });
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => {
+    return permission === 'media' && isCamskinOrigin(origin);
+  });
   // Langue résolue une fois au démarrage (réglage explicite en config, sinon locale
   // système via Intl, cf. src/i18n/core.js) — reappliquée par le handler IPC
   // `language:set` des qu'elle change depuis les Paramètres, sans redémarrer le runtime.

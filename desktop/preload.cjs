@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('klixa', {
   devicesListTokens: () => ipcRenderer.invoke('devices:list-tokens'),
   devicesGenerateToken: (deviceId, name) => ipcRenderer.invoke('devices:generate-token', { deviceId, name }),
   devicesRevokeToken: (deviceId) => ipcRenderer.invoke('devices:revoke-token', { deviceId }),
+  camskinPreview: () => ipcRenderer.invoke('camskin:preview'),
   getStatus: () => ipcRenderer.invoke('runtime:status'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('auto-launch:set', enabled),
   setLanguage: (language) => ipcRenderer.invoke('language:set', language),

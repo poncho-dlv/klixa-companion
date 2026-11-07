@@ -3,8 +3,11 @@
   "entry": [
     "tests/**/*.test.js",
     "desktop/renderer/renderer.js",
-    "desktop/preload.cjs"
+    "desktop/preload.cjs",
+    "src/integrations/camskin/web/overlay.js",
+    "src/integrations/camskin/web/tracker.js"
   ],
+  "ignoreUnresolved": ["/vendor/vision_bundle.mjs"],
   "project": [
     "src/**/*.js",
     "desktop/**/*.js",

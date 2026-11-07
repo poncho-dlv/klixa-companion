@@ -33,6 +33,7 @@ export default {
     connexion: 'Connexion',
     integrationsGroup: 'Intégrations',
     devices: 'Appareils LAN',
+    camskin: 'Skins caméra',
     settings: 'Paramètres'
   },
   pages: {
@@ -41,6 +42,7 @@ export default {
     streamerbot: { title: 'Streamer.bot', description: 'Déclenche des actions Streamer.bot.' },
     hue: { title: 'Philips Hue', description: 'Appaire le bridge, choisis les lampes à utiliser avec Klixa et active Hue.' },
     devices: { title: 'Appareils LAN', description: 'Scripts et appareils tiers (Raspberry Pi, ESP...) connectés au compagnon.' },
+    camskin: { title: 'Skins caméra', description: 'Grenouille, chat, fleurs… sur ta caméra, déclenchés depuis Klixa.' },
     settings: { title: 'Paramètres', description: 'Réglages généraux du compagnon.' }
   },
   connexion: {
@@ -59,6 +61,14 @@ export default {
   },
   streamerbot: {
     enable: 'Activer Streamer.bot'
+  },
+  camskin: {
+    enable: 'Activer les skins caméra',
+    obsUrl: 'URL de la Source navigateur OBS',
+    copyUrl: 'Copier l’URL',
+    copied: 'Copié',
+    preview: 'Ouvrir l’aperçu caméra',
+    previewTitle: 'Klixa — Aperçu caméra'
   },
   hue: {
     enable: 'Activer Hue',
@@ -139,6 +149,7 @@ export default {
   },
   tray: {
     open: 'Ouvrir Klixa Companion',
+    cameraPreview: 'Aperçu caméra (skins)',
     openLogs: 'Ouvrir les logs',
     about: 'À propos',
     quit: 'Quitter'
@@ -172,6 +183,9 @@ export default {
     companionStarting: 'Compagnon en cours de démarrage, réessaie dans un instant',
     pairInstanceUrlInvalid: 'URL d’instance invalide (http:// ou https:// attendu)',
     unknownCommand: 'Commande inconnue : %name%',
+    camskinPortInvalid: 'Port des skins caméra invalide',
+    camskinUnknownSkin: 'Skin inconnu : %skin%',
+    camskinInvalidDuration: 'Durée invalide (entier en ms, entre 0 et %max%)',
     commandNotAllowed: 'Commande réservée au compagnon local : %name%',
     healthcheckTimeout: 'Healthcheck expiré après %timeoutMs% ms',
     obsConnectTimeout: 'Timeout de connexion (10 s)',

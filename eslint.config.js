@@ -72,4 +72,14 @@ export default [
     plugins: { sonarjs, 'no-unsanitized': noUnsanitized },
     rules: { ...bugRiskRules, ...noUnsanitizedRules },
   },
+  {
+    // Page des skins camera : servie par l'integration camskin et chargee dans une Source
+    // navigateur OBS (contexte navigateur, modules ES charges directement, pas de bundler).
+    files: ['src/integrations/camskin/web/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: { ...globals.browser },
+    },
+  },
 ];

@@ -33,6 +33,7 @@ export default {
     connexion: 'Connection',
     integrationsGroup: 'Integrations',
     devices: 'LAN devices',
+    camskin: 'Camera skins',
     settings: 'Settings'
   },
   pages: {
@@ -41,6 +42,7 @@ export default {
     streamerbot: { title: 'Streamer.bot', description: 'Trigger Streamer.bot actions.' },
     hue: { title: 'Philips Hue', description: 'Pair the bridge, choose the lights to use with Klixa and enable Hue.' },
     devices: { title: 'LAN devices', description: 'Third-party scripts and devices (Raspberry Pi, ESP...) connected to the companion.' },
+    camskin: { title: 'Camera skins', description: 'Frog, cat, flowers… on your camera, triggered from Klixa.' },
     settings: { title: 'Settings', description: 'General companion settings.' }
   },
   connexion: {
@@ -59,6 +61,14 @@ export default {
   },
   streamerbot: {
     enable: 'Enable Streamer.bot'
+  },
+  camskin: {
+    enable: 'Enable camera skins',
+    obsUrl: 'OBS Browser Source URL',
+    copyUrl: 'Copy URL',
+    copied: 'Copied',
+    preview: 'Open camera preview',
+    previewTitle: 'Klixa — Camera preview'
   },
   hue: {
     enable: 'Enable Hue',
@@ -139,6 +149,7 @@ export default {
   },
   tray: {
     open: 'Open Klixa Companion',
+    cameraPreview: 'Camera preview (skins)',
     openLogs: 'Open logs',
     about: 'About',
     quit: 'Quit'
@@ -172,6 +183,9 @@ export default {
     companionStarting: 'Companion is starting, try again in a moment',
     pairInstanceUrlInvalid: 'Invalid instance URL (http:// or https:// expected)',
     unknownCommand: 'Unknown command: %name%',
+    camskinPortInvalid: 'Invalid camera skins port',
+    camskinUnknownSkin: 'Unknown skin: %skin%',
+    camskinInvalidDuration: 'Invalid duration (integer in ms, between 0 and %max%)',
     commandNotAllowed: 'Command reserved to the local companion: %name%',
     healthcheckTimeout: 'Healthcheck timed out after %timeoutMs% ms',
     obsConnectTimeout: 'Connection timeout (10s)',

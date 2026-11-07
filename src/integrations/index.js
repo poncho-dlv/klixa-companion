@@ -1,6 +1,7 @@
 import { createHueIntegration } from './hue.js';
 import { createObsIntegration } from './obs.js';
 import { createStreamerbotIntegration } from './streamerbot.js';
+import { createCamskinIntegration } from './camskin.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('integrations');
@@ -11,7 +12,7 @@ const log = createLogger('integrations');
  * ajouter ici les futures intégrations locales (Streamer.bot, etc.).
  */
 export function registerIntegrations(registry, config, { emitEvent } = {}) {
-  for (const id of ['hue', 'obs', 'streamerbot']) registerIntegration(registry, id, config, { emitEvent });
+  for (const id of ['hue', 'obs', 'streamerbot', 'camskin']) registerIntegration(registry, id, config, { emitEvent });
 }
 
 export function registerIntegration(registry, id, config, { emitEvent } = {}) {
@@ -36,6 +37,14 @@ export function registerIntegration(registry, id, config, { emitEvent } = {}) {
       registry.register(createStreamerbotIntegration(config.streamerbot, { emitEvent }));
     } catch (err) {
       log.error('Intégration Streamer.bot non chargée', err.message);
+    }
+  }
+
+  if (id === 'camskin' && config.camskin?.enabled) {
+    try {
+      registry.register(createCamskinIntegration(config.camskin, { emitEvent }));
+    } catch (err) {
+      log.error('Intégration skins caméra non chargée', err.message);
     }
   }
 }

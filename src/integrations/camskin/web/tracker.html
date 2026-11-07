@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Klixa - skins camera (suivi)</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="tracker">
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted></video>
+<div id="ui">
+  <select id="device"></select>
+  <select id="skin"></select>
+  <label><input type="checkbox" id="mirror" checked> Miroir</label>
+  <label><input type="checkbox" id="debug"> Points</label>
+  <span id="status">...</span>
+</div>
+<script type="module" src="/tracker.js"></script>
+</body>
+</html>

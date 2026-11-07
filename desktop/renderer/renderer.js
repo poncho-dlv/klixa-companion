@@ -50,6 +50,10 @@ const obsEnabled = document.querySelector('input[name="OBS_ENABLED"]');
 const obsConnectionBtn = document.querySelector('#obsConnectionBtn');
 const streamerbotEnabled = document.querySelector('input[name="SB_ENABLED"]');
 const streamerbotConnectionBtn = document.querySelector('#streamerbotConnectionBtn');
+const camskinPort = document.querySelector('#camskinPort');
+const camskinUrl = document.querySelector('#camskinUrl');
+const camskinCopyBtn = document.querySelector('#camskinCopyBtn');
+const camskinPreviewBtn = document.querySelector('#camskinPreviewBtn');
 const integrationStatusEls = new Map(
   [...document.querySelectorAll('.integration-status[data-integration]')].map((el) => [el.dataset.integration, el])
 );
@@ -75,7 +79,8 @@ const INTEGRATION_PLAIN_FIELDS = {
 };
 const INTEGRATION_ENABLED_KEYS = {
   obs: 'OBS_ENABLED',
-  streamerbot: 'SB_ENABLED'
+  streamerbot: 'SB_ENABLED',
+  camskin: 'CAMSKIN_ENABLED'
 };
 
 // Champs secrets (mot de passe / token) : jamais reaffiches en clair. Une fois
@@ -821,6 +826,19 @@ function renderCloudStatus(cloudStatus) {
   renderHeaderStatus();
 }
 
+// URL a coller dans la Source navigateur OBS : suit le port saisi (defaut 4777).
+function renderCamskinUrl() {
+  const port = Number.parseInt(camskinPort.value, 10);
+  camskinUrl.value = `http://127.0.0.1:${Number.isInteger(port) && port > 0 ? port : 4777}/`;
+}
+camskinPort.addEventListener('input', renderCamskinUrl);
+camskinCopyBtn.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(camskinUrl.value);
+  camskinCopyBtn.textContent = t('camskin.copied');
+  setTimeout(() => { camskinCopyBtn.textContent = t('camskin.copyUrl'); }, 1500);
+});
+camskinPreviewBtn.addEventListener('click', () => window.klixa.camskinPreview());
+
 function setForm(config) {
   lastConfig = config;
   configLoaded = true;
@@ -830,6 +848,7 @@ function setForm(config) {
     else if (config[field.name] !== undefined) field.value = config[field.name];
   }
   autoLaunch.checked = Boolean(config.AUTO_LAUNCH);
+  renderCamskinUrl();
   languageSelect.value = config.LANGUAGE || 'system';
   renderPairingUi();
   renderHueUi();

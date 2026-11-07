@@ -24,6 +24,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21",
     "@streamerbot/client": "^1.12.2",
     "dotenv": "^16.4.5",
     "electron-updater": "^6.6.2",
@@ -51,6 +52,7 @@
     "files": [
       "desktop/**/*",
       "src/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "asar": {

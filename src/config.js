@@ -61,6 +61,12 @@ return {
     password: env.SB_PASSWORD || '',
     scheme: env.SB_SCHEME || 'ws',
   },
+  camskin: {
+    // Skins camera : page locale (suivi du visage + skins) a charger en Source navigateur OBS.
+    // Loopback uniquement ; le port est celui de l'URL a coller dans OBS.
+    enabled: bool(env.CAMSKIN_ENABLED, true),
+    port: int(env.CAMSKIN_PORT, 4777),
+  },
   devices: {
     // Appareils LAN génériques (RPi, ESP...) qui se connectent AU compagnon en WS
     // sortant sur /devices/ws et s'annoncent avec leurs éléments pilotables (switch
