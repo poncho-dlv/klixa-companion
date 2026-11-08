@@ -76,6 +76,21 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Cache du binaire Electron
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: electron-win-${{ hashFiles('package-lock.json') }}
+      # Le téléchargement d'Electron (releases GitHub) renvoie parfois des 504 :
+      # on le fait ici avec des retries plutôt qu'au premier require('electron') des tests.
+      - name: Télécharger Electron (retries)
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5 6; do
+            node node_modules/electron/install.js && exit 0
+            echo "Tentative $i échouée, nouvel essai dans 30 s"; sleep 30
+          done
+          exit 1
       - run: npm test
       - run: npm run dist:win
       - uses: actions/upload-artifact@v7
