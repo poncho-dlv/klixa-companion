@@ -131,6 +131,12 @@ export function createCloudLink(config, registry, { onCloudStatus = () => {} } =
       notifyConnected({ connected: true, features: msg.features && typeof msg.features === 'object' ? msg.features : {} });
       return;
     }
+    // Le plan de l'espace a changé en cours de connexion (abonnement, essai, bascule de la
+    // console d'instance) : le cloud repousse les features à jour, sans reconnexion.
+    if (msg.type === 'features') {
+      notifyConnected({ connected: true, features: msg.features && typeof msg.features === 'object' ? msg.features : {} });
+      return;
+    }
     if (msg.type !== 'command') return;
     const { id, name, payload } = msg;
     if (typeof id !== 'string' || !id.trim()) {

@@ -109,6 +109,8 @@ const ICON_WARNING = 'M256 0c14.7 0 28.2 8.1 35.2 21l216 400c6.7 12.4 6.4 27.4-.
 // config, quelle que soit la page affichee — sans consequence puisque les autres
 // pages refletent deja l'etat persiste tant qu'elles n'ont pas ete modifiees sans
 // sauvegarder.
+const lockBanner = document.querySelector('#lockBanner');
+const lockBannerMessage = document.querySelector('#lockBannerMessage');
 const pageTitle = document.querySelector('#pageTitle');
 const pageDescription = document.querySelector('#pageDescription');
 const navButtons = new Map(
@@ -128,20 +130,19 @@ function setActivePage(id) {
   pageDescription.textContent = t(`pages.${id}.description`);
 }
 
-// Tant que le compagnon n'est pas lie a une console Klixa, les pages d'integration
-// n'ont rien a configurer de fonctionnel (rien a connecter) : on les grise dans le
-// menu et on force le retour sur la page Connexion.
-function setNavLocked(locked) {
-  for (const [pid, btn] of navButtons) {
-    if (pid === 'connexion' || pid === 'settings') continue;
-    btn.disabled = locked;
-  }
-  if (locked) { if (activePage !== 'settings') setActivePage('connexion'); }
-  else if (activePage === 'connexion') setActivePage('obs');
-}
+// Le compagnon n'est utilisable que lie ET connecte a la console Klixa : c'est elle qui
+// annonce les fonctionnalites du plan de l'espace (`cloudStatus.features`). Pages
+// d'integration verrouillees selon l'etat :
+//  - 'unlinked' : pas lie a une console -> menu grise, retour sur la page Connexion ;
+//  - 'offline'  : lie mais liaison coupee (redemarrage, reseau) -> page grisee + bandeau,
+//                 SANS redirection (sinon la page sauterait a chaque sauvegarde) ;
+//  - 'premium'  : connecte mais fonctionnalite non incluse dans le plan de l'espace.
+const LOCK_EXEMPT_PAGES = new Set(['connexion', 'settings']);
+// Page -> cle de fonctionnalite du plan (`describePlanFeatures` cote cloud).
+const FEATURE_PAGES = { devices: 'devices', camskin: 'camskin' };
 
 for (const [pid, btn] of navButtons) {
-  btn.addEventListener('click', () => setActivePage(pid));
+  btn.addEventListener('click', () => { setActivePage(pid); applyPageLocks(); });
 }
 
 setActivePage('connexion');
@@ -179,7 +180,38 @@ function renderPairingUi() {
   // Rien à faire sur cette page une fois lié (le "Déconnecter" de la sidebar suffit) :
   // masquée plutôt que juste désactivée.
   navButtons.get('connexion').hidden = linked;
-  setNavLocked(!linked);
+  applyPageLocks();
+}
+
+function getPageLock(pid) {
+  if (LOCK_EXEMPT_PAGES.has(pid)) return null;
+  if (!lastConfig.CLOUD_WS_URL) return 'unlinked';
+  if (!lastCloudStatus.connected) return 'offline';
+  const featureKey = FEATURE_PAGES[pid];
+  if (featureKey && lastCloudStatus.features?.[featureKey] !== true) return 'premium';
+  return null;
+}
+
+function applyPageLocks() {
+  const unlinked = !lastConfig.CLOUD_WS_URL;
+  for (const [pid, btn] of navButtons) {
+    const lock = getPageLock(pid);
+    btn.disabled = lock === 'unlinked';
+    if (lock === 'premium') btn.dataset.badge = t('nav.premiumBadge');
+    else delete btn.dataset.badge;
+    const section = pageSections.get(pid);
+    if (section) {
+      section.inert = lock === 'offline' || lock === 'premium';
+      section.classList.toggle('page-locked', section.inert);
+    }
+  }
+  if (unlinked) { if (activePage !== 'settings') setActivePage('connexion'); }
+  else if (activePage === 'connexion') setActivePage('obs');
+
+  const activeLock = getPageLock(activePage);
+  const messageKey = activeLock === 'offline' ? 'lock.offline' : activeLock === 'premium' ? 'lock.premium' : '';
+  lockBanner.hidden = !messageKey;
+  lockBannerMessage.textContent = messageKey ? t(messageKey) : '';
 }
 
 function isHueEnabled() {
@@ -824,6 +856,7 @@ window.klixa.onUpdateStatus(renderUpdateStatus);
 function renderCloudStatus(cloudStatus) {
   lastCloudStatus = cloudStatus || { connected: false, features: {} };
   renderHeaderStatus();
+  applyPageLocks();
 }
 
 // URL a coller dans la Source navigateur OBS : suit le port saisi (defaut 4777).

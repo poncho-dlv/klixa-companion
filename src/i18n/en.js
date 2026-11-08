@@ -34,7 +34,12 @@ export default {
     integrationsGroup: 'Integrations',
     devices: 'LAN devices',
     camskin: 'Camera skins',
-    settings: 'Settings'
+    settings: 'Settings',
+    premiumBadge: 'Premium'
+  },
+  lock: {
+    offline: 'Connecting to the Klixa console… Settings are available as soon as the companion is connected.',
+    premium: 'This feature is not included in your Klixa space\'s plan (Premium only).'
   },
   pages: {
     connexion: { title: 'Klixa connection', description: 'Link this companion to your Klixa console.' },

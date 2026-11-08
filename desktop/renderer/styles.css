@@ -66,6 +66,8 @@ body{background:var(--bg-base)}
 .config-button:hover:not(:disabled){background:var(--bg-elevated);color:var(--text)}
 .config-button.active{background:var(--accent-subtle);color:var(--accent-light);box-shadow:inset 3px 0 0 var(--accent)}
 .config-button:disabled{opacity:.4;cursor:not-allowed}
+.config-button[data-badge]::after{content:attr(data-badge);margin-left:8px;padding:1px 6px;border:1px solid var(--accent);border-radius:999px;font-size:10px;color:var(--accent-light)}
+.page.page-locked{opacity:.45}
 .config-button[hidden]{display:none}
 
 .main-content{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
