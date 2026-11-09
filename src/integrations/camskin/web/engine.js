@@ -1,7 +1,8 @@
 // Moteur de suivi du visage : independant de toute sortie (apercu, overlay OBS, et plus tard
 // camera virtuelle). Il transforme une image video en un "visage" normalise (position,
 // taille, inclinaison, ouverture de la bouche...) que les skins savent dessiner.
-import { FaceLandmarker, FilesetResolver } from '/vendor/vision_bundle.mjs';
+import { FaceLandmarker, PoseLandmarker, FilesetResolver } from '/vendor/vision_bundle.mjs';
+import { BODY_LANDMARKS } from './body-rig.js';
 
 // Index des landmarks MediaPipe utilises (maillage de 478 points).
 const L = { eyeA: 33, eyeB: 263, nose: 1, mouthTop: 13, mouthBottom: 14 };
@@ -28,12 +29,49 @@ async function createLandmarker() {
   }
 }
 
+async function createPoseLandmarker() {
+  const fileset = await FilesetResolver.forVisionTasks('/vendor/wasm');
+  const base = { modelAssetPath: '/models/pose_landmarker_lite.task' };
+  const options = { runningMode: 'VIDEO', numPoses: 1 };
+  try {
+    return await PoseLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...base, delegate: 'GPU' } });
+  } catch (error) {
+    console.warn('Pose : GPU indisponible, repli CPU', error?.message);
+    return PoseLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...base, delegate: 'CPU' } });
+  }
+}
+
+// Le corps bouge moins vite que le visage et le suivi du corps coute cher : une image sur deux.
+const POSE_EVERY = 2;
+
 /**
- * @returns {Promise<{ delegate: string, detect: (video: HTMLVideoElement, landmarks?: boolean) => { face: object|null, landmarks: object[]|null }, reset: () => void }>}
+ * @returns {Promise<{ delegate: string, detect: (video: HTMLVideoElement, landmarks?: boolean, body?: boolean) => { face: object|null, landmarks: object[]|null }, reset: () => void }>}
  */
 export async function createFaceEngine() {
   const { landmarker, delegate } = await createLandmarker();
   let smooth = null;
+  // Suivi du corps : charge a la premiere demande (inutile pour un skin sans corps).
+  let poseLandmarker = null;
+  let poseLoading = false;
+  let lastBody = null;
+  let poseFrame = 0;
+
+  function ensurePose() {
+    if (poseLandmarker || poseLoading) return;
+    poseLoading = true;
+    createPoseLandmarker()
+      .then((landmarker) => { poseLandmarker = landmarker; })
+      .catch((error) => { console.error('Suivi du corps indisponible', error); });
+  }
+
+  // Points utiles du corps : [x, y, z monde (m), visibilite], dans l'ordre de BODY_LANDMARKS.
+  function detectBody(video) {
+    const res = poseLandmarker.detectForVideo(video, performance.now());
+    const lms = res.landmarks?.[0];
+    const world = res.worldLandmarks?.[0];
+    if (!lms || !world) return null;
+    return BODY_LANDMARKS.map((i) => [round4(lms[i].x), round4(lms[i].y), round4(world[i].z), Math.round((lms[i].visibility ?? 0) * 100) / 100]);
+  }
 
   // Repere visage derive des landmarks, lisse par moyenne exponentielle. Coordonnees en
   // pixels de l'image video (w x h) : la sortie met a l'echelle selon sa propre taille.
@@ -96,8 +134,9 @@ export async function createFaceEngine() {
     delegate,
     reset() {
       smooth = null;
+      lastBody = null;
     },
-    detect(video, withLandmarks = false) {
+    detect(video, withLandmarks = false, withBody = false) {
       const w = video.videoWidth;
       const h = video.videoHeight;
       const res = landmarker.detectForVideo(video, performance.now());
@@ -107,7 +146,15 @@ export async function createFaceEngine() {
         return { face: null, landmarks: null };
       }
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));
-      return { face: buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data), landmarks: withLandmarks ? lms : null };
+      const face = buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data);
+      if (withBody) {
+        ensurePose();
+        if (poseLandmarker && poseFrame++ % POSE_EVERY === 0) lastBody = detectBody(video);
+        if (lastBody) face.body = lastBody;
+      } else {
+        lastBody = null;
+      }
+      return { face, landmarks: withLandmarks ? lms : null };
     }
   };
 }

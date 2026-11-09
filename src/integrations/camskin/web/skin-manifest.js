@@ -42,6 +42,39 @@ function optionalNumber(value, fallback, min, max) {
 }
 
 /**
+ * Section `body` du manifeste : corps (torse, cou, bras) fait de pieces rigides pilotees par la pose
+ * du corps. Longueurs en cm (celles du modele au repos), `restShoulder` = largeur d'epaules du modele.
+ * @returns {object|null} la section normalisee, ou null si le skin n'a pas de corps
+ */
+function normalizeBody(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw.model !== 'string' || !/^[\w./-]{1,120}\.(glb|gltf)$/i.test(raw.model) || raw.model.includes('..')) {
+    throw new Error('body.model invalide (chemin relatif vers un .glb/.gltf attendu)');
+  }
+  const lengths = raw.lengths ?? {};
+  return {
+    model: raw.model,
+    thickness: optionalNumber(raw.thickness, 1, 0.3, 3),
+    depthGain: optionalNumber(raw.depthGain, 0.6, -1.5, 1.5),
+    restShoulder: optionalNumber(raw.restShoulder, 40, 10, 100),
+    neckAnchor: vec3(raw.neckAnchor, [0, -13, -3], 60),
+    neckBase: optionalNumber(raw.neckBase, 0.12, -0.5, 0.5),
+    wings: {
+      restDeg: optionalNumber(raw.wings?.restDeg, 0, -30, 60),
+      flapDeg: optionalNumber(raw.wings?.flapDeg, 8, 0, 40),
+      periodSec: optionalNumber(raw.wings?.periodSec, 2.6, 0.5, 10)
+    },
+    lengths: {
+      torso: optionalNumber(lengths.torso, 45, 5, 150),
+      neck: optionalNumber(lengths.neck, 14, 2, 80),
+      upperArm: optionalNumber(lengths.upperArm, 28, 5, 100),
+      forearm: optionalNumber(lengths.forearm, 26, 5, 100),
+      hand: optionalNumber(lengths.hand, 10, 2, 50)
+    }
+  };
+}
+
+/**
  * Valide et complete le manifeste d'un skin 3D (`manifest.json`). Unites : centimetres, dans le
  * repere "visage canonique" de MediaPipe (origine au centre de la tete, +Y vers le haut, +Z
  * vers l'avant du visage). Les angles sont en degres.
@@ -50,7 +83,10 @@ function optionalNumber(value, fallback, min, max) {
  * @returns {{ model: string, position: number[], rotation: number[], scale: number,
  *   occluder: { enabled: boolean, position: number[], radii: number[] },
  *   jaw: { node: string, axis: number[], maxAngleDeg: number, gain: number, lipGain: number, curve: number }|null,
- *   stabilize: { noseHold: number }|null, morphGains: Record<string, number>,
+ *   stabilize: { noseHold: number }|null,
+ *   body: { model: string, thickness: number, depthGain: number, restShoulder: number, neckAnchor: number[], neckBase: number,
+ *     lengths: { torso: number, neck: number, upperArm: number, forearm: number, hand: number } }|null,
+ *   morphGains: Record<string, number>,
  *   eyes: { left: string|null, right: string|null, maxYawDeg: number, maxPitchDeg: number, gain: number }|null,
  *   breath: { morph: string, periodSec: number, amount: number }|null,
  *   texture: { materials: string[], scale: number, blotch: number, bump: number, scales: number }|null,
@@ -126,6 +162,7 @@ export function normalizeSkinManifest(raw) {
       morphGains[name] = optionalNumber(value, 1, 0, 6);
     }
   }
+  const body = normalizeBody(raw.body);
   const light = raw.light ?? {};
   return {
     model: raw.model,
@@ -142,6 +179,7 @@ export function normalizeSkinManifest(raw) {
     breath,
     texture,
     stabilize,
+    body,
     morphGains,
     morphGain: optionalNumber(raw.morphGain, 1, 0, 4),
     light: { ambient: optionalNumber(light.ambient, 1.1, 0, 10), key: optionalNumber(light.key, 1.6, 0, 10) }

@@ -2,7 +2,7 @@
 // elle qui ouvre la camera (webcam, ou "OBS Virtual Camera" pour partager la vraie webcam
 // avec OBS) et envoie les donnees de visage a l'overlay OBS via le serveur local.
 import { createFaceEngine } from './engine.js';
-import { SKINS, is3D } from './skins.js';
+import { SKINS, is3D, hasBody } from './skins.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -15,6 +15,7 @@ const state = {
   serverSkin: null,
   overlays: 0,
   mirror: true,
+  body: true,
   debug: false,
   info3d: '',
   error: ''
@@ -24,6 +25,7 @@ $('skin').add(new Option('Auto (Klixa)', ''));
 for (const [id, skin] of Object.entries(SKINS)) $('skin').add(new Option(skin.label, id));
 $('skin').onchange = (e) => { state.override = e.target.value; };
 $('mirror').onchange = (e) => { state.mirror = e.target.checked; };
+$('body').onchange = (e) => { state.body = e.target.checked; };
 $('debug').onchange = (e) => { state.debug = e.target.checked; };
 
 // --- Rendu 3D (a la demande) et calibrage ----------------------------------------------
@@ -62,7 +64,8 @@ function saveCalibration(skinId) {
     ...(m.jaw ? { jaw: m.jaw } : {}),
     ...(m.eyes ? { eyes: m.eyes } : {}),
     ...(m.texture ? { texture: m.texture } : {}),
-    ...(m.stabilize ? { stabilize: m.stabilize } : {})
+    ...(m.stabilize ? { stabilize: m.stabilize } : {}),
+    ...(m.body ? { body: m.body } : {})
   }));
 }
 
@@ -113,6 +116,17 @@ function buildCalibration(skinId) {
       renderer3d.patchManifest(skinId, { eyes: { ...renderer3d.getManifest(skinId).eyes, gain: value } });
     });
   }
+  if (manifest.body) {
+    addRow('Corps : epaisseur', 0.4, 2, 0.05, manifest.body.thickness, (value) => {
+      renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, thickness: value } });
+    });
+    addRow('Corps : profondeur', -1, 1.5, 0.05, manifest.body.depthGain, (value) => {
+      renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, depthGain: value } });
+    });
+    addRow('Cou : accroche', 0, 0.5, 0.01, manifest.body.neckBase, (value) => {
+      renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, neckBase: value } });
+    });
+  }
   if (manifest.stabilize) {
     addRow('Nez : maintien tete', 0, 1, 0.05, manifest.stabilize.noseHold, (value) => {
       renderer3d.patchManifest(skinId, { stabilize: { noseHold: value } });
@@ -152,6 +166,7 @@ $('calib-copy').onclick = async () => {
   if (m.breath) out.breath = m.breath;
   if (m.texture) out.texture = m.texture;
   if (m.stabilize) out.stabilize = m.stabilize;
+  if (m.body) out.body = m.body;
   if (Object.keys(m.morphGains).length) out.morphGains = m.morphGains;
   await navigator.clipboard.writeText(JSON.stringify(out, null, 2));
   $('calib-copy').textContent = 'Copie !';
@@ -290,7 +305,8 @@ async function main() {
       // Sans skin a afficher, on ne lance pas l'inference (la fenetre reste une simple camera).
       if (state.override || state.serverSkin || state.debug) {
         const t = performance.now();
-        result = engine.detect(video, state.debug);
+        const skinId = state.override || state.serverSkin;
+        result = engine.detect(video, state.debug, state.body && hasBody(SKINS[skinId]));
         stats.inferMs.push(performance.now() - t);
         if (state.serverSkin) send(result.face);
       } else {

@@ -31,6 +31,7 @@ function polygon(ctx, pts, fill) {
 const frog = {
   label: 'Grenouille',
   model: '/models/skins/frog/manifest.json',
+  body: true,
 };
 
 const cat = {
@@ -95,9 +96,16 @@ const flower = {
 const dragon = {
   label: 'Dragon',
   model: '/models/skins/dragon/manifest.json',
+  // Le manifeste decrit aussi un corps : le suivi calcule alors la pose du corps (epaules, bras).
+  body: true,
 };
 
 export const SKINS = { frog, cat, flower, dragon };
+
+/** Vrai si le skin a un corps : le suivi doit calculer la pose du corps en plus du visage. */
+export function hasBody(skin) {
+  return skin?.body === true;
+}
 
 /** Vrai si le skin est rendu en 3D (manifeste + modele glTF) plutot qu'en dessin 2D. */
 export function is3D(skin) {

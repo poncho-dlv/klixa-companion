@@ -9,6 +9,7 @@ import { t } from '../i18n/core.js';
 import { isAllowedOrigin, isAllowedRequestHost } from '../local-server.js';
 import { SKINS } from './camskin/web/skins.js';
 import { sanitizePoseAndBlend } from './camskin/web/skin-manifest.js';
+import { sanitizeBody } from './camskin/web/body-rig.js';
 
 const log = createLogger('camskin');
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -139,6 +140,12 @@ export function sanitizeFace(raw) {
   // Pose 3D et blendshapes : facultatifs (skins 3D), refuses s'ils sont mal formes.
   const extra = sanitizePoseAndBlend(raw);
   if (!extra) return null;
+  // Points du corps (skins avec corps) : facultatifs, refuses s'ils sont mal formes.
+  if (raw.body !== undefined && raw.body !== null) {
+    const body = sanitizeBody(raw.body);
+    if (!body) return null;
+    return { ...face, ...extra, body };
+  }
   return { ...face, ...extra };
 }
 

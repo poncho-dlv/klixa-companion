@@ -68,5 +68,24 @@
     "noseSneerRight": 2.4,
     "mouthUpperUpLeft": 2.0,
     "mouthUpperUpRight": 2.0
+  },
+  "body": {
+    "model": "frog-body.glb",
+    "thickness": 1.0,
+    "depthGain": 0.6,
+    "restShoulder": 40,
+    "neckAnchor": [
+      0,
+      -13,
+      -3
+    ],
+    "neckBase": 0.12,
+    "lengths": {
+      "torso": 45,
+      "neck": 14,
+      "upperArm": 28,
+      "forearm": 26,
+      "hand": 10
+    }
   }
 }

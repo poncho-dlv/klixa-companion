@@ -7,6 +7,7 @@
 // camera : le skin s'aligne sur l'image quel que soit le vrai champ de la webcam.
 import * as THREE from '/vendor-three/three.module.js';
 import { GLTFLoader } from '/vendor-three-addons/loaders/GLTFLoader.js';
+import { solveBody, blendSkeleton, segmentFrame, torsoFrame } from './body-rig.js';
 import { BLEND_NAMES, normalizeSkinManifest, resolveModelUrl, jawAngle, gazeAngles, breathValue, poseHoldWeight, smoothingFactor, isBlendName } from './skin-manifest.js';
 
 const FOV = 63;
@@ -14,7 +15,11 @@ const POSE_TAU = 0.04; // s : lissage de la pose (suivi ~30 images/s, affichage 
 const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
+const BODY_TAU = 0.07; // s : lissage du squelette (pose du corps ~15 images/s)
 const RETRY_MS = 10000;
+// Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.
+const BODY_SINGLE = ['Torso', 'Neck'];
+const BODY_PAIRED = ['Wing', 'UpperArm', 'Forearm', 'Hand', 'Shoulder', 'Elbow', 'Wrist'];
 const DEG = Math.PI / 180;
 
 const v = (a) => new THREE.Vector3(a[0], a[1], a[2]);
@@ -148,6 +153,136 @@ export function createSkin3DRenderer({ canvas } = {}) {
     occluder.material.needsUpdate = true;
   }
 
+  // --- Corps : pieces rigides pilotees par le squelette (pose MediaPipe) -----------------------
+  let skeleton = null;
+  const basis = new THREE.Matrix4();
+  const bx = new THREE.Vector3();
+  const by = new THREE.Vector3();
+  const bz = new THREE.Vector3();
+  const neckPoint = new THREE.Vector3();
+  const flapQuat = new THREE.Quaternion();
+  const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+  async function loadBody(entry, manifestUrl) {
+    const spec = entry.manifest.body;
+    const body = { status: 'loading', group: new THREE.Group(), parts: {} };
+    entry.body = body;
+    try {
+      const gltf = await loader.loadAsync(resolveModelUrl(manifestUrl, spec.model));
+      gltf.scene.updateMatrixWorld(true);
+      const sceneInverse = gltf.scene.matrixWorld.clone().invert();
+      const templates = {};
+      gltf.scene.traverse((node) => {
+        if (BODY_SINGLE.includes(node.name) || BODY_PAIRED.includes(node.name)) templates[node.name] = node;
+        const texture = entry.manifest.texture;
+        if (texture && node.isMesh && texture.materials.includes(node.material?.name)) {
+          const offset = new THREE.Vector3().setFromMatrixPosition(sceneInverse.clone().multiply(node.matrixWorld));
+          node.material = node.material.clone();
+          patchSkinMaterial(node.material, { ...entry.textureUniforms, uSkinOffset: { value: offset } });
+        }
+      });
+      for (const name of [...BODY_SINGLE, ...BODY_PAIRED]) {
+        if (!templates[name] && name !== 'Wing') console.warn(`Skin corps : noeud "${name}" introuvable`);
+      }
+      const spawn = (name) => {
+        const node = templates[name]?.clone(true);
+        if (!node) return null;
+        node.visible = false;
+        body.group.add(node);
+        return node;
+      };
+      for (const name of BODY_SINGLE) body.parts[name] = spawn(name);
+      for (const name of BODY_PAIRED) body.parts[name] = [spawn(name), spawn(name)];
+      body.group.visible = false;
+      body.status = 'ready';
+      if (active === entry) scene.add(body.group);
+    } catch (error) {
+      console.error('Corps du skin : chargement impossible', error);
+      body.status = 'failed';
+    }
+  }
+
+  function hideBody(entry) {
+    skeleton = null;
+    if (entry?.body?.group) entry.body.group.visible = false;
+  }
+
+  /** Oriente et dimensionne un noeud selon le repere d'un segment (+Y du modele vers l'extremite). */
+  function placePart(node, frame, restLength, thick) {
+    if (!node) return;
+    basis.makeBasis(bx.fromArray(frame.x), by.fromArray(frame.y), bz.fromArray(frame.z));
+    node.quaternion.setFromRotationMatrix(basis);
+    node.position.fromArray(frame.position);
+    node.scale.set(thick, Math.min(3, Math.max(0.3, frame.length / restLength)), thick);
+    node.visible = true;
+  }
+
+  /** Noeud ponctuel (articulation) : meme orientation que le segment, echelle uniforme. */
+  function placeJoint(node, frame, position, thick) {
+    if (!node) return;
+    basis.makeBasis(bx.fromArray(frame.x), by.fromArray(frame.y), bz.fromArray(frame.z));
+    node.quaternion.setFromRotationMatrix(basis);
+    node.position.fromArray(position);
+    node.scale.setScalar(thick);
+    node.visible = true;
+  }
+
+  function updateBody(entry, face, dt) {
+    const body = entry.body;
+    const spec = entry.manifest.body;
+    if (!body || body.status !== 'ready' || !face.body) {
+      hideBody(entry);
+      return;
+    }
+    const raw = solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
+      fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, lengths: spec.lengths
+    });
+    if (!raw) {
+      hideBody(entry);
+      return;
+    }
+    skeleton = blendSkeleton(skeleton, raw, smoothingFactor(dt, BODY_TAU));
+    const thick = skeleton.scale * spec.thickness;
+    const rest = spec.lengths;
+    const torso = torsoFrame(skeleton);
+    placePart(body.parts.Torso, torso, rest.torso, thick);
+
+    // Ailes (facultatives) : attachees au dos, dans le repere du torse, battement autour de son axe avant.
+    if (body.parts.Wing?.[0]) {
+      const { restDeg, flapDeg, periodSec } = spec.wings;
+      const wave = Math.sin((2 * Math.PI * performance.now()) / 1000 / periodSec);
+      const scale = skeleton.scale;
+      [1, -1].forEach((side, i) => {
+        const node = body.parts.Wing[i];
+        basis.makeBasis(bx.fromArray(torso.x), by.fromArray(torso.y), bz.fromArray(torso.z));
+        node.quaternion.setFromRotationMatrix(basis);
+        node.quaternion.multiply(flapQuat.setFromAxisAngle(AXIS_Z, -(restDeg + wave * flapDeg) * DEG * side));
+        node.position.fromArray(skeleton.shoulderMid.map((c, k) => c + (torso.x[k] * side * 9 + torso.y[k] * 3 - torso.z[k] * 11) * scale));
+        node.scale.set(side * thick, thick, thick);
+        node.visible = true;
+      });
+    }
+
+    // Cou : de la base du cou (au-dessus des epaules) jusque sous la tete, qui suit la pose du visage.
+    const up = [-torso.y[0], -torso.y[1], -torso.y[2]];
+    const base = skeleton.shoulderMid.map((c, i) => c + up[i] * spec.neckBase * skeleton.shoulderWidth);
+    neckPoint.fromArray(spec.neckAnchor).applyMatrix4(head.matrix);
+    placePart(body.parts.Neck, segmentFrame(base, neckPoint.toArray(), torso.x.map((c) => -c)), rest.neck, thick);
+
+    skeleton.arms.forEach((arm, i) => {
+      const upper = segmentFrame(arm.shoulder, arm.elbow, arm.outward);
+      const fore = segmentFrame(arm.elbow, arm.wrist, arm.outward);
+      const hand = segmentFrame(arm.wrist, arm.tip, arm.outward);
+      placePart(body.parts.UpperArm[i], upper, rest.upperArm, thick);
+      placePart(body.parts.Forearm[i], fore, rest.forearm, thick);
+      placePart(body.parts.Hand[i], hand, rest.hand, thick);
+      placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, thick);
+      placeJoint(body.parts.Elbow[i], fore, arm.elbow, thick);
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, thick);
+    });
+    body.group.visible = true;
+  }
+
   async function load(id, manifestUrl) {
     const entry = { status: 'loading', manifestUrl };
     skins.set(id, entry);
@@ -191,6 +326,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
       applyManifest(entry);
       applyTexture(entry);
       entry.status = 'ready';
+      if (entry.manifest.body) loadBody(entry, manifestUrl);
     } catch (error) {
       console.error(`Skin 3D ${id} : chargement impossible`, error);
       entry.status = 'failed';
@@ -215,8 +351,10 @@ export function createSkin3DRenderer({ canvas } = {}) {
   function activate(entry) {
     if (active === entry) return;
     if (active) head.remove(active.root);
+    if (active?.body?.group) scene.remove(active.body.group);
     active = entry;
     head.add(entry.root);
+    if (entry.body?.status === 'ready') scene.add(entry.body.group);
     applyOccluder(entry);
     ambient.intensity = entry.manifest.light.ambient;
     key.intensity = entry.manifest.light.key;
@@ -303,6 +441,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
       lastTime = now;
       resize(face.w, face.h);
       smoothPose(face.pose, smoothingFactor(dt, POSE_TAU), poseHoldWeight(face.blend, entry.manifest.stabilize));
+      updateBody(entry, face, dt);
       animate(entry, face.blend ?? {}, smoothingFactor(dt, BLEND_TAU), smoothingFactor(dt, FAST_TAU), face.lip);
       renderer.render(scene, camera);
       return true;
@@ -311,6 +450,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     clear() {
       hasPose = false;
       clean.valid = false;
+      hideBody(active);
       renderer.clear();
     },
     /** Etat du chargement du skin : idle, loading, ready ou failed (diagnostic). */
@@ -330,7 +470,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     patchManifest(id, patch) {
       const entry = skins.get(id);
       if (entry?.status !== 'ready') return;
-      entry.manifest = normalizeSkinManifest({ ...entry.manifest, transform: { ...entry.manifest, ...patch.transform }, occluder: { ...entry.manifest.occluder, ...patch.occluder }, jaw: patch.jaw ?? entry.manifest.jaw ?? undefined, eyes: patch.eyes ?? entry.manifest.eyes ?? undefined, breath: patch.breath ?? entry.manifest.breath ?? undefined, texture: patch.texture ?? entry.manifest.texture ?? undefined, stabilize: patch.stabilize ?? entry.manifest.stabilize ?? undefined, morphGains: patch.morphGains ?? entry.manifest.morphGains, morphGain: patch.morphGain ?? entry.manifest.morphGain, light: { ...entry.manifest.light, ...patch.light } });
+      entry.manifest = normalizeSkinManifest({ ...entry.manifest, transform: { ...entry.manifest, ...patch.transform }, occluder: { ...entry.manifest.occluder, ...patch.occluder }, jaw: patch.jaw ?? entry.manifest.jaw ?? undefined, eyes: patch.eyes ?? entry.manifest.eyes ?? undefined, breath: patch.breath ?? entry.manifest.breath ?? undefined, texture: patch.texture ?? entry.manifest.texture ?? undefined, stabilize: patch.stabilize ?? entry.manifest.stabilize ?? undefined, body: patch.body ?? entry.manifest.body ?? undefined, morphGains: patch.morphGains ?? entry.manifest.morphGains, morphGain: patch.morphGain ?? entry.manifest.morphGain, light: { ...entry.manifest.light, ...patch.light } });
       applyManifest(entry);
       applyTexture(entry);
       if (active === entry) applyOccluder(entry);
