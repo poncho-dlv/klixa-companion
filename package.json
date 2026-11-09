@@ -86,6 +86,10 @@
       {
         "from": "node_modules/three/examples/jsm/utils/BufferGeometryUtils.js",
         "to": "three-addons/utils/BufferGeometryUtils.js"
+      },
+      {
+        "from": "node_modules/three/examples/jsm/utils/SkeletonUtils.js",
+        "to": "three-addons/utils/SkeletonUtils.js"
       }
     ]
   },
