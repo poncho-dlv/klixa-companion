@@ -69,6 +69,7 @@ jobs:
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:RELEASE_TAG @assets --clobber
+            gh release edit $env:RELEASE_TAG --draft=false
           } else {
-            gh release create $env:RELEASE_TAG @assets --title "Klixa Companion $env:RELEASE_TAG" --generate-notes --draft
+            gh release create $env:RELEASE_TAG @assets --title "Klixa Companion $env:RELEASE_TAG" --generate-notes
           }
