@@ -64,6 +64,16 @@ function resolveThreeDir(...parts) {
   }
 }
 
+// Dans l'application installee, electron-builder exclut le dossier `examples` des node_modules :
+// les addons utiles sont donc copies dans `resources/three-addons` (extraResources).
+function resolveThreeAddonsDir() {
+  if (process.resourcesPath) {
+    const packaged = path.join(process.resourcesPath, 'three-addons');
+    if (fs.existsSync(path.join(packaged, 'loaders', 'GLTFLoader.js'))) return packaged;
+  }
+  return resolveThreeDir('examples', 'jsm');
+}
+
 // Les modules d'exemples de three.js (GLTFLoader...) importent `'three'` par son nom nu, que le
 // navigateur ne sait pas resoudre sans import map (un import map en ligne serait bloque par la
 // CSP). On reecrit donc cet unique specificateur vers le fichier servi localement.
@@ -147,7 +157,7 @@ export function createCamskinIntegration(cfg = {}, { emitEvent } = {}) {
   const mounts = [
     ['/vendor/', resolveVendorDir()],
     ['/vendor-three/', resolveThreeDir('build')],
-    ['/vendor-three-addons/', resolveThreeDir('examples', 'jsm')],
+    ['/vendor-three-addons/', resolveThreeAddonsDir()],
     ['/models/', cfg.modelsDir || path.resolve(directory, '..', '..', 'assets', 'camskin')],
     ['/', webDir]
   ];

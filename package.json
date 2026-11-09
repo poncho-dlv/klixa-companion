@@ -77,7 +77,17 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "extraResources": [
+      {
+        "from": "node_modules/three/examples/jsm/loaders/GLTFLoader.js",
+        "to": "three-addons/loaders/GLTFLoader.js"
+      },
+      {
+        "from": "node_modules/three/examples/jsm/utils/BufferGeometryUtils.js",
+        "to": "three-addons/utils/BufferGeometryUtils.js"
+      }
+    ]
   },
   "overrides": {
     "@eslint/config-array": {
