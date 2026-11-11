@@ -2,7 +2,7 @@
 // camera virtuelle). Il transforme une image video en un "visage" normalise (position,
 // taille, inclinaison, ouverture de la bouche...) que les skins savent dessiner.
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from '/vendor/vision_bundle.mjs';
-import { BODY_LANDMARKS, createBodyFilter } from './body-rig.js';
+import { BODY_LANDMARKS, BODY_JOINT, createBodyFilter } from './body-rig.js';
 
 // Index des landmarks MediaPipe utilises (maillage de 478 points).
 const L = { eyeA: 33, eyeB: 263, nose: 1, mouthTop: 13, mouthBottom: 14 };
@@ -48,6 +48,8 @@ const POSE_WIDTH = 640;
 // Prediction du corps : retard maximal compense (s) et part de ce retard rattrapee (1 = tout, moins = plus prudent
 // a l'arret d'un geste).
 const MAX_LEAD = 0.08;
+// Une main detectee est rattachee au poignet du corps le plus proche, a moins de cette distance (fraction de l'image).
+const HAND_MATCH = 0.15;
 const LEAD_GAIN = 0.85;
 // Repli (pose dans le fil principal) : marge par image pour le rendu 3D et l'envoi de la trame.
 const RENDER_MS = 4;
@@ -79,6 +81,9 @@ export async function createFaceEngine() {
   // Derniere trame de visage valide : sert de base quand le visage sort du champ mais que le corps reste visible.
   let lastFace = null;
   const bodyFilter = createBodyFilter();
+  // Mains : [gauche, droite] de la personne, 21 points filtres chacune (profondeur relative moins bruitee que celle du corps).
+  const handFilters = [0, 1].map(() => createBodyFilter({ zMinCutoff: 1, zBeta: 8 }));
+  let lastHands = null;
 
   function fallbackInline(reason) {
     console.warn('Pose : worker indisponible, repli dans le fil principal', reason);
@@ -93,23 +98,49 @@ export async function createFaceEngine() {
 
   // Points utiles du corps : [x, y, z monde (m), visibilite], dans l'ordre de BODY_LANDMARKS, filtres
   // (One Euro) a l'horloge de la video : l'intervalle reel entre deux images, sans la gigue du traitement.
-  function applyBody(points, mediaTime) {
+  function applyBody(points, mediaTime, hands = null) {
     const now = performance.now();
     if (lastPoseAt) poseRate += (1000 / Math.max(1, now - lastPoseAt) - poseRate) * 0.1;
     lastPoseAt = now;
     if (!points) {
       lastBody = null;
+      lastHands = null;
       bodyFilter.reset();
+      handFilters.forEach((f) => f.reset());
       return;
     }
     bodyFilter.filter(points, mediaTime);
+    matchHands(points, hands, mediaTime);
     bodyAt = mediaTime;
     lastBody = bodyNow(mediaTime);
+  }
+
+  // Rattache chaque main detectee au bras dont le poignet est le plus proche, puis filtre ses points.
+  function matchHands(points, hands, mediaTime) {
+    const slots = [null, null];
+    for (const hand of hands ?? []) {
+      let best = -1;
+      let bestDistance = HAND_MATCH;
+      [BODY_JOINT.wristL, BODY_JOINT.wristR].forEach((joint, slot) => {
+        const distance = Math.hypot(points[joint][0] - hand[0][0], points[joint][1] - hand[0][1]);
+        if (!slots[slot] && distance < bestDistance) {
+          bestDistance = distance;
+          best = slot;
+        }
+      });
+      if (best >= 0) slots[best] = hand;
+    }
+    slots.forEach((hand, slot) => {
+      if (hand) handFilters[slot].filter(hand.map(([x, y, z]) => [x, y, z, 1]), mediaTime);
+      else handFilters[slot].reset();
+    });
   }
 
   // Corps a l'instant de l'image courante : la derniere mesure, extrapolee de son retard (borne).
   function bodyNow(mediaTime) {
     const lead = Math.min(MAX_LEAD, Math.max(0, mediaTime - bodyAt)) * LEAD_GAIN;
+    const hands = handFilters.map((f) => f.predict(lead)?.map(([x, y, z]) => [round4(x), round4(y), round4(z)]) ?? null);
+    lastHands = hands.some(Boolean) ? hands : null;
     const points = bodyFilter.predict(lead);
     return points ? points.map(([x, y, z, v]) => [round4(x), round4(y), round4(z), Math.round(v * 100) / 100]) : null;
   }
@@ -125,13 +156,13 @@ export async function createFaceEngine() {
         } else if (data.type === 'pose') {
           poseBusy = false;
           track('pose', data.ms);
-          applyBody(data.points, data.t);
+          applyBody(data.points, data.t, data.hands);
         } else if (data.type === 'error') {
           fallbackInline(data.message);
         }
       };
       poseWorker.onerror = (event) => fallbackInline(event.message);
-      poseWorker.postMessage({ type: 'init', landmarks: BODY_LANDMARKS });
+      poseWorker.postMessage({ type: 'init', landmarks: BODY_LANDMARKS, wrists: [BODY_JOINT.wristL, BODY_JOINT.wristR] });
     } catch (error) {
       fallbackInline(error?.message);
     }
@@ -228,6 +259,28 @@ export async function createFaceEngine() {
     return out;
   }
 
+  // Met a jour `lastBody` / `lastHands` pour l'image courante (ou les oublie si le corps n'est pas demande).
+  function refreshBody(video, withBody) {
+    if (withBody) {
+      pumpPose(video);
+      if (lastBody) lastBody = bodyNow(video.currentTime);
+      return;
+    }
+    lastBody = null;
+    lastHands = null;
+    bodyFilter.reset();
+    handFilters.forEach((f) => f.reset());
+  }
+
+  // Ajoute le corps et les mains a une trame de visage.
+  function withBodyData(face) {
+    if (lastBody) {
+      face.body = lastBody;
+      if (lastHands) face.hands = lastHands;
+    }
+    return face;
+  }
+
   return {
     delegate,
     /** Etat du suivi du corps pour le diagnostic : mode (worker, inline...) et duree moyenne d'une mesure (ms). */
@@ -238,7 +291,9 @@ export async function createFaceEngine() {
       smooth = null;
       lastFace = null;
       lastBody = null;
+      lastHands = null;
       bodyFilter.reset();
+      handFilters.forEach((f) => f.reset());
     },
     detect(video, withLandmarks = false, withBody = false) {
       const w = video.videoWidth;
@@ -249,34 +304,23 @@ export async function createFaceEngine() {
       const res = landmarker.detectForVideo(video, faceStart);
       track('face', performance.now() - faceStart);
       const lms = res.faceLandmarks?.[0];
+      refreshBody(video, withBody);
+      const debug = withLandmarks ? { body: lastBody, hands: lastBody ? lastHands : null } : { body: null, hands: null };
       if (!lms) {
         smooth = null;
         // Visage perdu (hors champ, tete baissee...) : si le corps est encore la, on garde le skin
         // en place (tete figee, expressions neutres) au lieu de tout faire disparaitre.
-        if (withBody && lastFace) {
-          pumpPose(video);
-          if (lastBody) lastBody = bodyNow(video.currentTime);
-          if (lastBody) {
-            const { pose: _pose, ...rest } = lastFace;
-            const face = { ...rest, blend: {}, lip: 0, lost: true, body: lastBody };
-            return { face, landmarks: null, body: withLandmarks ? lastBody : null };
-          }
+        if (lastFace && lastBody) {
+          const { pose: _pose, ...rest } = lastFace;
+          return { face: withBodyData({ ...rest, blend: {}, lip: 0, lost: true }), landmarks: null, ...debug };
         }
         lastFace = null;
         return { face: null, landmarks: null };
       }
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));
       const face = buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data);
-      if (withBody) {
-        pumpPose(video);
-        if (lastBody) lastBody = bodyNow(video.currentTime);
-        if (lastBody) face.body = lastBody;
-      } else {
-        lastBody = null;
-        bodyFilter.reset();
-      }
-      lastFace = { ...face, body: undefined };
-      return { face, landmarks: withLandmarks ? lms : null, body: withLandmarks ? lastBody : null };
+      lastFace = face;
+      return { face: withBodyData({ ...face }), landmarks: withLandmarks ? lms : null, ...debug };
     }
   };
 }

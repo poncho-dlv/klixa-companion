@@ -7,7 +7,7 @@
 // camera : le skin s'aligne sur l'image quel que soit le vrai champ de la webcam.
 import * as THREE from '/vendor-three/three.module.js';
 import { GLTFLoader } from '/vendor-three-addons/loaders/GLTFLoader.js';
-import { solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame } from './body-rig.js';
+import { solveBody, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame } from './body-rig.js';
 import { BLEND_NAMES, normalizeSkinManifest, resolveModelUrl, jawAngle, gazeAngles, breathValue, poseHoldWeight, smoothingFactor, isBlendName } from './skin-manifest.js';
 
 const FOV = 63;
@@ -236,7 +236,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     }
     const raw = solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
       fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths
-    });
+    }, face.hands ?? null);
     if (!raw) {
       hideBody(entry);
       return;
@@ -275,12 +275,14 @@ export function createSkin3DRenderer({ canvas } = {}) {
     skeleton.arms.forEach((arm, i) => {
       const upper = limbFrame(arm.shoulder, arm.elbow, arm.outward);
       const fore = limbFrame(arm.elbow, arm.wrist, arm.outward);
-      const hand = limbFrame(arm.wrist, arm.tip, arm.outward);
+      // Main suivie point par point : rotation reelle (pouce) ; sinon dans la continuite du bras.
+      const hand = arm.thumb ? handFrame(arm) : limbFrame(arm.wrist, arm.tip, arm.outward);
       placePart(body.parts.UpperArm[i], upper, rest.upperArm, armThick);
       placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
       // Main : echelle uniforme calee sur la longueur mesuree (la patte grossit avec la main a l'ecran, en
       // longueur comme en largeur), jamais plus fine que le bras.
-      placePart(body.parts.Hand[i], hand, rest.hand, Math.min(3, Math.max(armThick * 0.85, hand.length / rest.hand)));
+      const handThick = Math.min(3, Math.max(armThick * 0.85, hand.length / rest.hand));
+      placePart(body.parts.Hand[i], hand, rest.hand, handThick, handThick * (hand.mirror ?? 1));
       placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, armThick);
       placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
       placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick);

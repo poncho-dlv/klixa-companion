@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BODY_LANDMARKS, BODY_JOINT, sanitizeBody, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
+  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
 } from '../src/integrations/camskin/web/body-rig.js';
 import { normalizeSkinManifest } from '../src/integrations/camskin/web/skin-manifest.js';
 import { sanitizeFace } from '../src/integrations/camskin.js';
@@ -205,6 +205,7 @@ test('le dragon declare un corps dont le modele existe avec les noeuds attendus'
     assert.ok(names.includes(name), `noeud ${name} absent du modele`);
   }
   for (const model of ['full', 'heavy']) assert.ok(fs.existsSync(path.join(root, 'assets', 'camskin', `pose_landmarker_${model}.task`)));
+  assert.ok(fs.existsSync(path.join(root, 'assets', 'camskin', 'hand_landmarker.task')));
 });
 
 test('sanitizeFace : le corps est facultatif mais refuse s il est mal forme', () => {
@@ -297,4 +298,69 @@ test('limbFrame : pas de retournement quand le bras passe a l horizontale', () =
   // Bras tendu vers la camera : toujours continu.
   const forward = limbFrame([0, 0, 0], [0, -1, 10], out);
   nearVec(forward.x, [1, 0, 0]);
+});
+
+// Main a plat face a la camera, doigts vers le haut de l'image, poignet en (x, y). `thumbSide` : +1 = pouce
+// vers la droite de l'image, -1 = vers la gauche.
+function flatHand(x, y, thumbSide, size = 0.1) {
+  const hand = Array.from({ length: HAND_POINTS }, () => [x, y - size, 0]);
+  hand[0] = [x, y, 0];
+  hand[5] = [x + thumbSide * size * 0.3, y - size, 0]; // base de l'index
+  hand[9] = [x, y - size, 0]; // base du majeur
+  hand[17] = [x - thumbSide * size * 0.3, y - size, 0]; // base de l'auriculaire
+  return hand;
+}
+
+test('sanitizeHands : forme et bornes strictes', () => {
+  const hand = flatHand(0.5, 0.5, 1);
+  assert.deepEqual(sanitizeHands([hand, null]), [hand, null]);
+  assert.equal(sanitizeHands([hand]), null);
+  assert.equal(sanitizeHands([hand.slice(1), null]), null);
+  assert.equal(sanitizeHands([[...hand.slice(1), [0.5, 0.5, Number.NaN]], null]), null);
+  assert.equal(sanitizeHands([[...hand.slice(1), [9, 0.5, 0]], null]), null);
+  assert.equal(sanitizeHands('x'), null);
+});
+
+test('solveBody : une main suivie donne le poignet, la taille et la direction du pouce', () => {
+  const hand = flatHand(0.8, 0.5, -1);
+  const sk = solveBody(standingBody({ wristL: [0.8, 0.5, 0, 0.98] }), VIEW, 60, {}, [hand, null]);
+  const arm = sk.arms[0];
+  const expected = unproject(0.8, 0.5, VIEW.w, VIEW.h, 60, 63);
+  near(arm.wrist[0], expected[0]);
+  near(arm.wrist[1], expected[1]);
+  assert.ok(arm.tip[1] > arm.wrist[1], 'doigts vers le haut');
+  nearVec(arm.thumb, [-1, 0, 0]);
+  assert.equal(arm.mirrored, true);
+  assert.equal(sk.arms[1].thumb, null, 'pas de main suivie de l autre cote');
+  // Main deux fois plus grande a l'ecran : patte plus longue.
+  const big = solveBody(standingBody({ wristL: [0.8, 0.5, 0, 0.98] }), VIEW, 60, {}, [flatHand(0.8, 0.5, -1, 0.2), null]).arms[0];
+  const size = (a) => Math.hypot(a.tip[0] - a.wrist[0], a.tip[1] - a.wrist[1], a.tip[2] - a.wrist[2]);
+  assert.ok(size(big) > size(arm) * 1.5);
+});
+
+test('handFrame : le pouce fixe la rotation, la main gauche est en miroir sans retourner la paume', () => {
+  const up = { wrist: [0, 0, -60], tip: [0, 10, -60] };
+  // Main droite, paume vers la camera : pouce vers +X de l'image.
+  const right = handFrame({ ...up, thumb: [1, 0, 0], mirrored: false });
+  nearVec(right.y, [0, 1, 0]);
+  nearVec(right.x, [1, 0, 0]);
+  assert.equal(right.mirror, 1);
+  // Main gauche, paume vers la camera : pouce vers -X ; meme face du maillage vers la camera, maillage en miroir.
+  const left = handFrame({ ...up, thumb: [-1, 0, 0], mirrored: true });
+  nearVec(left.z, right.z);
+  assert.equal(left.mirror, -1);
+  // Main droite retournee (dos vers la camera) : le pouce passe de l'autre cote, la face visible change.
+  const flipped = handFrame({ ...up, thumb: [-1, 0, 0], mirrored: false });
+  nearVec(flipped.z, right.z.map((c) => -c));
+});
+
+test('sanitizeFace : les mains ne passent qu avec un corps valide', () => {
+  const base = {
+    w: 640, h: 480, cx: 300, cy: 200, u: 60, angle: 0, jaw: 0, nose: { x: 1, y: 1 }, mouth: { x: 1, y: 1 }, look: { x: 0, y: 0 }, oval: [],
+    body: Array.from({ length: 15 }, () => [0.5, 0.5, 0, 0.9])
+  };
+  const hands = [flatHand(0.5, 0.5, 1), null];
+  assert.deepEqual(sanitizeFace({ ...base, hands }).hands, hands);
+  assert.equal(sanitizeFace({ ...base, hands: [[1, 2, 3], null] }), null);
+  assert.equal(sanitizeFace({ ...base, body: undefined, hands }).hands, undefined);
 });

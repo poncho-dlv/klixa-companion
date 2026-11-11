@@ -299,7 +299,26 @@ function drawBodyDebug(ctx, body, w, h) {
   }
 }
 
-function render(face, landmarks, body) {
+// Mains (21 points chacune) : os des doigts en jaune, pouce en orange.
+const HAND_BONES = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [0, 9, 10, 11, 12], [0, 13, 14, 15, 16], [0, 17, 18, 19, 20], [5, 9, 13, 17]];
+
+function drawHandsDebug(ctx, hands, w, h) {
+  ctx.lineCap = 'round';
+  for (const hand of hands) {
+    if (!hand) continue;
+    for (const [width, colored] of [[5, false], [2.5, true]]) {
+      ctx.lineWidth = width;
+      HAND_BONES.forEach((chain, index) => {
+        ctx.strokeStyle = colored ? (index === 0 ? '#f80' : '#fe3') : 'rgba(0,0,0,.75)';
+        ctx.beginPath();
+        chain.forEach((i, k) => (k ? ctx.lineTo(hand[i][0] * w, hand[i][1] * h) : ctx.moveTo(hand[i][0] * w, hand[i][1] * h)));
+        ctx.stroke();
+      });
+    }
+  }
+}
+
+function render(face, landmarks, body, hands) {
   const w = video.videoWidth;
   const h = video.videoHeight;
   if (canvas.width !== w || canvas.height !== h) {
@@ -341,6 +360,7 @@ function render(face, landmarks, body) {
     for (const p of landmarks) dctx.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
   }
   if (body) drawBodyDebug(dctx, body, w, h);
+  if (hands) drawHandsDebug(dctx, hands, w, h);
 }
 
 async function main() {
@@ -368,7 +388,7 @@ async function main() {
           engine.reset();
         }
         // Fenetre cachee (suivi pour OBS seulement) : l'apercu n'est vu par personne, on economise le rendu.
-        if (!document.hidden) render(result.face, result.landmarks, result.body);
+        if (!document.hidden) render(result.face, result.landmarks, result.body, result.hands);
       } catch (error) {
         console.error('Suivi : image ignoree', error);
       }

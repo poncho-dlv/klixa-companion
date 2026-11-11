@@ -103,6 +103,36 @@ export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1, vCuto
   };
 }
 
+/** Nombre de points d'une main (MediaPipe Hand Landmarker) et indices utilises. */
+export const HAND_POINTS = 21;
+const HAND_JOINT = { wrist: 0, thumbTip: 4, indexBase: 5, indexTip: 8, middleBase: 9, middleTip: 12, ringTip: 16, pinkyBase: 17, pinkyTip: 20 };
+
+/**
+ * Valide les mains d'une trame : `[main gauche|null, main droite|null]` (gauche/droite de la personne,
+ * meme ordre que les bras du squelette). Chaque main : 21 points [x, y, z] ; x/y = image normalisee,
+ * z = profondeur relative au poignet (meme echelle que x, negatif = plus pres de la camera).
+ * @returns {(number[][]|null)[]|null} copie nettoyee, ou null si invalide
+ */
+export function sanitizeHands(raw) {
+  if (!Array.isArray(raw) || raw.length !== 2) return null;
+  const out = [];
+  for (const hand of raw) {
+    if (hand === null) {
+      out.push(null);
+      continue;
+    }
+    if (!Array.isArray(hand) || hand.length !== HAND_POINTS) return null;
+    const points = [];
+    for (const q of hand) {
+      if (!Array.isArray(q) || q.length !== 3 || !q.every(finite)) return null;
+      if (q[0] < -2 || q[0] > 3 || q[1] < -2 || q[1] > 3 || Math.abs(q[2]) > 3) return null;
+      points.push([q[0], q[1], q[2]]);
+    }
+    out.push(points);
+  }
+  return out;
+}
+
 // --- Petits outils vectoriels (tableaux [x, y, z]) ---------------------------------------
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -148,6 +178,10 @@ const DEFAULT_BODY_PARAMS = {
   // repos. Main non mesuree : longueur de repos x handReach.
   handReach: 1.45,
   knuckleReach: 1.85,
+  // Main suivie par le modele des mains (21 points) : longueur = poignet -> base du majeur x palmReach
+  // (stable que les doigts soient tendus ou replies) ; handDepthGain dose la profondeur relative des points.
+  palmReach: 1.35,
+  handDepthGain: 1,
   handMin: 0.7,
   handMax: 2.6,
   // Ecartement des epaules autour de leur milieu : la pose donne le centre des articulations, nettement a
@@ -184,11 +218,12 @@ function bendElbow(shoulder, wrist, upper, lower, pole) {
  * @param {{ w: number, h: number }} view taille de l'image
  * @param {number} headDepth distance de la tete a la camera (cm), tiree de la pose du visage
  * @param {Partial<typeof DEFAULT_BODY_PARAMS>} [options]
+ * @param {(number[][]|null)[]|null} [hands] mains suivies (voir sanitizeHands) : position, taille et rotation reelles de chaque main
  * @returns {{ scale: number, shoulderWidth: number, shoulderMid: number[], hipMid: number[], hipsKnown: boolean,
  *   arms: { outward: number[], shoulder: number[], elbow: number[], wrist: number[], tip: number[], hasElbow: boolean, hasWrist: boolean }[] }|null}
  *   null si les epaules ne sont pas visibles (pas de corps a dessiner)
  */
-export function solveBody(body, view, headDepth, options = {}) {
+export function solveBody(body, view, headDepth, options = {}, hands = null) {
   const p = { ...DEFAULT_BODY_PARAMS, ...options, lengths: { ...DEFAULT_BODY_PARAMS.lengths, ...options.lengths } };
   const J = BODY_JOINT;
   const vis = (i) => body[i][3];
@@ -230,7 +265,7 @@ export function solveBody(body, view, headDepth, options = {}) {
   const hipsKnown = hipWeight > 0.5;
 
   const arms = [[J.shoulderL, J.elbowL, J.wristL, J.pinkyL, J.indexL, shL], [J.shoulderR, J.elbowR, J.wristR, J.pinkyR, J.indexR, shR]].map(
-    ([, elbowIndex, wristIndex, pinkyIndex, indexIndex, shoulder]) => {
+    ([, elbowIndex, wristIndex, pinkyIndex, indexIndex, shoulder], side) => {
       const outward = [Math.sign(shoulder[0] - shoulderMid[0]) || 1, 0, 0];
       const upper = p.lengths.upperArm * scale;
       const lower = p.lengths.forearm * scale;
@@ -249,7 +284,7 @@ export function solveBody(body, view, headDepth, options = {}) {
         : hanging;
       const elbow = elbowWeight > 0 ? mix(deduced, point(elbowIndex), elbowWeight) : deduced;
       const forearmDir = normalize(sub(elbow, shoulder));
-      const wrist = wristMeasured ? mix(add(elbow, mul(forearmDir, lower)), wristMeasured, wristWeight) : add(elbow, mul(forearmDir, lower));
+      let wrist = wristMeasured ? mix(add(elbow, mul(forearmDir, lower)), wristMeasured, wristWeight) : add(elbow, mul(forearmDir, lower));
       // Direction de la main : poignet -> milieu index/auriculaire, sinon dans le prolongement de l'avant-bras.
       const alongForearm = normalize(sub(wrist, elbow), forearmDir);
       let handDir = alongForearm;
@@ -263,7 +298,30 @@ export function solveBody(body, view, headDepth, options = {}) {
         const measured = clamp(knuckles * p.knuckleReach, handBase * p.handMin, handBase * p.handMax);
         hand += (measured - hand) * handWeight;
       }
-      return { outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow: elbowWeight > 0.5, hasWrist: wristWeight > 0.5 };
+      // Main suivie point par point : poignet, direction, taille et rotation viennent de la vraie main.
+      // `thumb` = direction du cote du pouce (auriculaire -> index), perpendiculaire aux doigts : avec la
+      // direction des doigts, elle fixe la rotation de la main (paume ou dos vers la camera).
+      let thumb = null;
+      const lm = hands?.[side];
+      if (lm) {
+        const depth = wristMeasured ? -wristMeasured[2] : headDepth;
+        // z d'un point de main : fraction de la largeur de l'image ; largeur de l'image a cette profondeur (cm).
+        const span = 2 * Math.tan((p.fov * Math.PI) / 360) * (view.w / view.h) * depth;
+        const at = (i) => unproject(lm[i][0], lm[i][1], view.w, view.h, Math.max(10, depth + lm[i][2] * span * p.handDepthGain), p.fov);
+        const base = at(HAND_JOINT.wrist);
+        const middle = at(HAND_JOINT.middleBase);
+        const fingers = normalize(sub(middle, base), handDir);
+        const across = sub(at(HAND_JOINT.indexBase), at(HAND_JOINT.pinkyBase));
+        thumb = normalize(sub(across, mul(fingers, dot(across, fingers))), outward);
+        wrist = base;
+        handDir = fingers;
+        hand = clamp(length(sub(middle, base)) * p.palmReach, handBase * p.handMin, handBase * p.handMax);
+      }
+      return {
+        outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow: elbowWeight > 0.5, hasWrist: wristWeight > 0.5 || Boolean(lm),
+        // `mirrored` : main gauche de la personne (le maillage, modele sur une main droite, est retourne).
+        thumb, mirrored: side === 0
+      };
     }
   );
   return { scale, shoulderWidth, shoulderMid, hipMid, hipsKnown, arms };
@@ -274,6 +332,8 @@ export function solveBody(body, view, headDepth, options = {}) {
  * precedent, ou si les membres changent de mode (visible / hors champ), il est repris tel quel.
  */
 const SCALE_SLOWDOWN = 0.15;
+// Cote du maillage de la main ou se trouve la paume : 1 = +Z, -1 = -Z (depend du modele 3D).
+const PALM_SIGN = 1;
 export function blendSkeleton(prev, next, k) {
   if (!prev || !next) return next;
   const blend = (a, b) => mix(a, b, k);
@@ -291,7 +351,8 @@ export function blendSkeleton(prev, next, k) {
         shoulder: blend(old.shoulder, arm.shoulder),
         elbow: blend(old.elbow, arm.elbow),
         wrist: blend(old.wrist, arm.wrist),
-        tip: blend(old.tip, arm.tip)
+        tip: blend(old.tip, arm.tip),
+        thumb: arm.thumb && old.thumb ? normalize(blend(old.thumb, arm.thumb), arm.thumb) : arm.thumb
       };
     })
   };
@@ -336,6 +397,19 @@ export function limbFrame(from, to, outward) {
     x = add(add(mul(outward, cos), mul(cross(k, outward), sin)), mul(k, dot(k, outward) * (1 - cos)));
   }
   return segmentFrame(from, to, x, x);
+}
+
+/**
+ * Repere d'une main suivie (voir `thumb` dans solveBody) : +Y vers les doigts, +X vers le pouce, +Z sortant
+ * de la paume. Le maillage est modele sur une main droite ; pour une main gauche le repere est construit
+ * avec le pouce a l'oppose et `mirror` vaut -1 (echelle X a appliquer au maillage), ce qui remet le pouce
+ * du bon cote sans retourner la paume.
+ * @returns {{ position: number[], x: number[], y: number[], z: number[], length: number, mirror: number }}
+ */
+export function handFrame(arm) {
+  const mirror = arm.mirrored ? -1 : 1;
+  const hint = mul(arm.thumb, mirror * PALM_SIGN);
+  return { ...segmentFrame(arm.wrist, arm.tip, hint, hint), mirror: mirror * PALM_SIGN };
 }
 
 /**
