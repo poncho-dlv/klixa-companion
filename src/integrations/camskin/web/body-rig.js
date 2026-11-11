@@ -35,6 +35,41 @@ export function sanitizeBody(raw) {
   return out;
 }
 
+/**
+ * Filtre anti-tremblement "One Euro" sur les points du corps : tres lisse quand on ne bouge pas
+ * (le bruit du modele disparait), quasi sans retard quand on bouge vite. Un filtre par coordonnee
+ * (x, y, z) de chaque point ; la visibilite est reprise telle quelle.
+ * @param {{ minCutoff?: number, beta?: number, dCutoff?: number }} [options] minCutoff (Hz) : lissage au repos ;
+ *   beta : reactivite aux mouvements rapides ; dCutoff : lissage de la vitesse
+ */
+export function createBodyFilter({ minCutoff = 0.6, beta = 3, dCutoff = 1 } = {}) {
+  let state = null; // [point][axe] -> { x, dx }
+  let lastT = null;
+  const alpha = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
+  return {
+    reset() { state = null; lastT = null; },
+    /** @param {number[][]} body points valides ; @param {number} t horloge en secondes */
+    filter(body, t) {
+      const dt = lastT === null ? 0 : t - lastT;
+      lastT = t;
+      if (!state || dt <= 0 || state.length !== body.length) {
+        state = body.map((p) => [0, 1, 2].map((a) => ({ x: p[a], dx: 0 })));
+        return body.map((p) => [...p]);
+      }
+      return body.map((p, i) => {
+        const out = [0, 1, 2].map((a) => {
+          const s = state[i][a];
+          const dx = (p[a] - s.x) / dt;
+          s.dx += alpha(dCutoff, dt) * (dx - s.dx);
+          s.x += alpha(minCutoff + beta * Math.abs(s.dx), dt) * (p[a] - s.x);
+          return s.x;
+        });
+        return [...out, p[3]];
+      });
+    }
+  };
+}
+
 // --- Petits outils vectoriels (tableaux [x, y, z]) ---------------------------------------
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];

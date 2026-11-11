@@ -61,7 +61,7 @@ function frame() {
     const renderer = ensureRenderer3d();
     drawn3d = Boolean(renderer?.render(face, state.skin, skin.model));
   } else if (live) {
-    skin.draw(ctx, face);
+    if (!face.lost) skin.draw(ctx, face);
   }
   if (!drawn3d) renderer3d?.clear();
   requestAnimationFrame(frame);

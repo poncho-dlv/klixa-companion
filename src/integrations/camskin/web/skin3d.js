@@ -434,13 +434,14 @@ export function createSkin3DRenderer({ canvas } = {}) {
      */
     render(face, id, manifestUrl) {
       const entry = ensure(id, manifestUrl);
-      if (!entry || !face?.pose) return false;
+      // `face.lost` : visage hors champ mais corps suivi. On garde la derniere pose de tete.
+      if (!entry || !face || (!face.pose && !(face.lost && hasPose))) return false;
       activate(entry);
       const now = performance.now();
       const dt = Math.min(0.2, (now - lastTime) / 1000);
       lastTime = now;
       resize(face.w, face.h);
-      smoothPose(face.pose, smoothingFactor(dt, POSE_TAU), poseHoldWeight(face.blend, entry.manifest.stabilize));
+      if (!face.lost) smoothPose(face.pose, smoothingFactor(dt, POSE_TAU), poseHoldWeight(face.blend, entry.manifest.stabilize));
       updateBody(entry, face, dt);
       animate(entry, face.blend ?? {}, smoothingFactor(dt, BLEND_TAU), smoothingFactor(dt, FAST_TAU), face.lip);
       renderer.render(scene, camera);

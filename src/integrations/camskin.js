@@ -137,6 +137,8 @@ export function sanitizeFace(raw) {
   const oval = raw.oval.map(point);
   if (oval.includes(null)) return null;
   const face = { w, h, cx, cy, u, angle, jaw, nose, mouth, look, oval };
+  // Visage perdu mais corps suivi : le rendu garde la derniere pose de tete.
+  if (raw.lost === true) face.lost = true;
   // Pose 3D et blendshapes : facultatifs (skins 3D), refuses s'ils sont mal formes.
   const extra = sanitizePoseAndBlend(raw);
   if (!extra) return null;

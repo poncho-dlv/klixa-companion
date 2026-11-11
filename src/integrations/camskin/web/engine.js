@@ -2,7 +2,7 @@
 // camera virtuelle). Il transforme une image video en un "visage" normalise (position,
 // taille, inclinaison, ouverture de la bouche...) que les skins savent dessiner.
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from '/vendor/vision_bundle.mjs';
-import { BODY_LANDMARKS } from './body-rig.js';
+import { BODY_LANDMARKS, createBodyFilter } from './body-rig.js';
 
 // Index des landmarks MediaPipe utilises (maillage de 478 points).
 const L = { eyeA: 33, eyeB: 263, nose: 1, mouthTop: 13, mouthBottom: 14 };
@@ -31,7 +31,7 @@ async function createLandmarker() {
 
 async function createPoseLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks('/vendor/wasm');
-  const base = { modelAssetPath: '/models/pose_landmarker_lite.task' };
+  const base = { modelAssetPath: '/models/pose_landmarker_full.task' };
   const options = { runningMode: 'VIDEO', numPoses: 1 };
   try {
     return await PoseLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...base, delegate: 'GPU' } });
@@ -55,6 +55,9 @@ export async function createFaceEngine() {
   let poseLoading = false;
   let lastBody = null;
   let poseFrame = 0;
+  // Derniere trame de visage valide : sert de base quand le visage sort du champ mais que le corps reste visible.
+  let lastFace = null;
+  const bodyFilter = createBodyFilter();
 
   function ensurePose() {
     if (poseLandmarker || poseLoading) return;
@@ -70,7 +73,8 @@ export async function createFaceEngine() {
     const lms = res.landmarks?.[0];
     const world = res.worldLandmarks?.[0];
     if (!lms || !world) return null;
-    return BODY_LANDMARKS.map((i) => [round4(lms[i].x), round4(lms[i].y), round4(world[i].z), Math.round((lms[i].visibility ?? 0) * 100) / 100]);
+    const raw = BODY_LANDMARKS.map((i) => [lms[i].x, lms[i].y, world[i].z, lms[i].visibility ?? 0]);
+    return bodyFilter.filter(raw, performance.now() / 1000).map(([x, y, z, v]) => [round4(x), round4(y), round4(z), Math.round(v * 100) / 100]);
   }
 
   // Repere visage derive des landmarks, lisse par moyenne exponentielle. Coordonnees en
@@ -134,7 +138,9 @@ export async function createFaceEngine() {
     delegate,
     reset() {
       smooth = null;
+      lastFace = null;
       lastBody = null;
+      bodyFilter.reset();
     },
     detect(video, withLandmarks = false, withBody = false) {
       const w = video.videoWidth;
@@ -143,6 +149,18 @@ export async function createFaceEngine() {
       const lms = res.faceLandmarks?.[0];
       if (!lms) {
         smooth = null;
+        // Visage perdu (hors champ, tete baissee...) : si le corps est encore la, on garde le skin
+        // en place (tete figee, expressions neutres) au lieu de tout faire disparaitre.
+        if (withBody && lastFace) {
+          ensurePose();
+          if (poseLandmarker && poseFrame++ % POSE_EVERY === 0) lastBody = detectBody(video);
+          if (lastBody) {
+            const { pose: _pose, ...rest } = lastFace;
+            const face = { ...rest, blend: {}, lip: 0, lost: true, body: lastBody };
+            return { face, landmarks: null, body: withLandmarks ? lastBody : null };
+          }
+        }
+        lastFace = null;
         return { face: null, landmarks: null };
       }
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));
@@ -153,8 +171,10 @@ export async function createFaceEngine() {
         if (lastBody) face.body = lastBody;
       } else {
         lastBody = null;
+        bodyFilter.reset();
       }
-      return { face, landmarks: withLandmarks ? lms : null };
+      lastFace = { ...face, body: undefined };
+      return { face, landmarks: withLandmarks ? lms : null, body: withLandmarks ? lastBody : null };
     }
   };
 }

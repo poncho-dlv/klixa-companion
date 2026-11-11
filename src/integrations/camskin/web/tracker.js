@@ -3,6 +3,7 @@
 // avec OBS) et envoie les donnees de visage a l'overlay OBS via le serveur local.
 import { createFaceEngine } from './engine.js';
 import { SKINS, is3D, hasBody } from './skins.js';
+import { BODY_JOINT } from './body-rig.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('cam');
@@ -255,7 +256,32 @@ $('device').onchange = async (e) => {
 // --- Boucle : suivi + apercu ------------------------------------------------------------
 const stats = { frames: 0, lastLog: performance.now(), inferMs: [], text: '' };
 
-function render(face, landmarks) {
+// Squelette du corps (points filtres envoyes au rendu) : vert = visible, rouge = peu fiable.
+const BODY_BONES = [['shoulderL', 'shoulderR'], ['shoulderL', 'elbowL'], ['elbowL', 'wristL'], ['shoulderR', 'elbowR'],
+  ['elbowR', 'wristR'], ['wristL', 'pinkyL'], ['wristL', 'indexL'], ['wristR', 'pinkyR'], ['wristR', 'indexR'],
+  ['shoulderL', 'hipL'], ['shoulderR', 'hipR'], ['hipL', 'hipR']];
+
+function drawBodyDebug(body, w, h) {
+  const at = (name) => body[BODY_JOINT[name]];
+  ctx.lineWidth = 2;
+  for (const [a, b] of BODY_BONES) {
+    const p = at(a);
+    const q = at(b);
+    ctx.strokeStyle = Math.min(p[3], q[3]) >= 0.5 ? 'rgba(80,255,80,.9)' : 'rgba(255,80,80,.7)';
+    ctx.beginPath();
+    ctx.moveTo(p[0] * w, p[1] * h);
+    ctx.lineTo(q[0] * w, q[1] * h);
+    ctx.stroke();
+  }
+  for (const p of body) {
+    ctx.fillStyle = p[3] >= 0.5 ? '#3f3' : '#f55';
+    ctx.beginPath();
+    ctx.arc(p[0] * w, p[1] * h, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function render(face, landmarks, body) {
   const w = video.videoWidth;
   const h = video.videoHeight;
   if (canvas.width !== w || canvas.height !== h) {
@@ -278,7 +304,7 @@ function render(face, landmarks) {
       drew3d = Boolean(renderer?.render(face, skin, def.model));
       state.info3d = renderer ? `3D ${renderer.status(skin)}${face.pose ? ` z=${face.pose[14]}` : ' sans pose'}` : '3D chargement du moteur';
     } else {
-      def.draw(ctx, face);
+      if (!face.lost) def.draw(ctx, face);
     }
   }
   // Le canvas WebGL est superpose a l'apercu (comme dans l'overlay OBS), pas recopie dedans.
@@ -289,6 +315,7 @@ function render(face, landmarks) {
     ctx.fillStyle = 'rgba(0,255,255,.8)';
     for (const p of landmarks) ctx.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
   }
+  if (body) drawBodyDebug(body, w, h);
   ctx.restore();
 }
 
@@ -312,7 +339,7 @@ async function main() {
       } else {
         engine.reset();
       }
-      render(result.face, result.landmarks);
+      render(result.face, result.landmarks, result.body);
     }
     const now = performance.now();
     if (now - stats.lastLog >= 1000) {

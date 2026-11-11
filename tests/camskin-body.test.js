@@ -160,7 +160,7 @@ test('le dragon declare un corps dont le modele existe avec les noeuds attendus'
   for (const name of ['Torso', 'Neck', 'Wing', 'UpperArm', 'Forearm', 'Hand', 'Shoulder', 'Elbow', 'Wrist']) {
     assert.ok(names.includes(name), `noeud ${name} absent du modele`);
   }
-  assert.ok(fs.existsSync(path.join(root, 'assets', 'camskin', 'pose_landmarker_lite.task')));
+  assert.ok(fs.existsSync(path.join(root, 'assets', 'camskin', 'pose_landmarker_full.task')));
 });
 
 test('sanitizeFace : le corps est facultatif mais refuse s il est mal forme', () => {
@@ -185,4 +185,34 @@ test('la grenouille declare aussi un corps (sans ailes)', () => {
 test('manifeste : ailes (defauts et bornes)', () => {
   const { wings } = normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb', wings: { flapDeg: 999 } } }).body;
   assert.deepEqual(wings, { restDeg: 0, flapDeg: 40, periodSec: 2.6 });
+});
+
+test('createBodyFilter : le bruit au repos est ecrase, un vrai mouvement est suivi', async () => {
+  const { createBodyFilter } = await import('../src/integrations/camskin/web/body-rig.js');
+  const f = createBodyFilter();
+  let seed = 1;
+  const noise = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 0.02;
+  let last;
+  let maxDev = 0;
+  for (let i = 0; i < 120; i++) {
+    last = f.filter([[0.5 + noise(), 0.5 + noise(), 0.1 + noise(), 0.9]], i / 15);
+    if (i > 30) maxDev = Math.max(maxDev, Math.abs(last[0][0] - 0.5));
+  }
+  assert.ok(maxDev < 0.006, `tremblement residuel ${maxDev}`);
+  assert.equal(last[0][3], 0.9);
+  for (let i = 120; i < 150; i++) last = f.filter([[0.8, 0.5, 0.1, 0.9]], i / 15);
+  assert.ok(Math.abs(last[0][0] - 0.8) < 0.02);
+});
+
+test('sanitizeFace : un visage perdu (corps seul) est relaye sans pose, avec le drapeau lost', () => {
+  const face = {
+    w: 640, h: 480, cx: 300, cy: 200, u: 60, angle: 0, jaw: 0, nose: { x: 1, y: 1 }, mouth: { x: 1, y: 1 }, look: { x: 0, y: 0 },
+    oval: [], blend: {}, lip: 0, lost: true,
+    body: Array.from({ length: 15 }, () => [0.5, 0.5, 0, 0.9])
+  };
+  const out = sanitizeFace(face);
+  assert.equal(out.lost, true);
+  assert.equal(out.pose, undefined);
+  assert.equal(out.body.length, 15);
+  assert.equal(sanitizeFace({ ...face, lost: undefined }).lost, undefined);
 });
