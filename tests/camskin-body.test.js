@@ -146,6 +146,7 @@ test('manifeste : section body (valeurs par defaut, bornes, rejets, idempotence)
   assert.equal(normalizeSkinManifest({ model: 'a.glb' }).body, null);
   const body = normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb' } }).body;
   assert.equal(body.thickness, 1);
+  assert.equal(body.armThickness, 1);
   assert.equal(body.depthGain, 0.6);
   assert.deepEqual(body.lengths, { torso: 45, neck: 14, upperArm: 28, forearm: 26, hand: 10 });
   assert.equal(normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb', thickness: 99 } }).body.thickness, 3);
@@ -223,4 +224,21 @@ test('sanitizeFace : un visage perdu (corps seul) est relaye sans pose, avec le 
   assert.equal(out.pose, undefined);
   assert.equal(out.body.length, 15);
   assert.equal(sanitizeFace({ ...face, lost: undefined }).lost, undefined);
+});
+
+test('createBodyFilter.predict : extrapole un mouvement regulier, immobile = pas de derive', async () => {
+  const { createBodyFilter } = await import('../src/integrations/camskin/web/body-rig.js');
+  const f = createBodyFilter();
+  assert.equal(f.predict(0.05), null);
+  // Main qui avance a 1 unite/s, mesuree a 30 Hz.
+  for (let i = 0; i < 60; i++) f.filter([[i / 30, 0.5, 0.1, 0.9]], i / 30);
+  const now = f.predict(0)[0];
+  const ahead = f.predict(0.05)[0];
+  assert.ok(ahead[0] - now[0] > 0.035 && ahead[0] - now[0] < 0.06, `avance de ${ahead[0] - now[0]}`);
+  assert.equal(ahead[1], now[1]);
+  assert.equal(ahead[2], now[2], 'la profondeur n est pas extrapolee');
+  assert.equal(ahead[3], 0.9);
+  const still = createBodyFilter();
+  for (let i = 0; i < 60; i++) still.filter([[0.4, 0.5, 0.1, 0.9]], i / 30);
+  assert.ok(Math.abs(still.predict(0.08)[0][0] - 0.4) < 1e-6);
 });

@@ -73,6 +73,7 @@
   "body": {
     "model": "dragon-body.glb",
     "thickness": 1.1,
+    "armThickness": 1.35,
     "depthGain": 0.6,
     "restShoulder": 40,
     "neckAnchor": [

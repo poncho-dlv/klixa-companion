@@ -39,33 +39,48 @@ export function sanitizeBody(raw) {
  * Filtre anti-tremblement "One Euro" sur les points du corps : tres lisse quand on ne bouge pas
  * (le bruit du modele disparait), quasi sans retard quand on bouge vite. Un filtre par coordonnee
  * (x, y, z) de chaque point ; la visibilite est reprise telle quelle.
- * @param {{ minCutoff?: number, beta?: number, dCutoff?: number }} [options] minCutoff (Hz) : lissage au repos ;
- *   beta : reactivite aux mouvements rapides ; dCutoff : lissage de la vitesse
+ * @param {{ minCutoff?: number, beta?: number, dCutoff?: number, vCutoff?: number }} [options] minCutoff (Hz) : lissage au repos ;
+ *   beta : reactivite aux mouvements rapides ; dCutoff : lissage de la vitesse ; vCutoff : lissage de la vitesse de prediction
  */
-export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1 } = {}) {
-  let state = null; // [point][axe] -> { x, dx }
+export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1, vCutoff = 4 } = {}) {
+  let state = null; // [point][axe] -> { x, dx, v } ; dx = vitesse tres lissee (reglage du filtre), v = vitesse pour la prediction
+  let vis = null;
   let lastT = null;
   const alpha = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
   return {
-    reset() { state = null; lastT = null; },
+    reset() { state = null; vis = null; lastT = null; },
     /** @param {number[][]} body points valides ; @param {number} t horloge en secondes */
     filter(body, t) {
       const dt = lastT === null ? 0 : t - lastT;
       lastT = t;
-      if (!state || dt <= 0 || state.length !== body.length) {
-        state = body.map((p) => [0, 1, 2].map((a) => ({ x: p[a], dx: 0 })));
+      vis = body.map((p) => p[3]);
+      // Premiere mesure, horloge qui recule (changement de camera) ou trou trop long : on repart de zero.
+      if (!state || dt <= 0 || dt > 0.5 || state.length !== body.length) {
+        state = body.map((p) => [0, 1, 2].map((a) => ({ x: p[a], dx: 0, v: 0 })));
         return body.map((p) => [...p]);
       }
       return body.map((p, i) => {
         const out = [0, 1, 2].map((a) => {
           const s = state[i][a];
+          const before = s.x;
           const dx = (p[a] - s.x) / dt;
           s.dx += alpha(dCutoff, dt) * (dx - s.dx);
           s.x += alpha(minCutoff + beta * Math.abs(s.dx), dt) * (p[a] - s.x);
+          s.v += alpha(vCutoff, dt) * ((s.x - before) / dt - s.v);
           return s.x;
         });
         return [...out, p[3]];
       });
+    },
+    /**
+     * Points extrapoles `lead` secondes apres la derniere mesure (compense le retard de la mesure et
+     * donne une position a chaque image affichee, meme si la pose est mesuree moins souvent).
+     * Seuls x et y sont extrapoles : la profondeur est trop bruitee pour ca.
+     * @returns {number[][]|null} null sans mesure
+     */
+    predict(lead) {
+      if (!state) return null;
+      return state.map((axes, i) => [axes[0].x + axes[0].v * lead, axes[1].x + axes[1].v * lead, axes[2].x, vis[i]]);
     }
   };
 }

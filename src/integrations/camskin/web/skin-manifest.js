@@ -55,6 +55,7 @@ function normalizeBody(raw) {
   return {
     model: raw.model,
     thickness: optionalNumber(raw.thickness, 1, 0.3, 3),
+    armThickness: optionalNumber(raw.armThickness, 1, 0.3, 3),
     depthGain: optionalNumber(raw.depthGain, 0.6, -1.5, 1.5),
     restShoulder: optionalNumber(raw.restShoulder, 40, 10, 100),
     neckAnchor: vec3(raw.neckAnchor, [0, -13, -3], 60),
@@ -84,7 +85,7 @@ function normalizeBody(raw) {
  *   occluder: { enabled: boolean, position: number[], radii: number[] },
  *   jaw: { node: string, axis: number[], maxAngleDeg: number, gain: number, lipGain: number, curve: number }|null,
  *   stabilize: { noseHold: number }|null,
- *   body: { model: string, thickness: number, depthGain: number, restShoulder: number, neckAnchor: number[], neckBase: number,
+ *   body: { model: string, thickness: number, armThickness: number, depthGain: number, restShoulder: number, neckAnchor: number[], neckBase: number,
  *     lengths: { torso: number, neck: number, upperArm: number, forearm: number, hand: number } }|null,
  *   morphGains: Record<string, number>,
  *   eyes: { left: string|null, right: string|null, maxYawDeg: number, maxPitchDeg: number, gain: number }|null,

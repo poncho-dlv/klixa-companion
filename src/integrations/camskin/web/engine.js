@@ -45,6 +45,10 @@ async function createPoseLandmarker() {
 // Largeur de l'image envoyee au worker de pose : le modele travaille en 256x256 sur la zone du corps,
 // une image plus grande ne lui apporte rien et coute a copier.
 const POSE_WIDTH = 640;
+// Prediction du corps : retard maximal compense (s) et part de ce retard rattrapee (1 = tout, moins = plus prudent
+// a l'arret d'un geste).
+const MAX_LEAD = 0.08;
+const LEAD_GAIN = 0.85;
 // Repli (pose dans le fil principal) : marge par image pour le rendu 3D et l'envoi de la trame.
 const RENDER_MS = 4;
 const clampInt = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -65,6 +69,7 @@ export async function createFaceEngine() {
   let poseBusy = false;
   let poseLandmarker = null;
   let lastBody = null;
+  let bodyAt = 0; // horloge video (s) de la derniere mesure de pose
   let poseFrame = 0;
   let poseRate = 0; // mesures de pose par seconde (moyenne mobile)
   let lastPoseAt = 0;
@@ -97,7 +102,16 @@ export async function createFaceEngine() {
       bodyFilter.reset();
       return;
     }
-    lastBody = bodyFilter.filter(points, mediaTime).map(([x, y, z, v]) => [round4(x), round4(y), round4(z), Math.round(v * 100) / 100]);
+    bodyFilter.filter(points, mediaTime);
+    bodyAt = mediaTime;
+    lastBody = bodyNow(mediaTime);
+  }
+
+  // Corps a l'instant de l'image courante : la derniere mesure, extrapolee de son retard (borne).
+  function bodyNow(mediaTime) {
+    const lead = Math.min(MAX_LEAD, Math.max(0, mediaTime - bodyAt)) * LEAD_GAIN;
+    const points = bodyFilter.predict(lead);
+    return points ? points.map(([x, y, z, v]) => [round4(x), round4(y), round4(z), Math.round(v * 100) / 100]) : null;
   }
 
   function ensurePose() {
@@ -241,6 +255,7 @@ export async function createFaceEngine() {
         // en place (tete figee, expressions neutres) au lieu de tout faire disparaitre.
         if (withBody && lastFace) {
           pumpPose(video);
+          if (lastBody) lastBody = bodyNow(video.currentTime);
           if (lastBody) {
             const { pose: _pose, ...rest } = lastFace;
             const face = { ...rest, blend: {}, lip: 0, lost: true, body: lastBody };
@@ -254,6 +269,7 @@ export async function createFaceEngine() {
       const face = buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data);
       if (withBody) {
         pumpPose(video);
+        if (lastBody) lastBody = bodyNow(video.currentTime);
         if (lastBody) face.body = lastBody;
       } else {
         lastBody = null;

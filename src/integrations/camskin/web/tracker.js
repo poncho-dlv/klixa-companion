@@ -124,6 +124,9 @@ function buildCalibration(skinId) {
     addRow('Corps : epaisseur', 0.4, 2, 0.05, manifest.body.thickness, (value) => {
       renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, thickness: value } });
     });
+    addRow('Bras : epaisseur', 0.4, 2.5, 0.05, manifest.body.armThickness, (value) => {
+      renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, armThickness: value } });
+    });
     addRow('Corps : profondeur', -1, 1.5, 0.05, manifest.body.depthGain, (value) => {
       renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, depthGain: value } });
     });

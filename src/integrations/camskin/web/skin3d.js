@@ -15,7 +15,7 @@ const POSE_TAU = 0.04; // s : lissage de la pose (suivi ~30 images/s, affichage 
 const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
-const BODY_TAU = 0.03; // s : lissage du squelette (le filtre One Euro fait deja l'essentiel ; plus haut = retard sur les gestes)
+const BODY_TAU = 0.015; // s : lissage residuel du squelette (le filtre One Euro et la prediction font l'essentiel ; plus haut = retard sur les gestes)
 const RETRY_MS = 10000;
 // Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.
 const BODY_SINGLE = ['Torso', 'Neck'];
@@ -243,6 +243,8 @@ export function createSkin3DRenderer({ canvas } = {}) {
     }
     skeleton = blendSkeleton(skeleton, raw, smoothingFactor(dt, BODY_TAU));
     const thick = skeleton.scale * spec.thickness;
+    // Bras, mains et articulations : epaisseur propre (multiplie celle du corps).
+    const armThick = thick * spec.armThickness;
     const rest = spec.lengths;
     const torso = torsoFrame(skeleton);
     placePart(body.parts.Torso, torso, rest.torso, thick);
@@ -273,12 +275,12 @@ export function createSkin3DRenderer({ canvas } = {}) {
       const upper = segmentFrame(arm.shoulder, arm.elbow, arm.outward);
       const fore = segmentFrame(arm.elbow, arm.wrist, arm.outward);
       const hand = segmentFrame(arm.wrist, arm.tip, arm.outward);
-      placePart(body.parts.UpperArm[i], upper, rest.upperArm, thick);
-      placePart(body.parts.Forearm[i], fore, rest.forearm, thick);
-      placePart(body.parts.Hand[i], hand, rest.hand, thick);
-      placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, thick);
-      placeJoint(body.parts.Elbow[i], fore, arm.elbow, thick);
-      placeJoint(body.parts.Wrist[i], hand, arm.wrist, thick);
+      placePart(body.parts.UpperArm[i], upper, rest.upperArm, armThick);
+      placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
+      placePart(body.parts.Hand[i], hand, rest.hand, armThick);
+      placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, armThick);
+      placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick);
     });
     body.group.visible = true;
   }
