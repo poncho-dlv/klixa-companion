@@ -354,7 +354,8 @@ async function main() {
       } else {
         engine.reset();
       }
-      render(result.face, result.landmarks, result.body);
+      // Fenetre cachee (suivi pour OBS seulement) : l'apercu n'est vu par personne, on economise le rendu.
+      if (!document.hidden) render(result.face, result.landmarks, result.body);
     }
     const now = performance.now();
     if (now - stats.lastLog >= 1000) {

@@ -43,9 +43,12 @@ async function createPoseLandmarker() {
   }
 }
 
-// Cible 60 images/s (16,6 ms par image) : visage ~7 ms a chaque image, pose "heavy" ~10 ms une image sur
-// trois (20 Hz) pour ne jamais depasser le budget ; le filtre One Euro et le lissage du rendu comblent.
-const POSE_EVERY = 3;
+// Cadence de la pose adaptee a la camera : a chaque image, le visage (~7 ms) ; la pose "heavy" (~10 ms) n'est
+// ajoutee que si les deux tiennent dans l'intervalle entre deux images (60 fps = 16,6 ms -> une image sur
+// deux ; 30 fps ou moins -> a chaque image). Les durees et l'intervalle sont mesures en continu.
+// Marge pour le rendu 3D et l'envoi de la trame, par image.
+const RENDER_MS = 4;
+const clampInt = (n, min, max) => Math.min(max, Math.max(min, n));
 
 /**
  * @returns {Promise<{ delegate: string, detect: (video: HTMLVideoElement, landmarks?: boolean, body?: boolean) => { face: object|null, landmarks: object[]|null }, reset: () => void }>}
@@ -58,6 +61,13 @@ export async function createFaceEngine() {
   let poseLoading = false;
   let lastBody = null;
   let poseFrame = 0;
+  const perf = { frame: 33, face: 7, pose: 10 }; // ms, moyennes mobiles
+  const track = (key, value) => { perf[key] += (value - perf[key]) * 0.1; };
+  let lastMediaTime = -1;
+  function poseDue() {
+    const every = clampInt(Math.ceil((perf.face + perf.pose + RENDER_MS) / Math.max(8, perf.frame)), 1, 4);
+    return poseFrame++ % every === 0;
+  }
   // Derniere trame de visage valide : sert de base quand le visage sort du champ mais que le corps reste visible.
   let lastFace = null;
   const bodyFilter = createBodyFilter();
@@ -72,7 +82,9 @@ export async function createFaceEngine() {
 
   // Points utiles du corps : [x, y, z monde (m), visibilite], dans l'ordre de BODY_LANDMARKS.
   function detectBody(video) {
-    const res = poseLandmarker.detectForVideo(video, performance.now());
+    const started = performance.now();
+    const res = poseLandmarker.detectForVideo(video, started);
+    track('pose', performance.now() - started);
     const lms = res.landmarks?.[0];
     const world = res.worldLandmarks?.[0];
     if (!lms || !world) return null;
@@ -148,7 +160,11 @@ export async function createFaceEngine() {
     detect(video, withLandmarks = false, withBody = false) {
       const w = video.videoWidth;
       const h = video.videoHeight;
-      const res = landmarker.detectForVideo(video, performance.now());
+      if (lastMediaTime >= 0 && video.currentTime > lastMediaTime) track('frame', (video.currentTime - lastMediaTime) * 1000);
+      lastMediaTime = video.currentTime;
+      const faceStart = performance.now();
+      const res = landmarker.detectForVideo(video, faceStart);
+      track('face', performance.now() - faceStart);
       const lms = res.faceLandmarks?.[0];
       if (!lms) {
         smooth = null;
@@ -156,7 +172,7 @@ export async function createFaceEngine() {
         // en place (tete figee, expressions neutres) au lieu de tout faire disparaitre.
         if (withBody && lastFace) {
           ensurePose();
-          if (poseLandmarker && poseFrame++ % POSE_EVERY === 0) lastBody = detectBody(video);
+          if (poseLandmarker && poseDue()) lastBody = detectBody(video);
           if (lastBody) {
             const { pose: _pose, ...rest } = lastFace;
             const face = { ...rest, blend: {}, lip: 0, lost: true, body: lastBody };
@@ -170,7 +186,7 @@ export async function createFaceEngine() {
       const face = buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data);
       if (withBody) {
         ensurePose();
-        if (poseLandmarker && poseFrame++ % POSE_EVERY === 0) lastBody = detectBody(video);
+        if (poseLandmarker && poseDue()) lastBody = detectBody(video);
         if (lastBody) face.body = lastBody;
       } else {
         lastBody = null;

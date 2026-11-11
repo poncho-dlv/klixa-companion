@@ -15,7 +15,7 @@ const POSE_TAU = 0.04; // s : lissage de la pose (suivi ~30 images/s, affichage 
 const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
-const BODY_TAU = 0.07; // s : lissage du squelette (pose du corps ~15 images/s)
+const BODY_TAU = 0.03; // s : lissage du squelette (le filtre One Euro fait deja l'essentiel ; plus haut = retard sur les gestes)
 const RETRY_MS = 10000;
 // Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.
 const BODY_SINGLE = ['Torso', 'Neck'];

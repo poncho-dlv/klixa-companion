@@ -42,7 +42,7 @@ export function sanitizeBody(raw) {
  * @param {{ minCutoff?: number, beta?: number, dCutoff?: number }} [options] minCutoff (Hz) : lissage au repos ;
  *   beta : reactivite aux mouvements rapides ; dCutoff : lissage de la vitesse
  */
-export function createBodyFilter({ minCutoff = 0.6, beta = 3, dCutoff = 1 } = {}) {
+export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1 } = {}) {
   let state = null; // [point][axe] -> { x, dx }
   let lastT = null;
   const alpha = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
