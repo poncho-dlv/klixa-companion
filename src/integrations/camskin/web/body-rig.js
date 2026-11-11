@@ -150,6 +150,23 @@ const DEFAULT_BODY_PARAMS = {
 };
 
 /**
+ * Coude d'un bras dont on connait l'epaule et le poignet (cinematique inverse a deux segments) : sur le
+ * cercle des positions possibles, celle qui pointe le plus vers `pole`. Bras trop court pour atteindre
+ * le poignet : coude sur la ligne epaule-poignet, au prorata des longueurs.
+ */
+function bendElbow(shoulder, wrist, upper, lower, pole) {
+  const delta = sub(wrist, shoulder);
+  const dist = length(delta);
+  if (dist < 1e-6) return add(shoulder, mul(pole, upper));
+  const dir = mul(delta, 1 / dist);
+  if (dist >= upper + lower) return add(shoulder, mul(dir, (dist * upper) / (upper + lower)));
+  const along = clamp((upper * upper - lower * lower + dist * dist) / (2 * dist), -upper, upper);
+  const height = Math.sqrt(Math.max(0, upper * upper - along * along));
+  const side = normalize(sub(pole, mul(dir, dot(pole, dir))), [0, -1, 0]);
+  return add(add(shoulder, mul(dir, along)), mul(side, height));
+}
+
+/**
  * Squelette (cm, repere camera) deduit des points de corps et de la profondeur de la tete.
  * Les membres hors champ ou peu visibles retombent sur une pose de repos le long du corps.
  *
@@ -206,14 +223,21 @@ export function solveBody(body, view, headDepth, options = {}) {
       const upper = p.lengths.upperArm * scale;
       const lower = p.lengths.forearm * scale;
       const hand = p.lengths.hand * scale * p.handReach;
-      // Chaque articulation glisse entre sa position de repos (bras le long du corps, dans le prolongement
-      // du segment precedent) et sa position mesuree, selon la confiance ; un poignet ne vaut pas mieux que son coude.
+      // Chaque articulation glisse entre une position deduite et sa position mesuree, selon la confiance.
+      // Le poignet est juge seul : main levee dans l'image avec le coude hors champ, c'est le cas courant
+      // devant une webcam. Le coude manquant est alors deduit de l'epaule et du poignet (bras plie vers
+      // le bas et l'exterieur) ; sans poignet non plus, le bras pend le long du corps.
       const elbowWeight = confidence(elbowIndex, p.elbowVisibility);
-      const wristWeight = elbowWeight * confidence(wristIndex, p.limbVisibility);
+      const wristWeight = confidence(wristIndex, p.limbVisibility);
       const handWeight = wristWeight * Math.min(confidence(pinkyIndex, p.limbVisibility), confidence(indexIndex, p.limbVisibility));
-      const elbow = mix(add(shoulder, mul(down, upper)), elbowWeight > 0 ? point(elbowIndex) : shoulder, elbowWeight);
+      const hanging = add(shoulder, mul(down, upper));
+      const wristMeasured = wristWeight > 0 ? point(wristIndex) : null;
+      const deduced = wristMeasured
+        ? mix(hanging, bendElbow(shoulder, wristMeasured, upper, lower, normalize(add(down, mul(outward, 0.6)))), wristWeight)
+        : hanging;
+      const elbow = elbowWeight > 0 ? mix(deduced, point(elbowIndex), elbowWeight) : deduced;
       const forearmDir = normalize(sub(elbow, shoulder));
-      const wrist = mix(add(elbow, mul(forearmDir, lower)), wristWeight > 0 ? point(wristIndex) : elbow, wristWeight);
+      const wrist = wristMeasured ? mix(add(elbow, mul(forearmDir, lower)), wristMeasured, wristWeight) : add(elbow, mul(forearmDir, lower));
       // Direction de la main : poignet -> milieu index/auriculaire, sinon dans le prolongement de l'avant-bras.
       const alongForearm = normalize(sub(wrist, elbow), forearmDir);
       const handDir = handWeight > 0

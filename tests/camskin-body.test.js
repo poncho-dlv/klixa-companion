@@ -90,7 +90,7 @@ test('solveBody : hanches visibles et plausibles utilisees, aberrantes ignorees'
 });
 
 test('solveBody : un bras hors champ pend le long du corps', () => {
-  const sk = solveBody(standingBody({ elbowL: [0.7, 0.9, 0, 0.1] }), VIEW, 60);
+  const sk = solveBody(standingBody({ elbowL: [0.7, 0.9, 0, 0.1], wristL: [0.7, 1.2, 0, 0.05], pinkyL: [0.7, 1.3, 0, 0.05], indexL: [0.7, 1.3, 0, 0.05] }), VIEW, 60);
   const arm = sk.arms[0];
   assert.equal(arm.hasElbow, false);
   assert.equal(arm.hasWrist, false);
@@ -105,6 +105,18 @@ test('solveBody : coude sorti, main cachee : le coude suit meme avec une visibil
   assert.equal(arm.hasElbow, true);
   assert.equal(arm.hasWrist, false);
   assert.ok(Math.abs(arm.elbow[0] - arm.shoulder[0]) > 5, 'le coude est ecarte du corps');
+});
+
+test('solveBody : main levee visible, coude hors champ : la patte suit la main, le coude est deduit', () => {
+  const sk = solveBody(standingBody({ elbowL: [0.8, 1.3, 0, 0.05], wristL: [0.85, 0.45, 0, 0.98], pinkyL: [0.87, 0.38, 0, 0.98], indexL: [0.84, 0.37, 0, 0.98] }), VIEW, 60);
+  const arm = sk.arms[0];
+  assert.equal(arm.hasWrist, true);
+  assert.equal(arm.hasElbow, false);
+  const expected = unproject(0.85, 0.45, VIEW.w, VIEW.h, 60, 63);
+  near(arm.wrist[0], expected[0]);
+  near(arm.wrist[1], expected[1]);
+  assert.ok(arm.elbow[1] < arm.wrist[1], 'le coude deduit est sous la main levee');
+  assert.ok(arm.tip[1] > arm.wrist[1], 'les doigts pointent vers le haut');
 });
 
 test('solveBody : la profondeur du corps suit la pose monde, bornee', () => {
