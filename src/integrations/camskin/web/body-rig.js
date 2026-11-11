@@ -167,7 +167,9 @@ const DEFAULT_BODY_PARAMS = {
   // Coude : plage basse, car cache par le corps ou la main il garde une position estimee correcte (coude
   // sorti, main cachee : le bras s'ecarte quand meme).
   elbowVisibility: [0.1, 0.35],
-  limbVisibility: [0.25, 0.5],
+  // Poignet et main : plage basse aussi. Un point cache mais DANS l'image (main passee derriere la tete, le
+  // dos...) reste bien estime par le modele ; c'est hors de l'image qu'il invente (voir offFrame).
+  limbVisibility: [0.04, 0.2],
   hipVisibility: [0.3, 0.6],
   // Hors de l'image, le modele invente la position : la confiance tombe entre ces deux distances au bord
   // (en fraction de l'image).

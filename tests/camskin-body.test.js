@@ -90,7 +90,7 @@ test('solveBody : hanches visibles et plausibles utilisees, aberrantes ignorees'
 });
 
 test('solveBody : un bras hors champ pend le long du corps', () => {
-  const sk = solveBody(standingBody({ elbowL: [0.7, 0.9, 0, 0.1], wristL: [0.7, 1.2, 0, 0.05], pinkyL: [0.7, 1.3, 0, 0.05], indexL: [0.7, 1.3, 0, 0.05] }), VIEW, 60);
+  const sk = solveBody(standingBody({ elbowL: [0.7, 0.9, 0, 0.1], wristL: [0.7, 1.2, 0, 0.02], pinkyL: [0.7, 1.3, 0, 0.02], indexL: [0.7, 1.3, 0, 0.02] }), VIEW, 60);
   const arm = sk.arms[0];
   assert.equal(arm.hasElbow, false);
   assert.equal(arm.hasWrist, false);
@@ -138,6 +138,13 @@ test('solveBody : shoulderSpread ecarte les epaules autour de leur milieu et gro
   near(wide.shoulderWidth, base.shoulderWidth * 1.25);
   near(wide.scale, base.scale * 1.25);
   near(wide.arms[0].shoulder[0] - wide.shoulderMid[0], (base.arms[0].shoulder[0] - base.shoulderMid[0]) * 1.25);
+});
+
+test('solveBody : poignet cache mais dans l image (main derriere la tete) : l avant-bras le rejoint', () => {
+  const sk = solveBody(standingBody({ elbowL: [0.8, 0.45, 0, 0.9], wristL: [0.55, 0.3, 0.2, 0.12], pinkyL: [0.53, 0.28, 0.2, 0.1], indexL: [0.53, 0.3, 0.2, 0.1] }), VIEW, 60);
+  const arm = sk.arms[0];
+  assert.ok(arm.wrist[0] < arm.elbow[0], 'le poignet revient vers la tete, il ne prolonge pas le haut du bras');
+  assert.ok(arm.wrist[2] < arm.elbow[2], 'et il est plus loin de la camera que le coude');
 });
 
 test('solveBody : la profondeur du corps suit la pose monde, bornee', () => {
