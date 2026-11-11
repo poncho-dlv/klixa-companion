@@ -65,6 +65,13 @@ test('solveBody : epaules invisibles = pas de corps', () => {
   assert.equal(solveBody(standingBody({ shoulderL: [0.65, 0.62, 0.2, 0] }), VIEW, 60), null);
 });
 
+test('solveBody : une epaule nettement hors de l image = pas de corps (sortie du champ)', () => {
+  assert.equal(solveBody(standingBody({ shoulderL: [1.2, 0.62, 0, 0.99] }), VIEW, 60), null);
+  assert.equal(solveBody(standingBody({ shoulderR: [-0.15, 0.62, 0, 0.99] }), VIEW, 60), null);
+  // Un leger depassement (personne large, pres de la camera) reste accepte.
+  assert.ok(solveBody(standingBody({ shoulderL: [1.05, 0.62, 0, 0.99] }), VIEW, 60));
+});
+
 test('solveBody : echelle, hanches estimees et bras de face', () => {
   const sk = solveBody(standingBody(), VIEW, 60);
   assert.ok(sk);

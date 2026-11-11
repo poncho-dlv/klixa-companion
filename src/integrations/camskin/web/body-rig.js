@@ -162,6 +162,8 @@ const DEFAULT_BODY_PARAMS = {
   depthGain: 0.6,
   maxDepthOffset: 40,
   minVisibility: 0.5,
+  // Depassement tolere d'une epaule hors de l'image (fraction de l'image) avant de renoncer au corps.
+  shoulderOutside: 0.1,
   // Confiance d'un point = transition douce entre deux visibilites [debut, pleine]. Pas de seuil sec : un point
   // dont la visibilite oscille ferait sauter le membre entre sa position suivie et sa position de repos.
   // Coude : plage basse, car cache par le corps ou la main il garde une position estimee correcte (coude
@@ -243,6 +245,12 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
   const J = BODY_JOINT;
   const vis = (i) => body[i][3];
   if (vis(J.shoulderL) < p.minVisibility || vis(J.shoulderR) < p.minVisibility) return null;
+  // Une epaule nettement sortie de l'image est inventee par le modele (personne qui quitte le champ) : il
+  // garde une bonne "visibilite" mais le squelette se deforme. Pas de corps plutot qu'un corps faux.
+  for (const i of [J.shoulderL, J.shoulderR]) {
+    const [x, y] = body[i];
+    if (Math.max(-x, x - 1, -y, y - 1) > p.shoulderOutside) return null;
+  }
 
   // Profondeur relative a la tete : moyenne nez/oreilles comme reference (monde en m -> cm).
   const ref = (body[J.nose][2] + body[J.earL][2] + body[J.earR][2]) / 3;

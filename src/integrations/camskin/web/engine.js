@@ -50,6 +50,9 @@ const POSE_WIDTH = 640;
 const MAX_LEAD = 0.08;
 // Une main detectee est rattachee au poignet du corps le plus proche, a moins de cette distance (fraction de l'image).
 const HAND_MATCH = 0.15;
+// Visage perdu : ecart maximal entre l'ancien visage et la tete vue par le modele du corps, en ecarts des yeux
+// (~ une largeur de tete et demie). Au-dela, le skin disparait.
+const LOST_HEAD_RADIUS = 3;
 const LEAD_GAIN = 0.85;
 // Repli (pose dans le fil principal) : marge par image pour le rendu 3D et l'envoi de la trame.
 const RENDER_MS = 4;
@@ -272,6 +275,14 @@ export async function createFaceEngine() {
     handFilters.forEach((f) => f.reset());
   }
 
+  // Visage perdu : la tete vue par le modele du corps (nez) est-elle encore la ou etait le visage ? Sinon la
+  // personne est partie (ou sort du champ) : garder le skin fige a l'ancien endroit n'aurait pas de sens.
+  function headStillThere() {
+    const nose = lastBody[BODY_JOINT.nose];
+    const distance = Math.hypot(nose[0] * lastFace.w - lastFace.nose.x, nose[1] * lastFace.h - lastFace.nose.y);
+    return nose[3] >= 0.3 && distance < lastFace.u * LOST_HEAD_RADIUS;
+  }
+
   // Ajoute le corps et les mains a une trame de visage.
   function withBodyData(face) {
     if (lastBody) {
@@ -310,7 +321,7 @@ export async function createFaceEngine() {
         smooth = null;
         // Visage perdu (hors champ, tete baissee...) : si le corps est encore la, on garde le skin
         // en place (tete figee, expressions neutres) au lieu de tout faire disparaitre.
-        if (lastFace && lastBody) {
+        if (lastFace && lastBody && headStillThere()) {
           const { pose: _pose, ...rest } = lastFace;
           return { face: withBodyData({ ...rest, blend: {}, lip: 0, lost: true }), landmarks: null, ...debug };
         }

@@ -16,7 +16,9 @@ let wrists = [];
 async function create() {
   const fileset = await FilesetResolver.forVisionTasks('/vendor/wasm');
   const make = (model, delegate) => PoseLandmarker.createFromOptions(fileset, {
-    runningMode: 'VIDEO', numPoses: 1, baseOptions: { modelAssetPath: `/models/pose_landmarker_${model}.task`, delegate }
+    runningMode: 'VIDEO', numPoses: 1, baseOptions: { modelAssetPath: `/models/pose_landmarker_${model}.task`, delegate },
+    // Plus exigeant que le defaut (0,5) : quand la personne sort du champ, le suivi lache au lieu d'inventer.
+    minPoseDetectionConfidence: 0.6, minPosePresenceConfidence: 0.65, minTrackingConfidence: 0.65
   });
   try {
     return { landmarker: await make('heavy', 'GPU'), model: 'heavy GPU' };
