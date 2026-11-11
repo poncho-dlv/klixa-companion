@@ -7,7 +7,7 @@
 // camera : le skin s'aligne sur l'image quel que soit le vrai champ de la webcam.
 import * as THREE from '/vendor-three/three.module.js';
 import { GLTFLoader } from '/vendor-three-addons/loaders/GLTFLoader.js';
-import { solveBody, solveHands, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame, clearTorso } from './body-rig.js';
+import { solveBody, solveArms, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame, clearTorso } from './body-rig.js';
 import { BLEND_NAMES, normalizeSkinManifest, resolveModelUrl, jawAngle, gazeAngles, breathValue, poseHoldWeight, smoothingFactor, isBlendName } from './skin-manifest.js';
 
 const FOV = 63;
@@ -259,27 +259,40 @@ export function createSkin3DRenderer({ canvas } = {}) {
     node.visible = true;
   }
 
-  /** Mains seules : une patte (et son bracelet) par main suivie, le reste du corps est cache. */
-  function updateHandsOnly(body, face, spec) {
+  /**
+   * Corps partiel (pas de torse exploitable) : par cote, la patte et ce qui est reellement vu du bras
+   * (avant-bras si le coude est vu, haut du bras si l'epaule l'est aussi). Le reste du corps est cache.
+   */
+  function updatePartial(body, face, spec) {
     skeleton = null;
-    const solved = solveHands(face.hands, { w: face.w, h: face.h }, { fov: FOV });
-    for (const [name, part] of Object.entries(body.parts)) {
-      if (name === 'Hand' || name === 'Wrist') continue;
+    const rest = spec.lengths;
+    const arms = solveArms(face.body ?? null, face.hands ?? null, { w: face.w, h: face.h }, {
+      fov: FOV, depthGain: spec.depthGain, lengths: rest, ...(hasPose ? { defaultDepth: -pose.position.z } : {})
+    });
+    for (const part of Object.values(body.parts)) {
       for (const node of Array.isArray(part) ? part : [part]) if (node) node.visible = false;
     }
-    solved.forEach((arm, i) => {
-      const nodes = [body.parts.Hand[i], body.parts.Wrist[i]];
-      if (!arm) {
-        for (const node of nodes) if (node) node.visible = false;
-        return;
+    // Epaisseur du bras : la derniere connue (corps complet), sinon celle du manifeste a l'echelle 1.
+    const armThick = body.armThick ?? spec.thickness * spec.armThickness;
+    arms.forEach((arm, i) => {
+      if (!arm) return;
+      const hand = arm.thumb ? handFrame(arm) : limbFrame(arm.wrist, arm.tip, arm.outward);
+      const handThick = Math.min(3, Math.max(armThick * 0.85, hand.length / rest.hand));
+      placePart(body.parts.Hand[i], hand, rest.hand, handThick, handThick * (hand.mirror ?? 1));
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * 0.8);
+      if (arm.elbow) {
+        const fore = limbFrame(arm.elbow, arm.wrist, arm.outward);
+        placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
+        placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
       }
-      const hand = handFrame(arm);
-      const handThick = Math.min(3, Math.max(0.3, hand.length / spec.lengths.hand));
-      placePart(body.parts.Hand[i], hand, spec.lengths.hand, handThick, handThick * hand.mirror);
-      placeJoint(body.parts.Wrist[i], hand, arm.wrist, handThick * 0.8);
+      if (arm.shoulder) {
+        const upper = limbFrame(arm.shoulder, arm.elbow, arm.outward);
+        placePart(body.parts.UpperArm[i], upper, rest.upperArm, armThick);
+        placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, armThick);
+      }
       setArmFront(body, i, false);
     });
-    body.group.visible = solved.some(Boolean);
+    body.group.visible = arms.some(Boolean);
   }
 
   function updateBody(entry, face, dt) {
@@ -297,8 +310,8 @@ export function createSkin3DRenderer({ canvas } = {}) {
       }, face.hands ?? null)
       : null;
     if (!raw) {
-      // Pas de corps exploitable (personne presque sortie du champ...) : les mains visibles gardent leur patte.
-      if (face.hands) updateHandsOnly(body, face, spec);
+      // Pas de corps exploitable (personne presque sortie du champ...) : on garde ce qui est reellement vu des bras.
+      if (face.hands || face.body) updatePartial(body, face, spec);
       else hideBody(entry);
       return;
     }
@@ -306,6 +319,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     const thick = skeleton.scale * spec.thickness;
     // Bras, mains et articulations : epaisseur propre (multiplie celle du corps).
     const armThick = thick * spec.armThickness;
+    body.armThick = armThick;
     const rest = spec.lengths;
     const torso = torsoFrame(skeleton);
     // Torse : largeur propre (le buste reel deborde des articulations d'epaule), sans toucher a sa profondeur.

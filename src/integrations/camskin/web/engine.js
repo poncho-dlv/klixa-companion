@@ -336,8 +336,9 @@ export async function createFaceEngine() {
           return { face: withBodyData({ ...rest, blend: {}, lip: 0, lost: true }), landmarks: null, ...debug };
         }
         lastFace = null;
-        // Ni visage ni corps exploitable, mais une main dans le champ : trame "mains seules" (pattes sans tete ni corps).
-        if (lastHands) return { face: withBodyData(handsOnlyFrame(w, h)), landmarks: null, ...debug };
+        // Pas de visage, mais une main ou un bout de corps dans le champ : trame sans tete (`handsOnly`) ; le rendu
+        // n'en dessine que ce qui est reellement vu (pattes, bras).
+        if (lastHands || lastBody) return { face: withBodyData(handsOnlyFrame(w, h)), landmarks: null, ...debug };
         return { face: null, landmarks: null };
       }
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));

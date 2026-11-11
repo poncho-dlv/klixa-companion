@@ -201,6 +201,8 @@ const DEFAULT_BODY_PARAMS = {
   palmRatio: 0.27,
   // Mains seules (ni corps ni visage) : longueur reelle d'une paume (cm) et bornes de profondeur (cm).
   palmCm: 9.5,
+  // Bras partiels : visibilite minimale d'une articulation pour etre dessinee (en plus d'etre dans l'image).
+  partialVisibility: 0.6,
   handsOnlyDepth: [15, 200],
   handNear: 0.45,
   handFar: 1.5,
@@ -273,6 +275,45 @@ export function solveHands(hands, view, options = {}) {
     const depth = clamp(p.palmCm / (palm * imageWidthAt1(view, p.fov)), p.handsOnlyDepth[0], p.handsOnlyDepth[1]);
     const pose = handPose(lm, view, depth, p, [0, 1, 0], [1, 0, 0]);
     return { wrist: pose.wrist, tip: add(pose.wrist, mul(pose.fingers, pose.palm * p.palmReach)), thumb: pose.thumb, mirrored: side === 0 };
+  });
+}
+
+/**
+ * Bras partiels, sans torse : quand le corps entier n'est pas exploitable (personne presque sortie du champ,
+ * tete hors cadre...), on garde ce qui est REELLEMENT vu. Par cote : la main (suivie point par point, sinon
+ * le poignet du modele du corps), puis l'avant-bras si le coude est vu, puis le haut du bras si l'epaule
+ * l'est aussi. "Vu" = bien visible ET dans l'image : hors de l'image le modele invente, rien n'en est tire.
+ * @param {number[][]|null} body points du corps (voir sanitizeBody), ou null
+ * @param {(number[][]|null)[]|null} hands mains suivies (voir sanitizeHands), ou null
+ * @param {{ w: number, h: number }} view taille de l'image
+ * @param {Partial<typeof DEFAULT_BODY_PARAMS> & { defaultDepth?: number }} [options] defaultDepth : profondeur
+ *   (cm) d'un bras sans main suivie (celle de la tete si elle est connue)
+ * @returns {({ shoulder: number[]|null, elbow: number[]|null, wrist: number[], tip: number[], thumb: number[]|null,
+ *   mirrored: boolean, outward: number[] }|null)[]} une entree par cote (gauche, droite de la personne)
+ */
+export function solveArms(body, hands, view, options = {}) {
+  const p = { ...DEFAULT_BODY_PARAMS, defaultDepth: 60, ...options, lengths: { ...DEFAULT_BODY_PARAMS.lengths, ...options.lengths } };
+  const J = BODY_JOINT;
+  const seen = (i) => Boolean(body) && body[i][3] >= p.partialVisibility && Math.min(body[i][0], 1 - body[i][0], body[i][1], 1 - body[i][1]) > 0;
+  const tracked = solveHands(hands, view, p);
+  return [[J.shoulderL, J.elbowL, J.wristL], [J.shoulderR, J.elbowR, J.wristR]].map(([shoulderIndex, elbowIndex, wristIndex], side) => {
+    const hand = tracked[side];
+    if (!hand && !seen(wristIndex)) return null;
+    // Dans l'image non retournee, le bras gauche de la personne est a droite : son exterieur est vers +X.
+    const outward = [side === 0 ? 1 : -1, 0, 0];
+    const depth = hand ? -hand.wrist[2] : p.defaultDepth;
+    // Les autres articulations : meme pixel que la pose, profondeur relative au poignet (modele du corps).
+    const at = (i) => {
+      const offset = body ? clamp((body[i][2] - body[wristIndex][2]) * 100 * p.depthGain, -p.maxDepthOffset, p.maxDepthOffset) : 0;
+      return unproject(body[i][0], body[i][1], view.w, view.h, Math.max(10, depth + offset), p.fov);
+    };
+    const wrist = hand ? hand.wrist : at(wristIndex);
+    const elbow = seen(elbowIndex) ? at(elbowIndex) : null;
+    const shoulder = elbow && seen(shoulderIndex) ? at(shoulderIndex) : null;
+    // Sans main suivie, la patte prolonge l'avant-bras : il faut donc le coude.
+    if (!hand && !elbow) return null;
+    const tip = hand ? hand.tip : add(wrist, mul(normalize(sub(wrist, elbow)), p.lengths.hand * p.handReach));
+    return { shoulder, elbow, wrist, tip, thumb: hand ? hand.thumb : null, mirrored: side === 0, outward };
   });
 }
 

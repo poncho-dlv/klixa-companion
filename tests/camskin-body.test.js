@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, solveHands, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
+  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, solveHands, solveArms, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
 } from '../src/integrations/camskin/web/body-rig.js';
 import { normalizeSkinManifest } from '../src/integrations/camskin/web/skin-manifest.js';
 import { sanitizeFace } from '../src/integrations/camskin.js';
@@ -446,4 +446,29 @@ test('solveHands : main seule placee sur son pixel, profondeur deduite de sa tai
   const size = (a) => Math.hypot(a.tip[0] - a.wrist[0], a.tip[1] - a.wrist[1], a.tip[2] - a.wrist[2]);
   near(size(big), size(left), 0.05);
   assert.deepEqual(solveHands(null, VIEW), [null, null]);
+});
+
+test('solveArms : seul ce qui est reellement vu du bras est rendu', () => {
+  const hand = flatHand(0.3, 0.6, 1, 0.1);
+  // Main suivie, coude et epaule bien vus : bras complet, rattache au poignet de la main.
+  const full = solveArms(standingBody({ shoulderL: [0.7, 0.2, 0, 0.99], elbowL: [0.5, 0.4, 0, 0.95], wristL: [0.3, 0.6, 0, 0.95] }), [hand, null], VIEW)[0];
+  assert.ok(full.shoulder && full.elbow && full.thumb);
+  near(full.elbow[2], full.wrist[2], 1e-6);
+  // Epaule hors de l'image : pas de haut du bras, l'avant-bras reste.
+  const noShoulder = solveArms(standingBody({ shoulderL: [1.2, 0.2, 0, 0.99], elbowL: [0.5, 0.4, 0, 0.95], wristL: [0.3, 0.6, 0, 0.95] }), [hand, null], VIEW)[0];
+  assert.equal(noShoulder.shoulder, null);
+  assert.ok(noShoulder.elbow);
+  // Coude peu visible : ni avant-bras ni haut du bras (meme si l'epaule est vue), la patte seule.
+  const handOnly = solveArms(standingBody({ shoulderL: [0.7, 0.2, 0, 0.99], elbowL: [0.5, 0.4, 0, 0.2], wristL: [0.3, 0.6, 0, 0.95] }), [hand, null], VIEW)[0];
+  assert.equal(handOnly.elbow, null);
+  assert.equal(handOnly.shoulder, null);
+  // Sans main suivie : le poignet et le coude du modele du corps suffisent, la patte prolonge l'avant-bras.
+  const poseOnly = solveArms(standingBody({ elbowL: [0.5, 0.4, 0, 0.95], wristL: [0.3, 0.6, 0, 0.95] }), null, VIEW, { defaultDepth: 80 })[0];
+  near(poseOnly.wrist[2], -80);
+  assert.equal(poseOnly.thumb, null);
+  assert.ok(poseOnly.tip[0] < poseOnly.wrist[0], 'la patte prolonge le bras');
+  // Rien de vu de ce cote, ou aucun corps : pas de bras ; une main sans corps garde sa patte.
+  assert.equal(solveArms(standingBody({ wristR: [0.3, 1.4, 0, 0.9] }), null, VIEW)[1], null);
+  assert.ok(solveArms(null, [hand, null], VIEW)[0].thumb);
+  assert.deepEqual(solveArms(null, null, VIEW), [null, null]);
 });
