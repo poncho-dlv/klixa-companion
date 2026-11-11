@@ -160,7 +160,7 @@ test('le dragon declare un corps dont le modele existe avec les noeuds attendus'
   for (const name of ['Torso', 'Neck', 'Wing', 'UpperArm', 'Forearm', 'Hand', 'Shoulder', 'Elbow', 'Wrist']) {
     assert.ok(names.includes(name), `noeud ${name} absent du modele`);
   }
-  assert.ok(fs.existsSync(path.join(root, 'assets', 'camskin', 'pose_landmarker_full.task')));
+  for (const model of ['full', 'heavy']) assert.ok(fs.existsSync(path.join(root, 'assets', 'camskin', `pose_landmarker_${model}.task`)));
 });
 
 test('sanitizeFace : le corps est facultatif mais refuse s il est mal forme', () => {

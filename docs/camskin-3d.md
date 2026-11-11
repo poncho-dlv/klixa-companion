@@ -93,7 +93,7 @@ bouche y≈-6,2 cm) et la tête est assez grande pour couvrir cheveux, casque et
 ## Corps (torse, cou, bras)
 
 Un skin peut avoir un corps : le moteur suit alors aussi le corps de la personne (MediaPipe
-**Pose Landmarker**, `assets/camskin/pose_landmarker_full.task`, lance en plus du visage, une image
+**Pose Landmarker**, `assets/camskin/pose_landmarker_heavy.task` (GPU ; repli CPU sur `pose_landmarker_full.task`), lance en plus du visage, une image
 sur deux, seulement si le skin l'a demande : `body: true` dans `skins.js`, case « Corps » de la
 fenetre de suivi). Les points utiles (nez, oreilles, epaules, coudes, poignets, mains, hanches ;
 `BODY_LANDMARKS`) voyagent dans la trame `face.body`, valides cote serveur par `sanitizeBody`.

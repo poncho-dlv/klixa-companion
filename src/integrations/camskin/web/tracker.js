@@ -266,21 +266,27 @@ const BODY_BONES = [['shoulderL', 'shoulderR'], ['shoulderL', 'elbowL'], ['elbow
 
 function drawBodyDebug(ctx, body, w, h) {
   const at = (name) => body[BODY_JOINT[name]];
-  ctx.lineWidth = 2;
-  for (const [a, b] of BODY_BONES) {
-    const p = at(a);
-    const q = at(b);
-    ctx.strokeStyle = Math.min(p[3], q[3]) >= 0.5 ? 'rgba(80,255,80,.9)' : 'rgba(255,80,80,.7)';
-    ctx.beginPath();
-    ctx.moveTo(p[0] * w, p[1] * h);
-    ctx.lineTo(q[0] * w, q[1] * h);
-    ctx.stroke();
+  ctx.lineCap = 'round';
+  const bones = BODY_BONES.map(([a, b]) => [at(a), at(b)]);
+  // Deux passes : un contour sombre, puis la couleur (lisible sur n'importe quel fond / skin).
+  for (const [width, colored] of [[8, false], [4, true]]) {
+    ctx.lineWidth = width;
+    for (const [p, q] of bones) {
+      ctx.strokeStyle = colored ? (Math.min(p[3], q[3]) >= 0.5 ? '#3f3' : '#f55') : 'rgba(0,0,0,.75)';
+      ctx.beginPath();
+      ctx.moveTo(p[0] * w, p[1] * h);
+      ctx.lineTo(q[0] * w, q[1] * h);
+      ctx.stroke();
+    }
   }
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,.85)';
   for (const p of body) {
     ctx.fillStyle = p[3] >= 0.5 ? '#3f3' : '#f55';
     ctx.beginPath();
-    ctx.arc(p[0] * w, p[1] * h, 4, 0, Math.PI * 2);
+    ctx.arc(p[0] * w, p[1] * h, 7, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
   }
 }
 

@@ -29,15 +29,17 @@ async function createLandmarker() {
   }
 }
 
+// Modele "heavy" (le plus precis) sur GPU : ~10 ms par image ; sur CPU il passe a ~80 ms, on y prefere
+// "full" (~24 ms). Mesures sur webcam 1280x720.
 async function createPoseLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks('/vendor/wasm');
-  const base = { modelAssetPath: '/models/pose_landmarker_full.task' };
   const options = { runningMode: 'VIDEO', numPoses: 1 };
+  const make = (model, delegate) => PoseLandmarker.createFromOptions(fileset, { ...options, baseOptions: { modelAssetPath: `/models/pose_landmarker_${model}.task`, delegate } });
   try {
-    return await PoseLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...base, delegate: 'GPU' } });
+    return await make('heavy', 'GPU');
   } catch (error) {
-    console.warn('Pose : GPU indisponible, repli CPU', error?.message);
-    return PoseLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...base, delegate: 'CPU' } });
+    console.warn('Pose : GPU indisponible, repli CPU (modele full)', error?.message);
+    return make('full', 'CPU');
   }
 }
 
