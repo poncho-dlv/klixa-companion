@@ -225,7 +225,7 @@ async function openCamera(deviceId) {
   // resizeMode 'none' : sans ca Chrome recadre/etire l'image vers le ratio demande (16:9) au lieu
   // de garder le format natif de la camera (4:3...), d'ou un ratio different de celui d'OBS.
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, resizeMode: 'none' },
+    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 30 }, resizeMode: 'none' },
     audio: false
   });
   video.srcObject = stream;
@@ -366,7 +366,8 @@ async function main() {
     }
     $('status').textContent = state.error ? `Erreur camera : ${state.error}` : stats.text;
     // Minuteur et non requestAnimationFrame : dans une fenetre cachee, rAF est ralenti a ~1 image/s.
-    setTimeout(loop, 8);
+    // 1 ms : une attente plus longue fait rater des images a 60 fps.
+    setTimeout(loop, 1);
   };
   loop();
 }

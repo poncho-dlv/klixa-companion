@@ -43,8 +43,9 @@ async function createPoseLandmarker() {
   }
 }
 
-// Le corps bouge moins vite que le visage et le suivi du corps coute cher : une image sur deux.
-const POSE_EVERY = 2;
+// Cible 60 images/s (16,6 ms par image) : visage ~7 ms a chaque image, pose "heavy" ~10 ms une image sur
+// trois (20 Hz) pour ne jamais depasser le budget ; le filtre One Euro et le lissage du rendu comblent.
+const POSE_EVERY = 3;
 
 /**
  * @returns {Promise<{ delegate: string, detect: (video: HTMLVideoElement, landmarks?: boolean, body?: boolean) => { face: object|null, landmarks: object[]|null }, reset: () => void }>}
