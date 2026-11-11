@@ -10,7 +10,6 @@ const { PoseLandmarker, HandLandmarker, FilesetResolver } = self.exports;
 let landmarker = null;
 let handLandmarker = null;
 let indices = [];
-let wrists = [];
 
 // Modele "heavy" (le plus precis) sur GPU : ~10 ms par image ; sur CPU il passe a ~80 ms, on y prefere "full".
 async function create() {
@@ -42,10 +41,10 @@ async function createHands() {
 
 // Mains de l'image : [{ lm: [x, y, z] x 21, side }, ...] ; `side` = 0 main gauche de la personne, 1 droite,
 // d'apres le modele (il suppose une image en miroir : son "Left" est la main droite d'une image non retournee).
-// Avec un corps suivi, lance seulement si un poignet est a peu pres visible (economie) ; sans corps, toujours
-// (main seule dans le champ).
-function detectHands(bitmap, points, timestamp) {
-  if (!handLandmarker || (points && !wrists.some((i) => points[i][3] > 0.2))) return null;
+// Toujours lance, meme si le modele du corps ne voit pas de poignet : il se trompe justement quand il ne
+// reste qu'un bras ou une main dans l'image.
+function detectHands(bitmap, timestamp) {
+  if (!handLandmarker) return null;
   try {
     const res = handLandmarker.detectForVideo(bitmap, timestamp);
     return (res.landmarks ?? []).map((hand, index) => {
@@ -61,7 +60,6 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'init') {
       indices = data.landmarks;
-      wrists = data.wrists ?? [];
       const created = await create();
       landmarker = created.landmarker;
       self.postMessage({ type: 'ready', model: created.model });
@@ -72,7 +70,7 @@ self.onmessage = async ({ data }) => {
       const lms = res.landmarks?.[0];
       const world = res.worldLandmarks?.[0];
       const points = lms && world ? indices.map((i) => [lms[i].x, lms[i].y, world[i].z, lms[i].visibility ?? 0]) : null;
-      const hands = detectHands(data.bitmap, points, started);
+      const hands = detectHands(data.bitmap, started);
       data.bitmap.close();
       self.postMessage({ type: 'pose', t: data.t, ms: performance.now() - started, points, hands });
     }

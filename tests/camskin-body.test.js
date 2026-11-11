@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, solveHands, solveArms, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
+  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, solveHands, solveArms, isPlausibleBody, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
 } from '../src/integrations/camskin/web/body-rig.js';
 import { normalizeSkinManifest } from '../src/integrations/camskin/web/skin-manifest.js';
 import { sanitizeFace } from '../src/integrations/camskin.js';
@@ -458,10 +458,10 @@ test('solveArms : seul ce qui est reellement vu du bras est rendu', () => {
   const noShoulder = solveArms(standingBody({ shoulderL: [1.2, 0.2, 0, 0.99], elbowL: [0.5, 0.4, 0, 0.95], wristL: [0.3, 0.6, 0, 0.95] }), [hand, null], VIEW)[0];
   assert.equal(noShoulder.shoulder, null);
   assert.ok(noShoulder.elbow);
-  // Coude peu visible : ni avant-bras ni haut du bras (meme si l'epaule est vue), la patte seule.
+  // Coude peu visible : pas de haut du bras (meme si l'epaule est vue) ; l'avant-bras prolonge la main.
   const handOnly = solveArms(standingBody({ shoulderL: [0.7, 0.2, 0, 0.99], elbowL: [0.5, 0.4, 0, 0.2], wristL: [0.3, 0.6, 0, 0.95] }), [hand, null], VIEW)[0];
-  assert.equal(handOnly.elbow, null);
   assert.equal(handOnly.shoulder, null);
+  assert.ok(handOnly.elbow[1] < handOnly.wrist[1], 'avant-bras suppose a l oppose des doigts (doigts vers le haut)');
   // Sans main suivie : le poignet et le coude du modele du corps suffisent, la patte prolonge l'avant-bras.
   const poseOnly = solveArms(standingBody({ elbowL: [0.5, 0.4, 0, 0.95], wristL: [0.3, 0.6, 0, 0.95] }), null, VIEW, { defaultDepth: 80 })[0];
   near(poseOnly.wrist[2], -80);
@@ -471,4 +471,16 @@ test('solveArms : seul ce qui est reellement vu du bras est rendu', () => {
   assert.equal(solveArms(standingBody({ wristR: [0.3, 1.4, 0, 0.9] }), null, VIEW)[1], null);
   assert.ok(solveArms(null, [hand, null], VIEW)[0].thumb);
   assert.deepEqual(solveArms(null, null, VIEW), [null, null]);
+});
+
+test('isPlausibleBody : rejette un corps fantome (buste ecrase ou epaules minuscules)', () => {
+  const aspect = VIEW.w / VIEW.h;
+  assert.equal(isPlausibleBody(standingBody(), aspect), true);
+  // Fantome vu sur un avant-bras : epaules larges, hanches bien "visibles" juste dessous.
+  const ghost = standingBody({ shoulderL: [0.64, 0.3, 0, 0.9], shoulderR: [0.49, 0.28, 0, 0.9], hipL: [0.66, 0.37, 0, 0.9], hipR: [0.5, 0.4, 0, 0.9] });
+  assert.equal(isPlausibleBody(ghost, aspect), false);
+  // Meme buste court mais hanches non visibles (hors champ, cas normal assis) : accepte.
+  const seated = standingBody({ hipL: [0.6, 0.7, 0, 0.1], hipR: [0.4, 0.7, 0, 0.1] });
+  assert.equal(isPlausibleBody(seated, aspect), true);
+  assert.equal(isPlausibleBody(standingBody({ shoulderL: [0.51, 0.62, 0, 0.99], shoulderR: [0.49, 0.62, 0, 0.99] }), aspect), false);
 });

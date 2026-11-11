@@ -2,7 +2,7 @@
 // camera virtuelle). Il transforme une image video en un "visage" normalise (position,
 // taille, inclinaison, ouverture de la bouche...) que les skins savent dessiner.
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from '/vendor/vision_bundle.mjs';
-import { BODY_LANDMARKS, BODY_JOINT, createBodyFilter } from './body-rig.js';
+import { BODY_LANDMARKS, BODY_JOINT, createBodyFilter, isPlausibleBody } from './body-rig.js';
 
 // Index des landmarks MediaPipe utilises (maillage de 478 points).
 const L = { eyeA: 33, eyeB: 263, nose: 1, mouthTop: 13, mouthBottom: 14 };
@@ -72,6 +72,7 @@ export async function createFaceEngine() {
   let poseMode = 'idle'; // idle | loading | worker | inline | failed
   let poseWorker = null;
   let poseBusy = false;
+  let poseAspect = 16 / 9; // largeur / hauteur de l'image envoyee au worker
   let poseLandmarker = null;
   let lastBody = null;
   let bodyAt = 0; // horloge video (s) de la derniere mesure de pose
@@ -101,10 +102,12 @@ export async function createFaceEngine() {
 
   // Points utiles du corps : [x, y, z monde (m), visibilite], dans l'ordre de BODY_LANDMARKS, filtres
   // (One Euro) a l'horloge de la video : l'intervalle reel entre deux images, sans la gigue du traitement.
-  function applyBody(points, mediaTime, hands = null) {
+  function applyBody(points, mediaTime, hands = null, aspect = 16 / 9) {
     const now = performance.now();
     if (lastPoseAt) poseRate += (1000 / Math.max(1, now - lastPoseAt) - poseRate) * 0.1;
     lastPoseAt = now;
+    // Corps fantome (proportions impossibles, vu sur un bras ou une main isolee) : ignore, les mains restent suivies.
+    if (points && !isPlausibleBody(points, aspect)) points = null;
     if (points) bodyFilter.filter(points, mediaTime);
     else bodyFilter.reset();
     // Les mains sont suivies meme sans corps (main seule dans le champ).
@@ -163,13 +166,13 @@ export async function createFaceEngine() {
         } else if (data.type === 'pose') {
           poseBusy = false;
           track('pose', data.ms);
-          applyBody(data.points, data.t, data.hands);
+          applyBody(data.points, data.t, data.hands, poseAspect);
         } else if (data.type === 'error') {
           fallbackInline(data.message);
         }
       };
       poseWorker.onerror = (event) => fallbackInline(event.message);
-      poseWorker.postMessage({ type: 'init', landmarks: BODY_LANDMARKS, wrists: [BODY_JOINT.wristL, BODY_JOINT.wristR] });
+      poseWorker.postMessage({ type: 'init', landmarks: BODY_LANDMARKS });
     } catch (error) {
       fallbackInline(error?.message);
     }
@@ -192,6 +195,7 @@ export async function createFaceEngine() {
       poseBusy = true;
       const t = video.currentTime;
       const scale = Math.min(1, POSE_WIDTH / video.videoWidth);
+      poseAspect = video.videoWidth / video.videoHeight;
       createImageBitmap(video, {
         resizeWidth: Math.round(video.videoWidth * scale), resizeHeight: Math.round(video.videoHeight * scale), resizeQuality: 'low'
       })
@@ -203,7 +207,7 @@ export async function createFaceEngine() {
     } else if (poseMode === 'inline') {
       // Fil principal : la pose n'est ajoutee que si visage + pose tiennent entre deux images.
       const every = clampInt(Math.ceil((perf.face + perf.pose + RENDER_MS) / Math.max(8, perf.frame)), 1, 4);
-      if (poseFrame++ % every === 0) applyBody(detectInline(video), video.currentTime);
+      if (poseFrame++ % every === 0) applyBody(detectInline(video), video.currentTime, null, video.videoWidth / video.videoHeight);
     }
   }
 

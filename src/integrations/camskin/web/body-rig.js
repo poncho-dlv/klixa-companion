@@ -103,6 +103,32 @@ export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1, vCuto
   };
 }
 
+/**
+ * Le corps detecte est-il plausible ? Quand il ne reste qu'un bras ou une main dans l'image, le modele du
+ * corps "voit" parfois un petit corps fantome dessus. On le reconnait a ses proportions : epaules
+ * minuscules, ou buste (epaules -> hanches bien visibles) beaucoup trop court pour sa largeur.
+ * @param {number[][]} body points du corps (voir sanitizeBody)
+ * @param {number} aspect largeur / hauteur de l'image
+ */
+export function isPlausibleBody(body, aspect) {
+  const J = BODY_JOINT;
+  const span = (a, b) => Math.hypot((body[a][0] - body[b][0]) * aspect, body[a][1] - body[b][1]); // en hauteurs d'image
+  const shoulders = span(J.shoulderL, J.shoulderR);
+  if (shoulders < MIN_SHOULDER_SPAN) return false;
+  if (body[J.hipL][3] >= 0.5 && body[J.hipR][3] >= 0.5) {
+    const torso = Math.hypot(
+      ((body[J.shoulderL][0] + body[J.shoulderR][0] - body[J.hipL][0] - body[J.hipR][0]) / 2) * aspect,
+      (body[J.shoulderL][1] + body[J.shoulderR][1] - body[J.hipL][1] - body[J.hipR][1]) / 2
+    );
+    if (torso < shoulders * MIN_TORSO_RATIO) return false;
+  }
+  return true;
+}
+// Ecart minimal des epaules (en hauteurs d'image) et hauteur minimale du buste rapportee a cet ecart
+// (un vrai buste fait ~1,3 fois la largeur d'epaules ; marge large pour une personne penchee).
+const MIN_SHOULDER_SPAN = 0.08;
+const MIN_TORSO_RATIO = 0.7;
+
 /** Nombre de points d'une main (MediaPipe Hand Landmarker) et indices utilises. */
 export const HAND_POINTS = 21;
 const HAND_JOINT = { wrist: 0, thumbTip: 4, indexBase: 5, indexTip: 8, middleBase: 9, middleTip: 12, ringTip: 16, pinkyBase: 17, pinkyTip: 20 };
@@ -308,10 +334,13 @@ export function solveArms(body, hands, view, options = {}) {
       return unproject(body[i][0], body[i][1], view.w, view.h, Math.max(10, depth + offset), p.fov);
     };
     const wrist = hand ? hand.wrist : at(wristIndex);
-    const elbow = seen(elbowIndex) ? at(elbowIndex) : null;
-    const shoulder = elbow && seen(shoulderIndex) ? at(shoulderIndex) : null;
+    const elbowSeen = seen(elbowIndex);
     // Sans main suivie, la patte prolonge l'avant-bras : il faut donc le coude.
-    if (!hand && !elbow) return null;
+    if (!hand && !elbowSeen) return null;
+    // Main suivie mais coude non vu (corps absent ou fantome) : l'avant-bras est suppose dans l'axe de la
+    // main, a l'oppose des doigts. Juste tant que le poignet n'est pas plie ; mieux qu'une patte flottante.
+    const elbow = elbowSeen ? at(elbowIndex) : add(hand.wrist, mul(normalize(sub(hand.wrist, hand.tip)), p.lengths.forearm));
+    const shoulder = elbowSeen && seen(shoulderIndex) ? at(shoulderIndex) : null;
     const tip = hand ? hand.tip : add(wrist, mul(normalize(sub(wrist, elbow)), p.lengths.hand * p.handReach));
     return { shoulder, elbow, wrist, tip, thumb: hand ? hand.thumb : null, mirrored: side === 0, outward };
   });
