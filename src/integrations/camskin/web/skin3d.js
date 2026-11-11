@@ -16,6 +16,10 @@ const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
 const FRONT_ORDER = 10; // ordre de rendu des pattes au premier plan
+// Une patte passe au premier plan tant qu'elle n'est pas a plus de FRONT_ON_CM derriere le plan du visage,
+// et y reste jusqu'a FRONT_OFF_CM derriere.
+const FRONT_ON_CM = 4;
+const FRONT_OFF_CM = 10;
 const BODY_TAU = 0.015; // s : lissage residuel du squelette (le filtre One Euro et la prediction font l'essentiel ; plus haut = retard sur les gestes)
 const RETRY_MS = 10000;
 // Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.
@@ -309,7 +313,11 @@ export function createSkin3DRenderer({ canvas } = {}) {
       placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
       // Bracelet du poignet : un peu plus fin que le bras, sinon il ecrase la main.
       placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * 0.8);
-      setArmFront(body, i, Boolean(arm.thumb));
+      // Premier plan seulement si la main est devant le plan du visage (ou a peine derriere). Nettement
+      // derriere (main passee derriere la tete), elle reste dans la scene : la tete du skin la cache.
+      // Deux seuils (hysteresis) pour ne pas clignoter a la limite.
+      const ahead = arm.thumb ? arm.handAhead : null;
+      setArmFront(body, i, ahead !== null && ahead > (body.front[i] ? -FRONT_OFF_CM : -FRONT_ON_CM));
     });
     body.group.visible = true;
   }
@@ -484,6 +492,10 @@ export function createSkin3DRenderer({ canvas } = {}) {
       clean.valid = false;
       hideBody(active);
       renderer.clear();
+    },
+    /** Avance de chaque main suivie sur le plan du visage, en cm (diagnostic) : [gauche, droite], null si non suivie. */
+    handsAhead() {
+      return skeleton ? skeleton.arms.map((arm) => (arm.thumb ? arm.handAhead : null)) : [null, null];
     },
     /** Etat du chargement du skin : idle, loading, ready ou failed (diagnostic). */
     status(id) {

@@ -310,6 +310,7 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
       // `thumb` = direction du cote du pouce (auriculaire -> index), perpendiculaire aux doigts : avec la
       // direction des doigts, elle fixe la rotation de la main (paume ou dos vers la camera).
       let thumb = null;
+      let handAhead = null;
       const lm = hands?.[side];
       if (lm) {
         const wide = 2 * Math.tan((p.fov * Math.PI) / 360) * (view.w / view.h); // largeur de l'image (cm) a 1 cm de la camera
@@ -321,6 +322,7 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
           depth = Math.max(10, clamp((p.palmRatio * jointWidth) / (palm * wide), headDepth * p.handNear, headDepth * p.handFar));
         }
         // z d'un point de main : fraction de la largeur de l'image ; largeur de l'image a cette profondeur (cm).
+        handAhead = headDepth - depth;
         const span = wide * depth;
         const at = (i) => unproject(lm[i][0], lm[i][1], view.w, view.h, Math.max(10, depth + lm[i][2] * span * p.handDepthGain), p.fov);
         const base = at(HAND_JOINT.wrist);
@@ -335,7 +337,9 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
       return {
         outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow: elbowWeight > 0.5, hasWrist: wristWeight > 0.5 || Boolean(lm),
         // `mirrored` : main gauche de la personne (le maillage, modele sur une main droite, est retourne).
-        thumb, mirrored: side === 0
+        thumb, mirrored: side === 0,
+        // Avance de la main suivie sur le plan du visage (cm, > 0 = devant la tete, < 0 = derriere) ; null sans main suivie.
+        handAhead
       };
     }
   );

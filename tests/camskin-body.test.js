@@ -372,4 +372,8 @@ test('solveBody : une main qui parait plus grande est plus pres de la camera, sa
   assert.ok(wristZ(0.12) > wristZ(0.05), 'Z moins negatif = plus pres');
   assert.ok(wristZ(0.6) <= -60 * 0.45 + 1e-6, 'borne proche : 45 % de la distance de la tete');
   assert.ok(wristZ(0.001) >= -60 * 1.5 - 1e-6, 'borne lointaine');
+  const ahead = (size) => solveBody(standingBody({ wristL: [0.6, 0.3, 0, 0.98] }), VIEW, 60, {}, [flatHand(0.6, 0.3, -1, size), null]).arms[0].handAhead;
+  assert.ok(ahead(0.25) > 0, 'grande main : devant le visage');
+  assert.ok(ahead(0.03) < 0, 'petite main : derriere le plan du visage');
+  assert.equal(solveBody(standingBody(), VIEW, 60).arms[0].handAhead, null);
 });
