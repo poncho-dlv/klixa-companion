@@ -99,6 +99,14 @@ test('solveBody : un bras hors champ pend le long du corps', () => {
   near(arm.wrist[0], arm.shoulder[0]);
 });
 
+test('solveBody : coude sorti, main cachee : le coude suit meme avec une visibilite basse', () => {
+  const sk = solveBody(standingBody({ elbowL: [0.85, 0.6, 0, 0.25], wristL: [0.9, 0.9, 0, 0.05] }), VIEW, 60);
+  const arm = sk.arms[0];
+  assert.equal(arm.hasElbow, true);
+  assert.equal(arm.hasWrist, false);
+  assert.ok(Math.abs(arm.elbow[0] - arm.shoulder[0]) > 5, 'le coude est ecarte du corps');
+});
+
 test('solveBody : la profondeur du corps suit la pose monde, bornee', () => {
   const closer = solveBody(standingBody({ shoulderL: [0.65, 0.62, -5, 0.99] }), VIEW, 60);
   const flat = solveBody(standingBody(), VIEW, 60);

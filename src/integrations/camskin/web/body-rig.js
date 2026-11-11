@@ -99,6 +99,9 @@ const DEFAULT_BODY_PARAMS = {
   depthGain: 0.6,
   maxDepthOffset: 40,
   minVisibility: 0.5,
+  // Le coude cache par le corps ou la main garde une visibilite basse alors que sa position estimee reste
+  // bonne : seuil bas pour qu'un coude sorti, main cachee, ecarte bien le bras (sinon il retombe le long du corps).
+  elbowVisibility: 0.15,
   limbVisibility: 0.4,
   // Les points index/auriculaire de la pose sont aux articulations des doigts, pas au bout : la main
   // reelle depasse d'autant. Facteur applique a la longueur de la main du squelette.
@@ -155,7 +158,7 @@ export function solveBody(body, view, headDepth, options = {}) {
       const upper = p.lengths.upperArm * scale;
       const lower = p.lengths.forearm * scale;
       const hand = p.lengths.hand * scale * p.handReach;
-      const hasElbow = vis(elbowIndex) >= p.limbVisibility;
+      const hasElbow = vis(elbowIndex) >= p.elbowVisibility;
       const hasWrist = hasElbow && vis(wristIndex) >= p.limbVisibility;
       const elbow = hasElbow ? point(elbowIndex) : add(shoulder, mul(down, upper));
       const forearmDir = normalize(sub(elbow, shoulder));
