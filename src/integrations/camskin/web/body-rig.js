@@ -147,11 +147,13 @@ const DEFAULT_BODY_PARAMS = {
   // alors la vraie main, quelle que soit sa taille a l'ecran), bornee a [handMin, handMax] x la longueur de
   // repos. Main non mesuree : longueur de repos x handReach.
   handReach: 1.45,
-  knuckleReach: 1.6,
+  knuckleReach: 1.85,
   handMin: 0.7,
   handMax: 2.6,
   // Ecartement des epaules autour de leur milieu : la pose donne le centre des articulations, nettement a
   // l'interieur de la silhouette ; > 1 les ramene vers le bord du buste (racine visible des bras).
+  // Mesure sur une personne de face : bord des epaules ~1,15 x l'ecart des articulations, buste ~1,38 x.
+  // Ce sont des rapports anatomiques, independants de la distance a la camera.
   shoulderSpread: 1,
   restShoulder: 40,
   lengths: { torso: 45, neck: 14, upperArm: 28, forearm: 26, hand: 10 }

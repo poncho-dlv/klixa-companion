@@ -74,8 +74,8 @@
     "model": "dragon-body.glb",
     "thickness": 1.1,
     "armThickness": 1.2,
-    "torsoWidth": 1.6,
-    "shoulderSpread": 1.25,
+    "torsoWidth": 1.15,
+    "shoulderSpread": 1.15,
     "depthGain": 0.6,
     "restShoulder": 40,
     "neckAnchor": [
