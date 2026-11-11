@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
+  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, solveHands, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
 } from '../src/integrations/camskin/web/body-rig.js';
 import { normalizeSkinManifest } from '../src/integrations/camskin/web/skin-manifest.js';
 import { sanitizeFace } from '../src/integrations/camskin.js';
@@ -370,7 +370,7 @@ test('handFrame : le pouce fixe la rotation, la main gauche est en miroir sans r
   nearVec(flipped.z, right.z.map((c) => -c));
 });
 
-test('sanitizeFace : les mains ne passent qu avec un corps valide', () => {
+test('sanitizeFace : mains validees, avec ou sans corps', () => {
   const base = {
     w: 640, h: 480, cx: 300, cy: 200, u: 60, angle: 0, jaw: 0, nose: { x: 1, y: 1 }, mouth: { x: 1, y: 1 }, look: { x: 0, y: 0 }, oval: [],
     body: Array.from({ length: 15 }, () => [0.5, 0.5, 0, 0.9])
@@ -378,7 +378,11 @@ test('sanitizeFace : les mains ne passent qu avec un corps valide', () => {
   const hands = [flatHand(0.5, 0.5, 1), null];
   assert.deepEqual(sanitizeFace({ ...base, hands }).hands, hands);
   assert.equal(sanitizeFace({ ...base, hands: [[1, 2, 3], null] }), null);
-  assert.equal(sanitizeFace({ ...base, body: undefined, hands }).hands, undefined);
+  // Mains sans corps (main seule dans le champ) : acceptees, avec le drapeau handsOnly.
+  const alone = sanitizeFace({ ...base, body: undefined, hands, handsOnly: true, lost: true });
+  assert.deepEqual(alone.hands, hands);
+  assert.equal(alone.handsOnly, true);
+  assert.equal(alone.body, undefined);
 });
 
 test('solveBody : une main qui parait plus grande est plus pres de la camera, sans jamais s y coller', () => {
@@ -425,4 +429,21 @@ test('solveBody : une main n est derriere la tete que si la taille ET le modele 
   assert.ok(ahead(0).handAheadSize < -10);
   // Les deux la voient derriere : elle l'est.
   assert.ok(ahead(0.3).handAhead < -10);
+});
+
+test('solveHands : main seule placee sur son pixel, profondeur deduite de sa taille', () => {
+  const [left, right] = solveHands([flatHand(0.3, 0.6, 1, 0.1), null], VIEW);
+  assert.equal(right, null);
+  assert.equal(left.mirrored, true);
+  nearVec(left.thumb, [1, 0, 0]);
+  assert.ok(left.tip[1] > left.wrist[1], 'doigts vers le haut');
+  const expected = unproject(0.3, 0.6, VIEW.w, VIEW.h, 60, 63);
+  near(left.wrist[0] / left.wrist[2], expected[0] / expected[2]);
+  near(left.wrist[1] / left.wrist[2], expected[1] / expected[2]);
+  // Une main deux fois plus grande a l'ecran est deux fois plus pres ; sa taille en cm ne change pas.
+  const [big] = solveHands([flatHand(0.3, 0.6, 1, 0.2), null], VIEW);
+  near(big.wrist[2] / left.wrist[2], 0.5, 0.02);
+  const size = (a) => Math.hypot(a.tip[0] - a.wrist[0], a.tip[1] - a.wrist[1], a.tip[2] - a.wrist[2]);
+  near(size(big), size(left), 0.05);
+  assert.deepEqual(solveHands(null, VIEW), [null, null]);
 });

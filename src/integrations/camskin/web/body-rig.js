@@ -199,6 +199,9 @@ const DEFAULT_BODY_PARAMS = {
   eyeSpan: 0,
   palmToEyes: 1,
   palmRatio: 0.27,
+  // Mains seules (ni corps ni visage) : longueur reelle d'une paume (cm) et bornes de profondeur (cm).
+  palmCm: 9.5,
+  handsOnlyDepth: [15, 200],
   handNear: 0.45,
   handFar: 1.5,
   // Ecartement des epaules autour de leur milieu : la pose donne le centre des articulations, nettement a
@@ -225,6 +228,52 @@ function bendElbow(shoulder, wrist, upper, lower, pole) {
   const height = Math.sqrt(Math.max(0, upper * upper - along * along));
   const side = normalize(sub(pole, mul(dir, dot(pole, dir))), [0, -1, 0]);
   return add(add(shoulder, mul(dir, along)), mul(side, height));
+}
+
+/** Longueur de la paume (poignet -> base du majeur) en fraction de la largeur de l'image, profondeur relative comprise. */
+function palmSpan(lm, view) {
+  const [a, b] = [lm[HAND_JOINT.wrist], lm[HAND_JOINT.middleBase]];
+  return Math.hypot(b[0] - a[0], ((b[1] - a[1]) * view.h) / view.w, b[2] - a[2]);
+}
+
+/** Largeur de l'image (cm) a 1 cm de la camera. */
+const imageWidthAt1 = (view, fov) => 2 * Math.tan((fov * Math.PI) / 360) * (view.w / view.h);
+
+/**
+ * Pose 3D d'une main suivie, placee a `depth` cm de la camera : poignet, direction des doigts, longueur de
+ * paume (cm) et direction du pouce (auriculaire -> index, perpendiculaire aux doigts).
+ */
+function handPose(lm, view, depth, p, fallbackDir, fallbackThumb) {
+  // z d'un point de main : fraction de la largeur de l'image ; converti en cm a cette profondeur.
+  const span = imageWidthAt1(view, p.fov) * depth;
+  const at = (i) => unproject(lm[i][0], lm[i][1], view.w, view.h, Math.max(10, depth + lm[i][2] * span * p.handDepthGain), p.fov);
+  const wrist = at(HAND_JOINT.wrist);
+  const middle = at(HAND_JOINT.middleBase);
+  const fingers = normalize(sub(middle, wrist), fallbackDir);
+  const across = sub(at(HAND_JOINT.indexBase), at(HAND_JOINT.pinkyBase));
+  return { wrist, fingers, palm: length(sub(middle, wrist)), thumb: normalize(sub(across, mul(fingers, dot(across, fingers))), fallbackThumb) };
+}
+
+/**
+ * Mains seules, sans corps ni visage exploitables (personne presque sortie du champ, main tendue devant la
+ * camera...) : chaque main suivie donne une patte, placee a une profondeur deduite de sa taille a l'ecran
+ * (une paume mesure environ `palmCm`).
+ * @param {(number[][]|null)[]} hands mains suivies (voir sanitizeHands)
+ * @param {{ w: number, h: number }} view taille de l'image
+ * @param {Partial<typeof DEFAULT_BODY_PARAMS>} [options]
+ * @returns {({ wrist: number[], tip: number[], thumb: number[], mirrored: boolean }|null)[]} une entree par main (gauche, droite)
+ */
+export function solveHands(hands, view, options = {}) {
+  const p = { ...DEFAULT_BODY_PARAMS, ...options };
+  return [0, 1].map((side) => {
+    const lm = hands?.[side];
+    if (!lm) return null;
+    const palm = palmSpan(lm, view);
+    if (palm < 1e-4) return null;
+    const depth = clamp(p.palmCm / (palm * imageWidthAt1(view, p.fov)), p.handsOnlyDepth[0], p.handsOnlyDepth[1]);
+    const pose = handPose(lm, view, depth, p, [0, 1, 0], [1, 0, 0]);
+    return { wrist: pose.wrist, tip: add(pose.wrist, mul(pose.fingers, pose.palm * p.palmReach)), thumb: pose.thumb, mirrored: side === 0 };
+  });
 }
 
 /**
@@ -335,10 +384,8 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
       let handAheadPose = null;
       const lm = hands?.[side];
       if (lm) {
-        const wide = 2 * Math.tan((p.fov * Math.PI) / 360) * (view.w / view.h); // largeur de l'image (cm) a 1 cm de la camera
-        const [w0, w9] = [lm[HAND_JOINT.wrist], lm[HAND_JOINT.middleBase]];
-        // Longueur de la paume en fraction de la largeur de l'image, profondeur relative comprise (main inclinee).
-        const palm = Math.hypot(w9[0] - w0[0], ((w9[1] - w0[1]) * view.h) / view.w, w9[2] - w0[2]);
+        const wide = imageWidthAt1(view, p.fov);
+        const palm = palmSpan(lm, view);
         let depth = wristMeasured ? -wristMeasured[2] : headDepth;
         if (palm > 1e-4) {
           // Reference preferee : l'ecart des yeux, mesure au meme endroit que la profondeur de la tete (meme
@@ -351,18 +398,12 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
           handAheadPose = (ref - body[wristIndex][2]) * 100;
           depth = Math.max(10, clamp(headDepth - Math.max(handAheadSize, handAheadPose), headDepth * p.handNear, headDepth * p.handFar));
         }
-        // z d'un point de main : fraction de la largeur de l'image ; largeur de l'image a cette profondeur (cm).
         handAhead = headDepth - depth;
-        const span = wide * depth;
-        const at = (i) => unproject(lm[i][0], lm[i][1], view.w, view.h, Math.max(10, depth + lm[i][2] * span * p.handDepthGain), p.fov);
-        const base = at(HAND_JOINT.wrist);
-        const middle = at(HAND_JOINT.middleBase);
-        const fingers = normalize(sub(middle, base), handDir);
-        const across = sub(at(HAND_JOINT.indexBase), at(HAND_JOINT.pinkyBase));
-        thumb = normalize(sub(across, mul(fingers, dot(across, fingers))), outward);
-        wrist = base;
-        handDir = fingers;
-        hand = clamp(length(sub(middle, base)) * p.palmReach, handBase * p.handMin, handBase * p.handMax);
+        const tracked = handPose(lm, view, depth, p, handDir, outward);
+        thumb = tracked.thumb;
+        wrist = tracked.wrist;
+        handDir = tracked.fingers;
+        hand = clamp(tracked.palm * p.palmReach, handBase * p.handMin, handBase * p.handMax);
       }
       return {
         outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow: elbowWeight > 0.5, hasWrist: wristWeight > 0.5 || Boolean(lm),

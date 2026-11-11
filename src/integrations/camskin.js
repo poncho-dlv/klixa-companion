@@ -143,19 +143,19 @@ export function sanitizeFace(raw) {
   // Pose 3D et blendshapes : facultatifs (skins 3D), refuses s'ils sont mal formes.
   const extra = sanitizePoseAndBlend(raw);
   if (!extra) return null;
-  // Points du corps (skins avec corps) : facultatifs, refuses s'ils sont mal formes.
+  // Points du corps et mains suivies (skins avec corps) : facultatifs, refuses s'ils sont mal formes.
+  const out = { ...face, ...extra };
   if (raw.body !== undefined && raw.body !== null) {
-    const body = sanitizeBody(raw.body);
-    if (!body) return null;
-    // Mains suivies (facultatives, seulement avec un corps) : refusees si mal formees.
-    if (raw.hands !== undefined && raw.hands !== null) {
-      const hands = sanitizeHands(raw.hands);
-      if (!hands) return null;
-      return { ...face, ...extra, body, hands };
-    }
-    return { ...face, ...extra, body };
+    out.body = sanitizeBody(raw.body);
+    if (!out.body) return null;
   }
-  return { ...face, ...extra };
+  if (raw.hands !== undefined && raw.hands !== null) {
+    out.hands = sanitizeHands(raw.hands);
+    if (!out.hands) return null;
+  }
+  // Mains seules : ni visage ni corps, le rendu ne dessine que les pattes.
+  if (raw.handsOnly === true) out.handsOnly = true;
+  return out;
 }
 
 /**

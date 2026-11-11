@@ -7,7 +7,7 @@
 // camera : le skin s'aligne sur l'image quel que soit le vrai champ de la webcam.
 import * as THREE from '/vendor-three/three.module.js';
 import { GLTFLoader } from '/vendor-three-addons/loaders/GLTFLoader.js';
-import { solveBody, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame, clearTorso } from './body-rig.js';
+import { solveBody, solveHands, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame, clearTorso } from './body-rig.js';
 import { BLEND_NAMES, normalizeSkinManifest, resolveModelUrl, jawAngle, gazeAngles, breathValue, poseHoldWeight, smoothingFactor, isBlendName } from './skin-manifest.js';
 
 const FOV = 63;
@@ -259,19 +259,47 @@ export function createSkin3DRenderer({ canvas } = {}) {
     node.visible = true;
   }
 
+  /** Mains seules : une patte (et son bracelet) par main suivie, le reste du corps est cache. */
+  function updateHandsOnly(body, face, spec) {
+    skeleton = null;
+    const solved = solveHands(face.hands, { w: face.w, h: face.h }, { fov: FOV });
+    for (const [name, part] of Object.entries(body.parts)) {
+      if (name === 'Hand' || name === 'Wrist') continue;
+      for (const node of Array.isArray(part) ? part : [part]) if (node) node.visible = false;
+    }
+    solved.forEach((arm, i) => {
+      const nodes = [body.parts.Hand[i], body.parts.Wrist[i]];
+      if (!arm) {
+        for (const node of nodes) if (node) node.visible = false;
+        return;
+      }
+      const hand = handFrame(arm);
+      const handThick = Math.min(3, Math.max(0.3, hand.length / spec.lengths.hand));
+      placePart(body.parts.Hand[i], hand, spec.lengths.hand, handThick, handThick * hand.mirror);
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, handThick * 0.8);
+      setArmFront(body, i, false);
+    });
+    body.group.visible = solved.some(Boolean);
+  }
+
   function updateBody(entry, face, dt) {
     const body = entry.body;
     const spec = entry.manifest.body;
-    if (!body || body.status !== 'ready' || !face.body) {
+    if (!body || body.status !== 'ready') {
       hideBody(entry);
       return;
     }
-    const raw = solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
-      fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths,
-      eyeSpan: face.u > 0 && face.w > 0 ? face.u / face.w : 0
-    }, face.hands ?? null);
+    // Sans tete suivie (mains seules), la profondeur de la tete n'a pas de sens : pas de squelette.
+    const raw = face.body && !face.handsOnly
+      ? solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
+        fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths,
+        eyeSpan: face.u > 0 && face.w > 0 ? face.u / face.w : 0
+      }, face.hands ?? null)
+      : null;
     if (!raw) {
-      hideBody(entry);
+      // Pas de corps exploitable (personne presque sortie du champ...) : les mains visibles gardent leur patte.
+      if (face.hands) updateHandsOnly(body, face, spec);
+      else hideBody(entry);
       return;
     }
     skeleton = blendSkeleton(skeleton, raw, smoothingFactor(dt, BODY_TAU));
@@ -501,12 +529,15 @@ export function createSkin3DRenderer({ canvas } = {}) {
     render(face, id, manifestUrl) {
       const entry = ensure(id, manifestUrl);
       // `face.lost` : visage hors champ mais corps suivi. On garde la derniere pose de tete.
-      if (!entry || !face || (!face.pose && !(face.lost && hasPose))) return false;
+      // `face.handsOnly` : ni visage ni corps, seulement des mains ; la tete du skin est cachee.
+      const handsOnly = Boolean(face?.handsOnly);
+      if (!entry || !face || (!handsOnly && !face.pose && !(face.lost && hasPose))) return false;
       activate(entry);
       const now = performance.now();
       const dt = Math.min(0.2, (now - lastTime) / 1000);
       lastTime = now;
       resize(face.w, face.h);
+      head.visible = !handsOnly;
       if (!face.lost) smoothPose(face.pose, smoothingFactor(dt, POSE_TAU), poseHoldWeight(face.blend, entry.manifest.stabilize));
       updateBody(entry, face, dt);
       animate(entry, face.blend ?? {}, smoothingFactor(dt, BLEND_TAU), smoothingFactor(dt, FAST_TAU), face.lip);

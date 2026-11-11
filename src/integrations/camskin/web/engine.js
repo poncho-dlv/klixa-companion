@@ -105,36 +105,40 @@ export async function createFaceEngine() {
     const now = performance.now();
     if (lastPoseAt) poseRate += (1000 / Math.max(1, now - lastPoseAt) - poseRate) * 0.1;
     lastPoseAt = now;
-    if (!points) {
-      lastBody = null;
-      lastHands = null;
-      bodyFilter.reset();
-      handFilters.forEach((f) => f.reset());
-      return;
-    }
-    bodyFilter.filter(points, mediaTime);
+    if (points) bodyFilter.filter(points, mediaTime);
+    else bodyFilter.reset();
+    // Les mains sont suivies meme sans corps (main seule dans le champ).
     matchHands(points, hands, mediaTime);
     bodyAt = mediaTime;
     lastBody = bodyNow(mediaTime);
   }
 
-  // Rattache chaque main detectee au bras dont le poignet est le plus proche, puis filtre ses points.
+  // Rattache chaque main detectee a un bras : celui dont le poignet (modele du corps) est le plus proche ;
+  // a defaut (pas de corps, poignet trop loin), le cote annonce par le modele des mains. Puis filtre ses points.
   function matchHands(points, hands, mediaTime) {
     const slots = [null, null];
+    const unmatched = [];
     for (const hand of hands ?? []) {
       let best = -1;
       let bestDistance = HAND_MATCH;
-      [BODY_JOINT.wristL, BODY_JOINT.wristR].forEach((joint, slot) => {
-        const distance = Math.hypot(points[joint][0] - hand[0][0], points[joint][1] - hand[0][1]);
-        if (!slots[slot] && distance < bestDistance) {
-          bestDistance = distance;
-          best = slot;
-        }
-      });
-      if (best >= 0) slots[best] = hand;
+      if (points) {
+        [BODY_JOINT.wristL, BODY_JOINT.wristR].forEach((joint, slot) => {
+          const distance = Math.hypot(points[joint][0] - hand.lm[0][0], points[joint][1] - hand.lm[0][1]);
+          if (!slots[slot] && distance < bestDistance) {
+            bestDistance = distance;
+            best = slot;
+          }
+        });
+      }
+      if (best >= 0) slots[best] = hand.lm;
+      else unmatched.push(hand);
     }
-    slots.forEach((hand, slot) => {
-      if (hand) handFilters[slot].filter(hand.map(([x, y, z]) => [x, y, z, 1]), mediaTime);
+    for (const hand of unmatched) {
+      const slot = slots[hand.side] ? 1 - hand.side : hand.side;
+      if (!slots[slot]) slots[slot] = hand.lm;
+    }
+    slots.forEach((lm, slot) => {
+      if (lm) handFilters[slot].filter(lm.map(([x, y, z]) => [x, y, z, 1]), mediaTime);
       else handFilters[slot].reset();
     });
   }
@@ -266,7 +270,7 @@ export async function createFaceEngine() {
   function refreshBody(video, withBody) {
     if (withBody) {
       pumpPose(video);
-      if (lastBody) lastBody = bodyNow(video.currentTime);
+      lastBody = bodyNow(video.currentTime);
       return;
     }
     lastBody = null;
@@ -283,12 +287,18 @@ export async function createFaceEngine() {
     return nose[3] >= 0.3 && distance < lastFace.u * LOST_HEAD_RADIUS;
   }
 
+  // Trame sans visage : les champs du visage sont neutres, `handsOnly` dit au rendu de ne dessiner que les mains.
+  function handsOnlyFrame(w, h) {
+    return {
+      w, h, cx: 0, cy: 0, u: 0, angle: 0, jaw: 0, nose: { x: 0, y: 0 }, mouth: { x: 0, y: 0 }, look: { x: 0, y: 0 }, oval: [],
+      blend: {}, lip: 0, lost: true, handsOnly: true
+    };
+  }
+
   // Ajoute le corps et les mains a une trame de visage.
   function withBodyData(face) {
-    if (lastBody) {
-      face.body = lastBody;
-      if (lastHands) face.hands = lastHands;
-    }
+    if (lastBody) face.body = lastBody;
+    if (lastHands) face.hands = lastHands;
     return face;
   }
 
@@ -316,7 +326,7 @@ export async function createFaceEngine() {
       track('face', performance.now() - faceStart);
       const lms = res.faceLandmarks?.[0];
       refreshBody(video, withBody);
-      const debug = withLandmarks ? { body: lastBody, hands: lastBody ? lastHands : null } : { body: null, hands: null };
+      const debug = withLandmarks ? { body: lastBody, hands: lastHands } : { body: null, hands: null };
       if (!lms) {
         smooth = null;
         // Visage perdu (hors champ, tete baissee...) : si le corps est encore la, on garde le skin
@@ -326,6 +336,8 @@ export async function createFaceEngine() {
           return { face: withBodyData({ ...rest, blend: {}, lip: 0, lost: true }), landmarks: null, ...debug };
         }
         lastFace = null;
+        // Ni visage ni corps exploitable, mais une main dans le champ : trame "mains seules" (pattes sans tete ni corps).
+        if (lastHands) return { face: withBodyData(handsOnlyFrame(w, h)), landmarks: null, ...debug };
         return { face: null, landmarks: null };
       }
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));

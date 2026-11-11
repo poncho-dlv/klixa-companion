@@ -40,12 +40,18 @@ async function createHands() {
   }
 }
 
-// Mains de l'image : [[x, y, z] x 21, ...]. Lance seulement si un poignet est a peu pres visible (economie).
+// Mains de l'image : [{ lm: [x, y, z] x 21, side }, ...] ; `side` = 0 main gauche de la personne, 1 droite,
+// d'apres le modele (il suppose une image en miroir : son "Left" est la main droite d'une image non retournee).
+// Avec un corps suivi, lance seulement si un poignet est a peu pres visible (economie) ; sans corps, toujours
+// (main seule dans le champ).
 function detectHands(bitmap, points, timestamp) {
-  if (!handLandmarker || !points || !wrists.some((i) => points[i][3] > 0.2)) return null;
+  if (!handLandmarker || (points && !wrists.some((i) => points[i][3] > 0.2))) return null;
   try {
     const res = handLandmarker.detectForVideo(bitmap, timestamp);
-    return (res.landmarks ?? []).map((hand) => hand.map((q) => [q.x, q.y, q.z]));
+    return (res.landmarks ?? []).map((hand, index) => {
+      const label = (res.handedness ?? res.handednesses)?.[index]?.[0]?.categoryName;
+      return { lm: hand.map((q) => [q.x, q.y, q.z]), side: label === 'Left' ? 1 : 0 };
+    });
   } catch {
     return null;
   }
