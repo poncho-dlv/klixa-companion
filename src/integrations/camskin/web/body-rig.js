@@ -100,6 +100,9 @@ const DEFAULT_BODY_PARAMS = {
   maxDepthOffset: 40,
   minVisibility: 0.5,
   limbVisibility: 0.4,
+  // Les points index/auriculaire de la pose sont aux articulations des doigts, pas au bout : la main
+  // reelle depasse d'autant. Facteur applique a la longueur de la main du squelette.
+  handReach: 1.45,
   restShoulder: 40,
   lengths: { torso: 45, neck: 14, upperArm: 28, forearm: 26, hand: 10 }
 };
@@ -151,7 +154,7 @@ export function solveBody(body, view, headDepth, options = {}) {
       const outward = [Math.sign(shoulder[0] - shoulderMid[0]) || 1, 0, 0];
       const upper = p.lengths.upperArm * scale;
       const lower = p.lengths.forearm * scale;
-      const hand = p.lengths.hand * scale;
+      const hand = p.lengths.hand * scale * p.handReach;
       const hasElbow = vis(elbowIndex) >= p.limbVisibility;
       const hasWrist = hasElbow && vis(wristIndex) >= p.limbVisibility;
       const elbow = hasElbow ? point(elbowIndex) : add(shoulder, mul(down, upper));

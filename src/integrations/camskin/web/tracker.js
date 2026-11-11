@@ -9,6 +9,9 @@ const $ = (id) => document.getElementById(id);
 const video = $('cam');
 const canvas = $('stage');
 const ctx = canvas.getContext('2d');
+// Points de suivi : couche au-dessus du rendu 3D (sinon le corps du skin les cache).
+const debugCanvas = $('stagedebug');
+const dctx = debugCanvas.getContext('2d');
 const CAMERA_KEY = 'camskin.camera';
 
 const state = {
@@ -261,7 +264,7 @@ const BODY_BONES = [['shoulderL', 'shoulderR'], ['shoulderL', 'elbowL'], ['elbow
   ['elbowR', 'wristR'], ['wristL', 'pinkyL'], ['wristL', 'indexL'], ['wristR', 'pinkyR'], ['wristR', 'indexR'],
   ['shoulderL', 'hipL'], ['shoulderR', 'hipR'], ['hipL', 'hipR']];
 
-function drawBodyDebug(body, w, h) {
+function drawBodyDebug(ctx, body, w, h) {
   const at = (name) => body[BODY_JOINT[name]];
   ctx.lineWidth = 2;
   for (const [a, b] of BODY_BONES) {
@@ -311,12 +314,18 @@ function render(face, landmarks, body) {
   $('stage3d').classList.toggle('mirror', state.mirror);
   if (!drew3d) renderer3d?.clear();
   syncCalibration(skin && is3D(SKINS[skin]) ? skin : null);
-  if (landmarks) {
-    ctx.fillStyle = 'rgba(0,255,255,.8)';
-    for (const p of landmarks) ctx.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
-  }
-  if (body) drawBodyDebug(body, w, h);
   ctx.restore();
+  if (debugCanvas.width !== w || debugCanvas.height !== h) {
+    debugCanvas.width = w;
+    debugCanvas.height = h;
+  }
+  debugCanvas.classList.toggle('mirror', state.mirror);
+  dctx.clearRect(0, 0, w, h);
+  if (landmarks) {
+    dctx.fillStyle = 'rgba(0,255,255,.8)';
+    for (const p of landmarks) dctx.fillRect(p.x * w - 1, p.y * h - 1, 2, 2);
+  }
+  if (body) drawBodyDebug(dctx, body, w, h);
 }
 
 async function main() {
