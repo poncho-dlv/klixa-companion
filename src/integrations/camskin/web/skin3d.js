@@ -208,12 +208,12 @@ export function createSkin3DRenderer({ canvas } = {}) {
   }
 
   /** Oriente et dimensionne un noeud selon le repere d'un segment (+Y du modele vers l'extremite). */
-  function placePart(node, frame, restLength, thick) {
+  function placePart(node, frame, restLength, thick, width = thick) {
     if (!node) return;
     basis.makeBasis(bx.fromArray(frame.x), by.fromArray(frame.y), bz.fromArray(frame.z));
     node.quaternion.setFromRotationMatrix(basis);
     node.position.fromArray(frame.position);
-    node.scale.set(thick, Math.min(3, Math.max(0.3, frame.length / restLength)), thick);
+    node.scale.set(width, Math.min(3, Math.max(0.3, frame.length / restLength)), thick);
     node.visible = true;
   }
 
@@ -235,7 +235,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
       return;
     }
     const raw = solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
-      fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, lengths: spec.lengths
+      fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths
     });
     if (!raw) {
       hideBody(entry);
@@ -247,7 +247,8 @@ export function createSkin3DRenderer({ canvas } = {}) {
     const armThick = thick * spec.armThickness;
     const rest = spec.lengths;
     const torso = torsoFrame(skeleton);
-    placePart(body.parts.Torso, torso, rest.torso, thick);
+    // Torse : largeur propre (le buste reel deborde des articulations d'epaule), sans toucher a sa profondeur.
+    placePart(body.parts.Torso, torso, rest.torso, thick, thick * spec.torsoWidth);
 
     // Ailes (facultatives) : attachees au dos, dans le repere du torse, battement autour de son axe avant.
     if (body.parts.Wing?.[0]) {

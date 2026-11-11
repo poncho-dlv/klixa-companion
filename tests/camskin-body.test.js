@@ -131,6 +131,15 @@ test('solveBody : la longueur de la patte suit la taille mesuree de la main, bor
   assert.ok(size(hand(0.001)) > 0, 'borne basse');
 });
 
+test('solveBody : shoulderSpread ecarte les epaules autour de leur milieu et grossit l echelle', () => {
+  const base = solveBody(standingBody(), VIEW, 60);
+  const wide = solveBody(standingBody(), VIEW, 60, { shoulderSpread: 1.25 });
+  nearVec(wide.shoulderMid, base.shoulderMid);
+  near(wide.shoulderWidth, base.shoulderWidth * 1.25);
+  near(wide.scale, base.scale * 1.25);
+  near(wide.arms[0].shoulder[0] - wide.shoulderMid[0], (base.arms[0].shoulder[0] - base.shoulderMid[0]) * 1.25);
+});
+
 test('solveBody : la profondeur du corps suit la pose monde, bornee', () => {
   const closer = solveBody(standingBody({ shoulderL: [0.65, 0.62, -5, 0.99] }), VIEW, 60);
   const flat = solveBody(standingBody(), VIEW, 60);
@@ -171,6 +180,8 @@ test('manifeste : section body (valeurs par defaut, bornes, rejets, idempotence)
   const body = normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb' } }).body;
   assert.equal(body.thickness, 1);
   assert.equal(body.armThickness, 1);
+  assert.equal(body.torsoWidth, 1);
+  assert.equal(body.shoulderSpread, 1.15);
   assert.equal(body.depthGain, 0.6);
   assert.deepEqual(body.lengths, { torso: 45, neck: 14, upperArm: 28, forearm: 26, hand: 10 });
   assert.equal(normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb', thickness: 99 } }).body.thickness, 3);

@@ -124,6 +124,12 @@ function buildCalibration(skinId) {
     addRow('Corps : epaisseur', 0.4, 2, 0.05, manifest.body.thickness, (value) => {
       renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, thickness: value } });
     });
+    addRow('Epaules : ecartement', 0.8, 1.8, 0.01, manifest.body.shoulderSpread, (value) => {
+      renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, shoulderSpread: value } });
+    });
+    addRow('Torse : largeur', 0.5, 2.5, 0.05, manifest.body.torsoWidth, (value) => {
+      renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, torsoWidth: value } });
+    });
     addRow('Bras : epaisseur', 0.4, 2.5, 0.05, manifest.body.armThickness, (value) => {
       renderer3d.patchManifest(skinId, { body: { ...renderer3d.getManifest(skinId).body, armThickness: value } });
     });

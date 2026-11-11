@@ -150,6 +150,9 @@ const DEFAULT_BODY_PARAMS = {
   knuckleReach: 1.6,
   handMin: 0.7,
   handMax: 2.6,
+  // Ecartement des epaules autour de leur milieu : la pose donne le centre des articulations, nettement a
+  // l'interieur de la silhouette ; > 1 les ramene vers le bord du buste (racine visible des bras).
+  shoulderSpread: 1,
   restShoulder: 40,
   lengths: { torso: 45, neck: 14, upperArm: 28, forearm: 26, hand: 10 }
 };
@@ -196,9 +199,11 @@ export function solveBody(body, view, headDepth, options = {}) {
     return unproject(body[i][0], body[i][1], view.w, view.h, Math.max(10, headDepth + offset), p.fov);
   };
 
-  const shL = point(J.shoulderL);
-  const shR = point(J.shoulderR);
-  const shoulderMid = mid(shL, shR);
+  const jointL = point(J.shoulderL);
+  const jointR = point(J.shoulderR);
+  const shoulderMid = mid(jointL, jointR);
+  const shL = add(shoulderMid, mul(sub(jointL, shoulderMid), p.shoulderSpread));
+  const shR = add(shoulderMid, mul(sub(jointR, shoulderMid), p.shoulderSpread));
   const shoulderWidth = Math.max(1, length(sub(shL, shR)));
   const scale = clamp(shoulderWidth / p.restShoulder, 0.25, 5);
   const down = [0, -1, 0];
