@@ -15,6 +15,7 @@ const POSE_TAU = 0.04; // s : lissage de la pose (suivi ~30 images/s, affichage 
 const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
+const FRONT_ORDER = 10; // ordre de rendu des pattes au premier plan
 const BODY_TAU = 0.015; // s : lissage residuel du squelette (le filtre One Euro et la prediction font l'essentiel ; plus haut = retard sur les gestes)
 const RETRY_MS = 10000;
 // Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.
@@ -193,6 +194,17 @@ export function createSkin3DRenderer({ canvas } = {}) {
       };
       for (const name of BODY_SINGLE) body.parts[name] = spawn(name);
       for (const name of BODY_PAIRED) body.parts[name] = [spawn(name), spawn(name)];
+      // Pattes suivies point par point : dessinees par-dessus le reste (une main que la camera voit n'est
+      // cachee par rien, la patte ne doit donc jamais passer derriere la tete du skin, plus volumineuse
+      // qu'une vraie tete). Cet objet invisible efface la profondeur juste avant elles ; elles gardent
+      // ainsi leur propre relief entre elles.
+      body.frontClear = new THREE.Mesh(new THREE.PlaneGeometry(0.001, 0.001), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }));
+      body.frontClear.frustumCulled = false;
+      body.frontClear.renderOrder = FRONT_ORDER - 1;
+      body.frontClear.onBeforeRender = (r) => r.clearDepth();
+      body.frontClear.visible = false;
+      body.group.add(body.frontClear);
+      body.front = [false, false];
       body.group.visible = false;
       body.status = 'ready';
       if (active === entry) scene.add(body.group);
@@ -200,6 +212,16 @@ export function createSkin3DRenderer({ canvas } = {}) {
       console.error('Corps du skin : chargement impossible', error);
       body.status = 'failed';
     }
+  }
+
+  /** Passe la main et le poignet d'un bras au premier plan (ou les remet dans la scene normale). */
+  function setArmFront(body, i, front) {
+    if (body.front[i] === front) return;
+    body.front[i] = front;
+    for (const node of [body.parts.Hand[i], body.parts.Wrist[i]]) {
+      node?.traverse((o) => { if (o.isMesh) o.renderOrder = front ? FRONT_ORDER : 0; });
+    }
+    body.frontClear.visible = body.front.some(Boolean);
   }
 
   function hideBody(entry) {
@@ -285,7 +307,9 @@ export function createSkin3DRenderer({ canvas } = {}) {
       placePart(body.parts.Hand[i], hand, rest.hand, handThick, handThick * (hand.mirror ?? 1));
       placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, armThick);
       placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
-      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick);
+      // Bracelet du poignet : un peu plus fin que le bras, sinon il ecrase la main.
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * 0.8);
+      setArmFront(body, i, Boolean(arm.thumb));
     });
     body.group.visible = true;
   }

@@ -325,17 +325,19 @@ test('solveBody : une main suivie donne le poignet, la taille et la direction du
   const hand = flatHand(0.8, 0.5, -1);
   const sk = solveBody(standingBody({ wristL: [0.8, 0.5, 0, 0.98] }), VIEW, 60, {}, [hand, null]);
   const arm = sk.arms[0];
+  // Le poignet reste sur le meme pixel que la main, quelle que soit la profondeur deduite de sa taille.
   const expected = unproject(0.8, 0.5, VIEW.w, VIEW.h, 60, 63);
-  near(arm.wrist[0], expected[0]);
-  near(arm.wrist[1], expected[1]);
+  near(arm.wrist[0] / arm.wrist[2], expected[0] / expected[2]);
+  near(arm.wrist[1] / arm.wrist[2], expected[1] / expected[2]);
   assert.ok(arm.tip[1] > arm.wrist[1], 'doigts vers le haut');
   nearVec(arm.thumb, [-1, 0, 0]);
   assert.equal(arm.mirrored, true);
   assert.equal(sk.arms[1].thumb, null, 'pas de main suivie de l autre cote');
-  // Main deux fois plus grande a l'ecran : patte plus longue.
+  // Main deux fois plus grande a l'ecran : elle est plus pres de la camera, sa taille reelle (cm) ne change pas.
   const big = solveBody(standingBody({ wristL: [0.8, 0.5, 0, 0.98] }), VIEW, 60, {}, [flatHand(0.8, 0.5, -1, 0.2), null]).arms[0];
   const size = (a) => Math.hypot(a.tip[0] - a.wrist[0], a.tip[1] - a.wrist[1], a.tip[2] - a.wrist[2]);
-  assert.ok(size(big) > size(arm) * 1.5);
+  assert.ok(big.wrist[2] > arm.wrist[2], 'plus pres de la camera');
+  assert.ok(size(big) > 0 && size(arm) > 0);
 });
 
 test('handFrame : le pouce fixe la rotation, la main gauche est en miroir sans retourner la paume', () => {
@@ -363,4 +365,11 @@ test('sanitizeFace : les mains ne passent qu avec un corps valide', () => {
   assert.deepEqual(sanitizeFace({ ...base, hands }).hands, hands);
   assert.equal(sanitizeFace({ ...base, hands: [[1, 2, 3], null] }), null);
   assert.equal(sanitizeFace({ ...base, body: undefined, hands }).hands, undefined);
+});
+
+test('solveBody : une main qui parait plus grande est plus pres de la camera, sans jamais s y coller', () => {
+  const wristZ = (size) => solveBody(standingBody({ wristL: [0.6, 0.3, 0, 0.98] }), VIEW, 60, {}, [flatHand(0.6, 0.3, -1, size), null]).arms[0].wrist[2];
+  assert.ok(wristZ(0.12) > wristZ(0.05), 'Z moins negatif = plus pres');
+  assert.ok(wristZ(0.6) <= -60 * 0.45 + 1e-6, 'borne proche : 45 % de la distance de la tete');
+  assert.ok(wristZ(0.001) >= -60 * 1.5 - 1e-6, 'borne lointaine');
 });

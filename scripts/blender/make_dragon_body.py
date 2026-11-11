@@ -139,19 +139,26 @@ for i, y in enumerate((5.0, 10.0, 15.0, 20.0)):
     fore_parts.append(spike(f"PiqueAvantBras{i}", (5.2, y, 0), (9.6 * size + 1.5, y + 1.4 * size, 0), 1.0 * size))
 fore = join(fore_parts, "Forearm")
 
-# Main griffue : paume, trois doigts + pouce exterieur, griffes recourbees.
-hand_parts = [add_ellipsoid("Paume", (0, 3.6, 0), (4.8, 4.3, 2.4), ["peau"])]
-for i, (x, tilt) in enumerate(((-2.7, -0.18), (0.0, 0.0), (2.7, 0.18))):
-    base = Vector((x, 6.5, 0))
-    knuckle = Vector((x * 1.25 + tilt * 6, 11.0, 0.5))
-    tip = Vector((x * 1.5 + tilt * 11, 14.2, 1.7))
-    hand_parts.append(add_tube(f"Doigt{i}", bezier(base, knuckle, tip, 7), [1.35, 1.2, 1.05, 0.9, 0.78, 0.68, 0.6], ["peau"], segments=8))
-    claw_tip = tip + Vector((tilt * 3, 3.6, 1.8))
-    hand_parts.append(spike(f"Griffe{i}", tip, claw_tip, 0.7, bend=(0, 0, 1.1)))
-thumb_base = Vector((4.2, 3.4, 0))
-thumb_tip = Vector((8.6, 8.4, 0.8))
-hand_parts.append(add_tube("Pouce", bezier(thumb_base, (6.6, 5.2, 0.4), thumb_tip, 6), [1.4, 1.15, 0.95, 0.8, 0.7, 0.62], ["peau"], segments=8))
-hand_parts.append(spike("GriffePouce", thumb_tip, thumb_tip + Vector((2.2, 2.8, 1.2)), 0.65, bend=(0, 0, 0.8)))
+# Main griffue, pleine : elle doit RECOUVRIR une main humaine suivie point par point (poignet a l'origine,
+# base des doigts vers y=7,4, bout des doigts vers y=14,5 ; voir body-rig.js, palmReach). Paume large et
+# longue, dos de main bombe jusqu'a la base des doigts, trois gros doigts serres (pas de jour entre eux)
+# + pouce epais sur le cote exterieur, griffes recourbees vers la paume (+Z).
+hand_parts = [
+    add_ellipsoid("Paume", (0, 4.4, 0), (5.4, 5.2, 2.7), ["peau"]),
+    add_ellipsoid("DosMain", (0, 7.2, -0.2), (5.0, 3.4, 2.3), ["peau"]),
+]
+for i, (x, tilt) in enumerate(((-3.1, -0.07), (0.0, 0.0), (3.1, 0.07))):
+    base = Vector((x, 7.0, 0))
+    knuckle = Vector((x * 1.08 + tilt * 6, 11.2, 0.4))
+    tip = Vector((x * 1.16 + tilt * 11, 14.6, 1.3))
+    hand_parts.append(add_tube(f"Doigt{i}", bezier(base, knuckle, tip, 7), [2.0, 1.95, 1.85, 1.7, 1.5, 1.3, 1.1], ["peau"], segments=10))
+    hand_parts.append(add_ellipsoid(f"Phalange{i}", tuple(knuckle), (2.0, 1.5, 1.8), ["peau"]))
+    claw_tip = tip + Vector((tilt * 3, 3.4, 1.9))
+    hand_parts.append(spike(f"Griffe{i}", tip, claw_tip, 1.05, bend=(0, 0, 1.1)))
+thumb_base = Vector((4.0, 3.0, 0))
+thumb_tip = Vector((8.8, 8.6, 0.8))
+hand_parts.append(add_tube("Pouce", bezier(thumb_base, (6.8, 5.0, 0.4), thumb_tip, 6), [2.1, 1.9, 1.7, 1.5, 1.3, 1.1], ["peau"], segments=10))
+hand_parts.append(spike("GriffePouce", thumb_tip, thumb_tip + Vector((2.0, 2.8, 1.3)), 0.95, bend=(0, 0, 0.8)))
 hand = join(hand_parts, "Hand")
 
 # --- Articulations -----------------------------------------------------------------------

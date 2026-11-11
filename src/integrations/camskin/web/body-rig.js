@@ -178,12 +178,19 @@ const DEFAULT_BODY_PARAMS = {
   // repos. Main non mesuree : longueur de repos x handReach.
   handReach: 1.45,
   knuckleReach: 1.85,
+  handMin: 0.7,
+  handMax: 2.6,
   // Main suivie par le modele des mains (21 points) : longueur = poignet -> base du majeur x palmReach
   // (stable que les doigts soient tendus ou replies) ; handDepthGain dose la profondeur relative des points.
   palmReach: 1.35,
   handDepthGain: 1,
-  handMin: 0.7,
-  handMax: 2.6,
+  // Profondeur d'une main suivie, deduite de sa taille a l'ecran : une paume (poignet -> base du majeur)
+  // mesure environ palmRatio x l'ecart des articulations d'epaule ; plus elle parait grande, plus elle est
+  // pres de la camera. Bien plus fiable que la profondeur du modele du corps. Bornee a
+  // [handNear, handFar] x la distance de la tete (une main collee a la camera ferait exploser la perspective).
+  palmRatio: 0.27,
+  handNear: 0.45,
+  handFar: 1.5,
   // Ecartement des epaules autour de leur milieu : la pose donne le centre des articulations, nettement a
   // l'interieur de la silhouette ; > 1 les ramene vers le bord du buste (racine visible des bras).
   // Mesure sur une personne de face : bord des epaules ~1,15 x l'ecart des articulations, buste ~1,38 x.
@@ -239,6 +246,7 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
   const jointL = point(J.shoulderL);
   const jointR = point(J.shoulderR);
   const shoulderMid = mid(jointL, jointR);
+  const jointWidth = Math.max(1, length(sub(jointL, jointR)));
   const shL = add(shoulderMid, mul(sub(jointL, shoulderMid), p.shoulderSpread));
   const shR = add(shoulderMid, mul(sub(jointR, shoulderMid), p.shoulderSpread));
   const shoulderWidth = Math.max(1, length(sub(shL, shR)));
@@ -304,9 +312,16 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
       let thumb = null;
       const lm = hands?.[side];
       if (lm) {
-        const depth = wristMeasured ? -wristMeasured[2] : headDepth;
+        const wide = 2 * Math.tan((p.fov * Math.PI) / 360) * (view.w / view.h); // largeur de l'image (cm) a 1 cm de la camera
+        const [w0, w9] = [lm[HAND_JOINT.wrist], lm[HAND_JOINT.middleBase]];
+        // Longueur de la paume en fraction de la largeur de l'image, profondeur relative comprise (main inclinee).
+        const palm = Math.hypot(w9[0] - w0[0], ((w9[1] - w0[1]) * view.h) / view.w, w9[2] - w0[2]);
+        let depth = wristMeasured ? -wristMeasured[2] : headDepth;
+        if (palm > 1e-4) {
+          depth = Math.max(10, clamp((p.palmRatio * jointWidth) / (palm * wide), headDepth * p.handNear, headDepth * p.handFar));
+        }
         // z d'un point de main : fraction de la largeur de l'image ; largeur de l'image a cette profondeur (cm).
-        const span = 2 * Math.tan((p.fov * Math.PI) / 360) * (view.w / view.h) * depth;
+        const span = wide * depth;
         const at = (i) => unproject(lm[i][0], lm[i][1], view.w, view.h, Math.max(10, depth + lm[i][2] * span * p.handDepthGain), p.fov);
         const base = at(HAND_JOINT.wrist);
         const middle = at(HAND_JOINT.middleBase);
