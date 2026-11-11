@@ -18,8 +18,9 @@ const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
 const FRONT_ORDER = 10; // ordre de rendu des pattes au premier plan
 // Une patte passe au premier plan tant qu'elle n'est pas a plus de FRONT_ON_CM derriere le plan du visage,
 // et y reste jusqu'a FRONT_OFF_CM derriere.
-const FRONT_ON_CM = 4;
-const FRONT_OFF_CM = 10;
+// Marges larges : la profondeur est deduite de la taille de la main, sous-estimee quand elle est vue par la tranche.
+const FRONT_ON_CM = 10;
+const FRONT_OFF_CM = 16;
 const BODY_TAU = 0.015; // s : lissage residuel du squelette (le filtre One Euro et la prediction font l'essentiel ; plus haut = retard sur les gestes)
 const RETRY_MS = 10000;
 // Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.

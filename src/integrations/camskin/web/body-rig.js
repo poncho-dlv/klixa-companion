@@ -167,13 +167,15 @@ const DEFAULT_BODY_PARAMS = {
   // Coude : plage basse, car cache par le corps ou la main il garde une position estimee correcte (coude
   // sorti, main cachee : le bras s'ecarte quand meme).
   elbowVisibility: [0.1, 0.35],
-  // Poignet et main : plage basse aussi. Un point cache mais DANS l'image (main passee derriere la tete, le
-  // dos...) reste bien estime par le modele ; c'est hors de l'image qu'il invente (voir offFrame).
-  limbVisibility: [0.04, 0.2],
+  limbVisibility: [0.25, 0.5],
   hipVisibility: [0.3, 0.6],
   // Hors de l'image, le modele invente la position : la confiance tombe entre ces deux distances au bord
   // (en fraction de l'image).
   offFrame: [0.1, 0.45],
+  // Confiance plancher d'un point cache mais dans l'image (main derriere la tete, dans le dos...), atteinte a
+  // insideMargin du bord (fraction de l'image) ; au bord meme elle est nulle.
+  occludedTrust: 0.85,
+  insideMargin: 0.08,
   // Longueur de la main du squelette. Les points index/auriculaire de la pose sont aux articulations des
   // doigts, pas au bout. Main mesuree : distance poignet -> articulations x knuckleReach (la patte couvre
   // alors la vraie main, quelle que soit sa taille a l'ecran), bornee a [handMin, handMax] x la longueur de
@@ -259,7 +261,11 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
   const confidence = (i, [lo, hi]) => {
     const [x, y] = body[i];
     const outside = Math.max(0, -x, x - 1, -y, y - 1);
-    return smoothstep(lo, hi, vis(i)) * (1 - smoothstep(p.offFrame[0], p.offFrame[1], outside));
+    // Marge au bord quand le point est dans l'image (> 0) : un point cache par le corps ou la tete a une
+    // visibilite quasi nulle, mais sa position estimee reste bonne tant qu'il est dans l'image.
+    const inside = Math.min(x, 1 - x, y, 1 - y);
+    const occluded = p.occludedTrust * smoothstep(0, p.insideMargin, inside);
+    return Math.max(smoothstep(lo, hi, vis(i)), occluded) * (1 - smoothstep(p.offFrame[0], p.offFrame[1], outside));
   };
 
   // Hanches : melange progressif entre la position mesuree et une position estimee sous les epaules.
