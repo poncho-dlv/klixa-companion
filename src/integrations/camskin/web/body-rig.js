@@ -16,6 +16,14 @@ export const BODY_JOINT = {
 
 const finite = (n) => typeof n === 'number' && Number.isFinite(n);
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+/** Transition douce de 0 (v <= lo) a 1 (v >= hi). */
+function smoothstep(lo, hi, v) {
+  const t = clamp((v - lo) / (hi - lo), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+// Prediction : vitesse (largeur d'image par seconde) sous laquelle on n'extrapole pas, et a partir de laquelle on extrapole pleinement.
+const PREDICT_MIN_SPEED = 0.04;
+const PREDICT_FULL_SPEED = 0.15;
 
 /**
  * Valide les points de corps d'une trame (le serveur local ne relaie rien de mal forme).
@@ -42,7 +50,7 @@ export function sanitizeBody(raw) {
  * @param {{ minCutoff?: number, beta?: number, dCutoff?: number, vCutoff?: number }} [options] minCutoff (Hz) : lissage au repos ;
  *   beta : reactivite aux mouvements rapides ; dCutoff : lissage de la vitesse ; vCutoff : lissage de la vitesse de prediction
  */
-export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1, vCutoff = 4 } = {}) {
+export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1, vCutoff = 4, zMinCutoff = 0.25, zBeta = 1.5, visTau = 0.25 } = {}) {
   let state = null; // [point][axe] -> { x, dx, v } ; dx = vitesse tres lissee (reglage du filtre), v = vitesse pour la prediction
   let vis = null;
   let lastT = null;
@@ -53,34 +61,44 @@ export function createBodyFilter({ minCutoff = 0.6, beta = 8, dCutoff = 1, vCuto
     filter(body, t) {
       const dt = lastT === null ? 0 : t - lastT;
       lastT = t;
-      vis = body.map((p) => p[3]);
       // Premiere mesure, horloge qui recule (changement de camera) ou trou trop long : on repart de zero.
       if (!state || dt <= 0 || dt > 0.5 || state.length !== body.length) {
         state = body.map((p) => [0, 1, 2].map((a) => ({ x: p[a], dx: 0, v: 0 })));
+        vis = body.map((p) => p[3]);
         return body.map((p) => [...p]);
       }
+      // Visibilite lissee : elle oscille d'une image a l'autre autour des seuils, ce qui ferait sauter les membres.
+      const kVis = 1 - Math.exp(-dt / visTau);
       return body.map((p, i) => {
         const out = [0, 1, 2].map((a) => {
           const s = state[i][a];
           const before = s.x;
           const dx = (p[a] - s.x) / dt;
           s.dx += alpha(dCutoff, dt) * (dx - s.dx);
-          s.x += alpha(minCutoff + beta * Math.abs(s.dx), dt) * (p[a] - s.x);
+          // La profondeur (axe 2) est bien plus bruitee que la position dans l'image : filtre plus ferme.
+          const cutoff = a === 2 ? zMinCutoff + zBeta * Math.abs(s.dx) : minCutoff + beta * Math.abs(s.dx);
+          s.x += alpha(cutoff, dt) * (p[a] - s.x);
           s.v += alpha(vCutoff, dt) * ((s.x - before) / dt - s.v);
           return s.x;
         });
-        return [...out, p[3]];
+        vis[i] += (p[3] - vis[i]) * kVis;
+        return [...out, vis[i]];
       });
     },
     /**
      * Points extrapoles `lead` secondes apres la derniere mesure (compense le retard de la mesure et
      * donne une position a chaque image affichee, meme si la pose est mesuree moins souvent).
-     * Seuls x et y sont extrapoles : la profondeur est trop bruitee pour ca.
+     * Seuls x et y sont extrapoles : la profondeur est trop bruitee pour ca. Sous une petite vitesse
+     * (immobile), rien n'est extrapole : la prediction n'ajoute pas de tremblement au repos.
      * @returns {number[][]|null} null sans mesure
      */
     predict(lead) {
       if (!state) return null;
-      return state.map((axes, i) => [axes[0].x + axes[0].v * lead, axes[1].x + axes[1].v * lead, axes[2].x, vis[i]]);
+      return state.map((axes, i) => {
+        const speed = Math.hypot(axes[0].v, axes[1].v);
+        const gain = lead * smoothstep(PREDICT_MIN_SPEED, PREDICT_FULL_SPEED, speed);
+        return [axes[0].x + axes[0].v * gain, axes[1].x + axes[1].v * gain, axes[2].x, vis[i]];
+      });
     }
   };
 }
@@ -114,10 +132,16 @@ const DEFAULT_BODY_PARAMS = {
   depthGain: 0.6,
   maxDepthOffset: 40,
   minVisibility: 0.5,
-  // Le coude cache par le corps ou la main garde une visibilite basse alors que sa position estimee reste
-  // bonne : seuil bas pour qu'un coude sorti, main cachee, ecarte bien le bras (sinon il retombe le long du corps).
-  elbowVisibility: 0.15,
-  limbVisibility: 0.4,
+  // Confiance d'un point = transition douce entre deux visibilites [debut, pleine]. Pas de seuil sec : un point
+  // dont la visibilite oscille ferait sauter le membre entre sa position suivie et sa position de repos.
+  // Coude : plage basse, car cache par le corps ou la main il garde une position estimee correcte (coude
+  // sorti, main cachee : le bras s'ecarte quand meme).
+  elbowVisibility: [0.1, 0.35],
+  limbVisibility: [0.25, 0.5],
+  hipVisibility: [0.3, 0.6],
+  // Hors de l'image, le modele invente la position : la confiance tombe entre ces deux distances au bord
+  // (en fraction de l'image).
+  offFrame: [0.1, 0.45],
   // Les points index/auriculaire de la pose sont aux articulations des doigts, pas au bout : la main
   // reelle depasse d'autant. Facteur applique a la longueur de la main du squelette.
   handReach: 1.45,
@@ -157,15 +181,24 @@ export function solveBody(body, view, headDepth, options = {}) {
   const scale = clamp(shoulderWidth / p.restShoulder, 0.25, 5);
   const down = [0, -1, 0];
 
-  let hipMid = null;
-  const hipsSeen = vis(J.hipL) >= p.minVisibility && vis(J.hipR) >= p.minVisibility;
-  if (hipsSeen) {
-    hipMid = mid(point(J.hipL), point(J.hipR));
+  // Confiance (0..1) d'un point : visibilite, reduite quand il sort de l'image.
+  const confidence = (i, [lo, hi]) => {
+    const [x, y] = body[i];
+    const outside = Math.max(0, -x, x - 1, -y, y - 1);
+    return smoothstep(lo, hi, vis(i)) * (1 - smoothstep(p.offFrame[0], p.offFrame[1], outside));
+  };
+
+  // Hanches : melange progressif entre la position mesuree et une position estimee sous les epaules.
+  const hipRest = add(shoulderMid, mul(down, p.lengths.torso * scale));
+  let hipWeight = Math.min(confidence(J.hipL, p.hipVisibility), confidence(J.hipR, p.hipVisibility));
+  let hipMid = hipRest;
+  if (hipWeight > 0) {
+    const measured = mid(point(J.hipL), point(J.hipR));
     // Des hanches au-dessus des epaules ou presque : detection aberrante.
-    if (shoulderMid[1] - hipMid[1] < 0.5 * shoulderWidth) hipMid = null;
+    if (shoulderMid[1] - measured[1] < 0.5 * shoulderWidth) hipWeight = 0;
+    else hipMid = mix(hipRest, measured, hipWeight);
   }
-  const hipsKnown = hipMid !== null;
-  if (!hipsKnown) hipMid = add(shoulderMid, mul(down, p.lengths.torso * scale));
+  const hipsKnown = hipWeight > 0.5;
 
   const arms = [[J.shoulderL, J.elbowL, J.wristL, J.pinkyL, J.indexL, shL], [J.shoulderR, J.elbowR, J.wristR, J.pinkyR, J.indexR, shR]].map(
     ([, elbowIndex, wristIndex, pinkyIndex, indexIndex, shoulder]) => {
@@ -173,17 +206,20 @@ export function solveBody(body, view, headDepth, options = {}) {
       const upper = p.lengths.upperArm * scale;
       const lower = p.lengths.forearm * scale;
       const hand = p.lengths.hand * scale * p.handReach;
-      const hasElbow = vis(elbowIndex) >= p.elbowVisibility;
-      const hasWrist = hasElbow && vis(wristIndex) >= p.limbVisibility;
-      const elbow = hasElbow ? point(elbowIndex) : add(shoulder, mul(down, upper));
+      // Chaque articulation glisse entre sa position de repos (bras le long du corps, dans le prolongement
+      // du segment precedent) et sa position mesuree, selon la confiance ; un poignet ne vaut pas mieux que son coude.
+      const elbowWeight = confidence(elbowIndex, p.elbowVisibility);
+      const wristWeight = elbowWeight * confidence(wristIndex, p.limbVisibility);
+      const handWeight = wristWeight * Math.min(confidence(pinkyIndex, p.limbVisibility), confidence(indexIndex, p.limbVisibility));
+      const elbow = mix(add(shoulder, mul(down, upper)), elbowWeight > 0 ? point(elbowIndex) : shoulder, elbowWeight);
       const forearmDir = normalize(sub(elbow, shoulder));
-      const wrist = hasWrist ? point(wristIndex) : add(elbow, mul(forearmDir, lower));
+      const wrist = mix(add(elbow, mul(forearmDir, lower)), wristWeight > 0 ? point(wristIndex) : elbow, wristWeight);
       // Direction de la main : poignet -> milieu index/auriculaire, sinon dans le prolongement de l'avant-bras.
-      const handsSeen = hasWrist && vis(pinkyIndex) >= p.limbVisibility && vis(indexIndex) >= p.limbVisibility;
-      const handDir = handsSeen
-        ? normalize(sub(mid(point(pinkyIndex), point(indexIndex)), wrist), forearmDir)
-        : normalize(sub(wrist, elbow), forearmDir);
-      return { outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow, hasWrist };
+      const alongForearm = normalize(sub(wrist, elbow), forearmDir);
+      const handDir = handWeight > 0
+        ? normalize(mix(alongForearm, normalize(sub(mid(point(pinkyIndex), point(indexIndex)), point(wristIndex)), alongForearm), handWeight), alongForearm)
+        : alongForearm;
+      return { outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow: elbowWeight > 0.5, hasWrist: wristWeight > 0.5 };
     }
   );
   return { scale, shoulderWidth, shoulderMid, hipMid, hipsKnown, arms };
@@ -193,13 +229,15 @@ export function solveBody(body, view, headDepth, options = {}) {
  * Lisse un squelette vers le suivant (moyenne exponentielle, `k` entre 0 et 1). Sans squelette
  * precedent, ou si les membres changent de mode (visible / hors champ), il est repris tel quel.
  */
+const SCALE_SLOWDOWN = 0.15;
 export function blendSkeleton(prev, next, k) {
   if (!prev || !next) return next;
   const blend = (a, b) => mix(a, b, k);
   return {
     ...next,
-    scale: prev.scale + (next.scale - prev.scale) * k,
-    shoulderWidth: prev.shoulderWidth + (next.shoulderWidth - prev.shoulderWidth) * k,
+    // La carrure d'une personne ne change pas d'une image a l'autre : echelle lissee bien plus fort (sinon le corps "respire").
+    scale: prev.scale + (next.scale - prev.scale) * k * SCALE_SLOWDOWN,
+    shoulderWidth: prev.shoulderWidth + (next.shoulderWidth - prev.shoulderWidth) * k * SCALE_SLOWDOWN,
     shoulderMid: blend(prev.shoulderMid, next.shoulderMid),
     hipMid: blend(prev.hipMid, next.hipMid),
     arms: next.arms.map((arm, i) => {
