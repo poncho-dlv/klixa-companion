@@ -124,7 +124,36 @@ la peau procedurale du manifeste s'applique aussi au corps.
   L'alignement dans l'image ne depend jamais de la profondeur, seulement l'echelle et l'orientation.
 - `neckAnchor` : point du repere de la tete ou le cou vient se raccorder ; `neckBase` : hauteur de
   la base du cou au-dessus des epaules (fraction de leur largeur).
-- Membres hors champ ou peu visibles (< 0,4) : le bras pend le long du corps ; hanches non
+- `armThickness`, `torsoWidth`, `shoulderSpread` : proportions du buste et des bras par rapport a ce que
+  mesure la pose (defauts neutres : 1, 1, 1,15). Les epaules suivies sont au centre des articulations,
+  a l'interieur de la silhouette : `shoulderSpread` les ramene vers le bord du buste, `torsoWidth` elargit
+  le torse sans changer sa profondeur.
+
+### Patron de patte (`body.hand`, `body.armRadius`, `body.front`)
+
+Tout ce qui relie les points suivis de la main au maillage `Hand` est dans le manifeste, pour qu'un nouveau
+modele se regle sans toucher au code. Les defauts sont ceux du dragon ; **a ajuster pour chaque nouvelle patte** :
+
+| Champ | Defaut | Role | Quand l'ajuster |
+|---|---|---|---|
+| `hand.palmReach` | 1,35 | longueur de la patte = longueur mesuree poignet -> base du majeur x ce facteur | la patte est trop courte / depasse au-dela des doigts reels |
+| `hand.knuckleReach` | 1,85 | idem quand seuls les points du corps sont connus (poignet -> articulations des doigts) | idem, sans suivi des mains |
+| `hand.reach` | 1,45 | idem sans aucune mesure de la main (x longueur de repos `lengths.hand`) | rarement |
+| `hand.min` / `hand.max` | 0,7 / 2,6 | bornes de la longueur, x `lengths.hand` | patte geante ou minuscule sur une mauvaise detection |
+| `hand.palmCm` | 9,5 | longueur reelle d'une paume (cm) : place une main seule en profondeur | main seule trop pres / trop loin |
+| `hand.bracelet` | 0,8 | taille du noeud `Wrist` par rapport au bras | le bracelet ecrase la main |
+| `hand.palmSide` | 1 | `-1` si la paume du maillage est du cote -Z | le dos de la patte apparait a la place de la paume |
+| `armRadius` | 6 | rayon d'un bras au repos (cm) : marge devant le torse | un bras passe dans le ventre, ou s'en ecarte trop |
+| `front.onCm` / `front.offCm` | 10 / 16 | une patte reste devant la tete jusqu'a `onCm` derriere son plan, et y reste jusqu'a `offCm` ; au-dela la tete la cache | la tete du skin est volumineuse |
+
+Convention du maillage `Hand` (a respecter pour que ces reglages restent valables) : origine au poignet, doigts
+vers `+Y`, pouce vers `+X`, paume vers `+Z`, modele sur une **main droite** (la main gauche est retournee par
+le moteur). Le bout des doigts doit tomber vers `lengths.hand` x ~1,45 ; la base du majeur vers `lengths.hand` x ~0,7.
+Pour regler : activer « Points » dans la fenetre de suivi (squelette de la main en jaune, pouce en orange),
+mettre une main devant la camera paume visible, puis ajuster `palmReach`, `bracelet` et `palmSide` jusqu'a
+ce que la patte recouvre la main ; « Copier le manifeste » exporte les valeurs.
+
+- Membres hors champ ou peu visibles : le bras pend le long du corps ; hanches non
   visibles : torse estime vers le bas. Epaules non visibles : pas de corps du tout.
 - Generer le modele : `blender -b -P scripts/blender/make_dragon_body.py` (`--render DOSSIER` pour
   un apercu des pieces). Le panneau de calibrage a les reglages « Corps » (epaisseur, profondeur,

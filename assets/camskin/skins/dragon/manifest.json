@@ -76,6 +76,18 @@
     "armThickness": 1.2,
     "torsoWidth": 1.15,
     "shoulderSpread": 1.15,
+    "armRadius": 6,
+    "front": { "onCm": 10, "offCm": 16 },
+    "hand": {
+      "palmReach": 1.35,
+      "knuckleReach": 1.85,
+      "reach": 1.45,
+      "min": 0.7,
+      "max": 2.6,
+      "palmCm": 9.5,
+      "bracelet": 0.8,
+      "palmSide": 1
+    },
     "depthGain": 0.6,
     "restShoulder": 40,
     "neckAnchor": [

@@ -15,13 +15,7 @@ const POSE_TAU = 0.04; // s : lissage de la pose (suivi ~30 images/s, affichage 
 const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
-const ARM_RADIUS = 6; // cm : rayon d'un bras du modele au repos (marge gardee devant le torse)
 const FRONT_ORDER = 10; // ordre de rendu des pattes au premier plan
-// Une patte passe au premier plan tant qu'elle n'est pas a plus de FRONT_ON_CM derriere le plan du visage,
-// et y reste jusqu'a FRONT_OFF_CM derriere.
-// Marges larges : la profondeur est deduite de la taille de la main, sous-estimee quand elle est vue par la tranche.
-const FRONT_ON_CM = 10;
-const FRONT_OFF_CM = 16;
 const BODY_TAU = 0.015; // s : lissage residuel du squelette (le filtre One Euro et la prediction font l'essentiel ; plus haut = retard sur les gestes)
 const RETRY_MS = 10000;
 // Pieces du corps attendues dans le modele (noeuds nommes) ; les membres sont dupliques gauche/droite.
@@ -259,6 +253,12 @@ export function createSkin3DRenderer({ canvas } = {}) {
     node.visible = true;
   }
 
+  /** Reglages de la patte du manifeste, sous les noms attendus par body-rig.js. */
+  function handOptions(spec) {
+    const h = spec.hand;
+    return { palmReach: h.palmReach, knuckleReach: h.knuckleReach, handReach: h.reach, handMin: h.min, handMax: h.max, palmCm: h.palmCm };
+  }
+
   /**
    * Corps partiel (pas de torse exploitable) : par cote, la patte et ce qui est reellement vu du bras
    * (avant-bras si le coude est vu, haut du bras si l'epaule l'est aussi). Le reste du corps est cache.
@@ -267,7 +267,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     skeleton = null;
     const rest = spec.lengths;
     const arms = solveArms(face.body ?? null, face.hands ?? null, { w: face.w, h: face.h }, {
-      fov: FOV, depthGain: spec.depthGain, lengths: rest, ...(hasPose ? { defaultDepth: -pose.position.z } : {})
+      fov: FOV, depthGain: spec.depthGain, lengths: rest, ...handOptions(spec), ...(hasPose ? { defaultDepth: -pose.position.z } : {})
     });
     for (const part of Object.values(body.parts)) {
       for (const node of Array.isArray(part) ? part : [part]) if (node) node.visible = false;
@@ -276,10 +276,10 @@ export function createSkin3DRenderer({ canvas } = {}) {
     const armThick = body.armThick ?? spec.thickness * spec.armThickness;
     arms.forEach((arm, i) => {
       if (!arm) return;
-      const hand = arm.thumb ? handFrame(arm) : limbFrame(arm.wrist, arm.tip, arm.outward);
+      const hand = arm.thumb ? handFrame(arm, spec.hand.palmSide) : limbFrame(arm.wrist, arm.tip, arm.outward);
       const handThick = Math.min(3, Math.max(armThick * 0.85, hand.length / rest.hand));
       placePart(body.parts.Hand[i], hand, rest.hand, handThick, handThick * (hand.mirror ?? 1));
-      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * 0.8);
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * spec.hand.bracelet);
       if (arm.elbow) {
         const fore = limbFrame(arm.elbow, arm.wrist, arm.outward);
         placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
@@ -305,7 +305,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
     // Sans tete suivie (mains seules), la profondeur de la tete n'a pas de sens : pas de squelette.
     const raw = face.body && !face.handsOnly
       ? solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
-        fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths,
+        fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths, ...handOptions(spec),
         eyeSpan: face.u > 0 && face.w > 0 ? face.u / face.w : 0
       }, face.hands ?? null)
       : null;
@@ -358,7 +358,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
         top: box.min.y * stretch,
         bottom: box.max.y * stretch
       };
-      const radius = ARM_RADIUS * armThick;
+      const radius = spec.armRadius * armThick;
       arms = arms.map((arm) => ({
         ...arm,
         elbow: clearTorso(arm.elbow, torso, shape, radius),
@@ -371,7 +371,7 @@ export function createSkin3DRenderer({ canvas } = {}) {
       const upper = limbFrame(arm.shoulder, arm.elbow, arm.outward);
       const fore = limbFrame(arm.elbow, arm.wrist, arm.outward);
       // Main suivie point par point : rotation reelle (pouce) ; sinon dans la continuite du bras.
-      const hand = arm.thumb ? handFrame(arm) : limbFrame(arm.wrist, arm.tip, arm.outward);
+      const hand = arm.thumb ? handFrame(arm, spec.hand.palmSide) : limbFrame(arm.wrist, arm.tip, arm.outward);
       placePart(body.parts.UpperArm[i], upper, rest.upperArm, armThick);
       placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
       // Main : echelle uniforme calee sur la longueur mesuree (la patte grossit avec la main a l'ecran, en
@@ -380,13 +380,13 @@ export function createSkin3DRenderer({ canvas } = {}) {
       placePart(body.parts.Hand[i], hand, rest.hand, handThick, handThick * (hand.mirror ?? 1));
       placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, armThick);
       placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
-      // Bracelet du poignet : un peu plus fin que le bras, sinon il ecrase la main.
-      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * 0.8);
+      // Bracelet du poignet : un peu plus fin que le bras (`hand.bracelet`), sinon il ecrase la main.
+      placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick * spec.hand.bracelet);
       // Premier plan seulement si la main est devant le plan du visage (ou a peine derriere). Nettement
       // derriere (main passee derriere la tete), elle reste dans la scene : la tete du skin la cache.
       // Deux seuils (hysteresis) pour ne pas clignoter a la limite.
       const ahead = arm.thumb ? arm.handAhead : null;
-      setArmFront(body, i, ahead !== null && ahead > (body.front[i] ? -FRONT_OFF_CM : -FRONT_ON_CM));
+      setArmFront(body, i, ahead !== null && ahead > (body.front[i] ? -spec.front.offCm : -spec.front.onCm));
     });
     body.group.visible = true;
   }

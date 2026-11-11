@@ -484,3 +484,27 @@ test('isPlausibleBody : rejette un corps fantome (buste ecrase ou epaules minusc
   assert.equal(isPlausibleBody(seated, aspect), true);
   assert.equal(isPlausibleBody(standingBody({ shoulderL: [0.51, 0.62, 0, 0.99], shoulderR: [0.49, 0.62, 0, 0.99] }), aspect), false);
 });
+
+test('manifeste : le bloc de la patte (hand, armRadius, front) a des defauts neutres et des bornes', () => {
+  const body = normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb' } }).body;
+  assert.deepEqual(body.hand, { palmReach: 1.35, knuckleReach: 1.85, reach: 1.45, min: 0.7, max: 2.6, palmCm: 9.5, bracelet: 0.8, palmSide: 1 });
+  assert.equal(body.armRadius, 6);
+  assert.deepEqual(body.front, { onCm: 10, offCm: 16 });
+  const custom = normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb', armRadius: 99, front: { onCm: -5 }, hand: { palmReach: 2, palmSide: -1, bracelet: 50, max: 0 } } }).body;
+  assert.equal(custom.hand.palmReach, 2);
+  assert.equal(custom.hand.palmSide, -1);
+  assert.equal(custom.hand.bracelet, 2, 'borne haute');
+  assert.equal(custom.hand.max, 1, 'borne basse');
+  assert.equal(custom.armRadius, 40);
+  assert.equal(custom.front.onCm, 0);
+  assert.equal(normalizeSkinManifest({ model: 'a.glb', body: { model: 'b.glb', hand: { palmSide: 7 } } }).body.hand.palmSide, 1, 'seul -1 inverse');
+});
+
+test('handFrame : palmSide inverse la face montree a la camera', () => {
+  const arm = { wrist: [0, 0, -60], tip: [0, 10, -60], thumb: [1, 0, 0], mirrored: false };
+  const normal = handFrame(arm);
+  const flipped = handFrame(arm, -1);
+  assert.equal(normal.mirror, 1);
+  assert.equal(flipped.mirror, -1);
+  nearVec(flipped.z, normal.z.map((c) => -c));
+});

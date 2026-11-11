@@ -52,6 +52,8 @@ function normalizeBody(raw) {
     throw new Error('body.model invalide (chemin relatif vers un .glb/.gltf attendu)');
   }
   const lengths = raw.lengths ?? {};
+  const hand = raw.hand ?? {};
+  const front = raw.front ?? {};
   return {
     model: raw.model,
     thickness: optionalNumber(raw.thickness, 1, 0.3, 3),
@@ -62,6 +64,26 @@ function normalizeBody(raw) {
     restShoulder: optionalNumber(raw.restShoulder, 40, 10, 100),
     neckAnchor: vec3(raw.neckAnchor, [0, -13, -3], 60),
     neckBase: optionalNumber(raw.neckBase, 0.12, -0.5, 0.5),
+    // Patte du modele : ce qui relie les points suivis de la main (poignet, base des doigts) a la forme du
+    // maillage `Hand`. A regler pour chaque modele de patte (voir docs/camskin-3d.md, "Patron de patte").
+    hand: {
+      palmReach: optionalNumber(hand.palmReach, 1.35, 0.5, 4), // longueur de la patte / longueur mesuree poignet -> base du majeur
+      knuckleReach: optionalNumber(hand.knuckleReach, 1.85, 0.5, 6), // idem, quand seuls les points du corps sont connus (poignet -> articulations)
+      reach: optionalNumber(hand.reach, 1.45, 0.5, 4), // idem, sans aucune mesure de la main (longueur de repos x reach)
+      min: optionalNumber(hand.min, 0.7, 0.1, 3), // bornes de la longueur, x la longueur de repos
+      max: optionalNumber(hand.max, 2.6, 1, 8),
+      palmCm: optionalNumber(hand.palmCm, 9.5, 3, 30), // longueur reelle d'une paume (cm) : place une main seule en profondeur
+      bracelet: optionalNumber(hand.bracelet, 0.8, 0.2, 2), // taille du noeud `Wrist` par rapport au bras
+      palmSide: hand.palmSide === -1 ? -1 : 1 // -1 si la paume du maillage est du cote -Z (le dos apparait a la place de la paume)
+    },
+    // Rayon d'un bras du modele au repos (cm) : marge gardee devant le torse quand un bras passe devant la poitrine.
+    armRadius: optionalNumber(raw.armRadius, 6, 0.5, 40),
+    // Une patte passe devant la tete jusqu'a `onCm` derriere son plan, et y reste jusqu'a `offCm` (cm) ; au-dela,
+    // la tete du skin la cache. A elargir si la tete du skin est volumineuse.
+    front: {
+      onCm: optionalNumber(front.onCm, 10, 0, 60),
+      offCm: optionalNumber(front.offCm, 16, 0, 80)
+    },
     wings: {
       restDeg: optionalNumber(raw.wings?.restDeg, 0, -30, 60),
       flapDeg: optionalNumber(raw.wings?.flapDeg, 8, 0, 40),
@@ -88,6 +110,8 @@ function normalizeBody(raw) {
  *   jaw: { node: string, axis: number[], maxAngleDeg: number, gain: number, lipGain: number, curve: number }|null,
  *   stabilize: { noseHold: number }|null,
  *   body: { model: string, thickness: number, armThickness: number, torsoWidth: number, shoulderSpread: number, depthGain: number, restShoulder: number, neckAnchor: number[], neckBase: number,
+ *     hand: { palmReach: number, knuckleReach: number, reach: number, min: number, max: number, palmCm: number, bracelet: number, palmSide: number },
+ *     armRadius: number, front: { onCm: number, offCm: number },
  *     lengths: { torso: number, neck: number, upperArm: number, forearm: number, hand: number } }|null,
  *   morphGains: Record<string, number>,
  *   eyes: { left: string|null, right: string|null, maxYawDeg: number, maxPitchDeg: number, gain: number }|null,

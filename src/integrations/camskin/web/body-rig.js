@@ -494,8 +494,6 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
  * precedent, ou si les membres changent de mode (visible / hors champ), il est repris tel quel.
  */
 const SCALE_SLOWDOWN = 0.15;
-// Cote du maillage de la main ou se trouve la paume : 1 = +Z, -1 = -Z (depend du modele 3D).
-const PALM_SIGN = 1;
 export function blendSkeleton(prev, next, k) {
   if (!prev || !next) return next;
   const blend = (a, b) => mix(a, b, k);
@@ -597,12 +595,14 @@ export function clearTorso(point, torso, shape, radius) {
  * de la paume. Le maillage est modele sur une main droite ; pour une main gauche le repere est construit
  * avec le pouce a l'oppose et `mirror` vaut -1 (echelle X a appliquer au maillage), ce qui remet le pouce
  * du bon cote sans retourner la paume.
+ * @param {{ thumb: number[], mirrored: boolean, wrist: number[], tip: number[] }} arm bras avec main suivie
+ * @param {number} [palmSide] 1 si la paume du maillage est du cote +Z, -1 si elle est du cote -Z (manifeste : `hand.palmSide`)
  * @returns {{ position: number[], x: number[], y: number[], z: number[], length: number, mirror: number }}
  */
-export function handFrame(arm) {
-  const mirror = arm.mirrored ? -1 : 1;
-  const hint = mul(arm.thumb, mirror * PALM_SIGN);
-  return { ...segmentFrame(arm.wrist, arm.tip, hint, hint), mirror: mirror * PALM_SIGN };
+export function handFrame(arm, palmSide = 1) {
+  const mirror = (arm.mirrored ? -1 : 1) * palmSide;
+  const hint = mul(arm.thumb, mirror);
+  return { ...segmentFrame(arm.wrist, arm.tip, hint, hint), mirror };
 }
 
 /**
