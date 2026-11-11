@@ -192,6 +192,10 @@ const DEFAULT_BODY_PARAMS = {
   // mesure environ palmRatio x l'ecart des articulations d'epaule ; plus elle parait grande, plus elle est
   // pres de la camera. Bien plus fiable que la profondeur du modele du corps. Bornee a
   // [handNear, handFar] x la distance de la tete (une main collee a la camera ferait exploser la perspective).
+  // eyeSpan : ecart des coins externes des yeux en fraction de la largeur de l'image (fourni par le suivi du
+  // visage, 0 = inconnu) ; palmToEyes : longueur d'une paume rapportee a cet ecart (anatomie, ~1).
+  eyeSpan: 0,
+  palmToEyes: 1,
   palmRatio: 0.27,
   handNear: 0.45,
   handFar: 1.5,
@@ -319,6 +323,8 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
       // direction des doigts, elle fixe la rotation de la main (paume ou dos vers la camera).
       let thumb = null;
       let handAhead = null;
+      let handAheadSize = null;
+      let handAheadPose = null;
       const lm = hands?.[side];
       if (lm) {
         const wide = 2 * Math.tan((p.fov * Math.PI) / 360) * (view.w / view.h); // largeur de l'image (cm) a 1 cm de la camera
@@ -327,7 +333,15 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
         const palm = Math.hypot(w9[0] - w0[0], ((w9[1] - w0[1]) * view.h) / view.w, w9[2] - w0[2]);
         let depth = wristMeasured ? -wristMeasured[2] : headDepth;
         if (palm > 1e-4) {
-          depth = Math.max(10, clamp((p.palmRatio * jointWidth) / (palm * wide), headDepth * p.handNear, headDepth * p.handFar));
+          // Reference preferee : l'ecart des yeux, mesure au meme endroit que la profondeur de la tete (meme
+          // image, meme echelle). A defaut, la carrure (moins fiable : epaules en retrait, buste qui tourne).
+          const estimate = p.eyeSpan > 0 ? (headDepth * p.eyeSpan * p.palmToEyes) / palm : (p.palmRatio * jointWidth) / (palm * wide);
+          // Une main vue par la tranche, inclinee ou collee au visage parait plus petite, donc plus loin
+          // qu'elle n'est. Second indice : la profondeur du poignet selon le modele du corps. On garde le
+          // plus proche des deux : la main n'est jugee derriere la tete que si les deux le disent.
+          handAheadSize = headDepth - estimate;
+          handAheadPose = (ref - body[wristIndex][2]) * 100;
+          depth = Math.max(10, clamp(headDepth - Math.max(handAheadSize, handAheadPose), headDepth * p.handNear, headDepth * p.handFar));
         }
         // z d'un point de main : fraction de la largeur de l'image ; largeur de l'image a cette profondeur (cm).
         handAhead = headDepth - depth;
@@ -347,7 +361,9 @@ export function solveBody(body, view, headDepth, options = {}, hands = null) {
         // `mirrored` : main gauche de la personne (le maillage, modele sur une main droite, est retourne).
         thumb, mirrored: side === 0,
         // Avance de la main suivie sur le plan du visage (cm, > 0 = devant la tete, < 0 = derriere) ; null sans main suivie.
-        handAhead
+        handAhead,
+        // Les deux indices dont `handAhead` est tire (diagnostic) : taille de la main, modele du corps.
+        handAheadSize, handAheadPose
       };
     }
   );
@@ -424,6 +440,37 @@ export function limbFrame(from, to, outward) {
     x = add(add(mul(outward, cos), mul(cross(k, outward), sin)), mul(k, dot(k, outward) * (1 - cos)));
   }
   return segmentFrame(from, to, x, x);
+}
+
+/**
+ * Sort un point du volume du torse, vers la camera : le torse d'un skin est plus bombe qu'un vrai buste,
+ * un bras passe devant la poitrine s'y retrouverait enfoui. Le torse est approche par un ellipsoide
+ * (demi-largeur, avancee du ventre, haut et bas le long de son axe) ; le point est avance le long de son
+ * rayon de vue (la camera est a l'origine), donc il reste sur le meme pixel. Un point franchement derriere
+ * le torse (main dans le dos) n'est pas touche.
+ * @param {number[]} point position (cm, repere camera)
+ * @param {{ position: number[], x: number[], y: number[], z: number[] }} torso repere du torse (voir torsoFrame)
+ * @param {{ halfWidth: number, front: number, top: number, bottom: number }} shape dimensions du torse (cm)
+ * @param {number} radius rayon du membre (cm) : marge gardee devant la surface
+ * @returns {number[]} le point, eventuellement avance
+ */
+export function clearTorso(point, torso, shape, radius) {
+  const local = sub(point, torso.position);
+  const u = dot(local, torso.x);
+  const v = dot(local, torso.y);
+  const w = dot(local, torso.z);
+  const centerV = (shape.top + shape.bottom) / 2;
+  const nu = u / (shape.halfWidth + radius);
+  const nv = (v - centerV) / ((shape.bottom - shape.top) / 2 + radius);
+  const inside = 1 - nu * nu - nv * nv;
+  if (inside <= 0) return point;
+  const surface = (shape.front + radius) * Math.sqrt(inside);
+  if (w >= surface || w < -surface * 0.5) return point;
+  // Avance le long du rayon de vue ; borne pour ne jamais atteindre la camera.
+  const toCamera = normalize(mul(point, -1), [0, 0, 1]);
+  const gain = Math.max(0.3, dot(toCamera, torso.z));
+  const step = Math.min((surface - w) / gain, length(point) * 0.6);
+  return add(point, mul(toCamera, step));
 }
 
 /**

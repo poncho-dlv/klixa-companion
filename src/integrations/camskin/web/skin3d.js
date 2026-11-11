@@ -7,7 +7,7 @@
 // camera : le skin s'aligne sur l'image quel que soit le vrai champ de la webcam.
 import * as THREE from '/vendor-three/three.module.js';
 import { GLTFLoader } from '/vendor-three-addons/loaders/GLTFLoader.js';
-import { solveBody, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame } from './body-rig.js';
+import { solveBody, blendSkeleton, segmentFrame, limbFrame, handFrame, torsoFrame, clearTorso } from './body-rig.js';
 import { BLEND_NAMES, normalizeSkinManifest, resolveModelUrl, jawAngle, gazeAngles, breathValue, poseHoldWeight, smoothingFactor, isBlendName } from './skin-manifest.js';
 
 const FOV = 63;
@@ -15,6 +15,7 @@ const POSE_TAU = 0.04; // s : lissage de la pose (suivi ~30 images/s, affichage 
 const BLEND_TAU = 0.03; // s : lissage des blendshapes
 const FAST_TAU = 0.012; // s : machoire et clignements, tres brefs (quelques images de suivi)
 const FAST_BLENDS = new Set(['jawOpen', 'eyeBlinkLeft', 'eyeBlinkRight']);
+const ARM_RADIUS = 6; // cm : rayon d'un bras du modele au repos (marge gardee devant le torse)
 const FRONT_ORDER = 10; // ordre de rendu des pattes au premier plan
 // Une patte passe au premier plan tant qu'elle n'est pas a plus de FRONT_ON_CM derriere le plan du visage,
 // et y reste jusqu'a FRONT_OFF_CM derriere.
@@ -190,6 +191,10 @@ export function createSkin3DRenderer({ canvas } = {}) {
       for (const name of [...BODY_SINGLE, ...BODY_PAIRED]) {
         if (!templates[name] && name !== 'Wing') console.warn(`Skin corps : noeud "${name}" introuvable`);
       }
+      // Encombrement du torse dans son propre repere (cm, avant mise a l'echelle) : sert a sortir les bras de son volume.
+      if (templates.Torso) {
+        body.torsoBox = new THREE.Box3().setFromObject(templates.Torso).applyMatrix4(templates.Torso.matrixWorld.clone().invert());
+      }
       const spawn = (name) => {
         const node = templates[name]?.clone(true);
         if (!node) return null;
@@ -262,7 +267,8 @@ export function createSkin3DRenderer({ canvas } = {}) {
       return;
     }
     const raw = solveBody(face.body, { w: face.w, h: face.h }, -pose.position.z, {
-      fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths
+      fov: FOV, depthGain: spec.depthGain, restShoulder: spec.restShoulder, shoulderSpread: spec.shoulderSpread, lengths: spec.lengths,
+      eyeSpan: face.u > 0 && face.w > 0 ? face.u / face.w : 0
     }, face.hands ?? null);
     if (!raw) {
       hideBody(entry);
@@ -299,7 +305,27 @@ export function createSkin3DRenderer({ canvas } = {}) {
     neckPoint.fromArray(spec.neckAnchor).applyMatrix4(head.matrix);
     placePart(body.parts.Neck, segmentFrame(base, neckPoint.toArray(), torso.x.map((c) => -c)), rest.neck, thick);
 
-    skeleton.arms.forEach((arm, i) => {
+    // Bras passes devant le buste : coude, poignet et main sont sortis du volume du torse (plus bombe qu'un vrai buste).
+    let arms = skeleton.arms;
+    if (body.torsoBox) {
+      const stretch = Math.min(3, Math.max(0.3, torso.length / rest.torso));
+      const box = body.torsoBox;
+      const shape = {
+        halfWidth: Math.max(-box.min.x, box.max.x) * thick * spec.torsoWidth,
+        front: box.max.z * thick,
+        top: box.min.y * stretch,
+        bottom: box.max.y * stretch
+      };
+      const radius = ARM_RADIUS * armThick;
+      arms = arms.map((arm) => ({
+        ...arm,
+        elbow: clearTorso(arm.elbow, torso, shape, radius),
+        wrist: clearTorso(arm.wrist, torso, shape, radius),
+        tip: clearTorso(arm.tip, torso, shape, radius)
+      }));
+    }
+
+    arms.forEach((arm, i) => {
       const upper = limbFrame(arm.shoulder, arm.elbow, arm.outward);
       const fore = limbFrame(arm.elbow, arm.wrist, arm.outward);
       // Main suivie point par point : rotation reelle (pouce) ; sinon dans la continuite du bras.
@@ -494,9 +520,9 @@ export function createSkin3DRenderer({ canvas } = {}) {
       hideBody(active);
       renderer.clear();
     },
-    /** Avance de chaque main suivie sur le plan du visage, en cm (diagnostic) : [gauche, droite], null si non suivie. */
+    /** Avance de chaque main suivie sur le plan du visage, en cm (diagnostic) : [gauche, droite], null si non suivie ; `size` et `pose` = les deux indices. */
     handsAhead() {
-      return skeleton ? skeleton.arms.map((arm) => (arm.thumb ? arm.handAhead : null)) : [null, null];
+      return skeleton ? skeleton.arms.map((arm) => (arm.thumb ? { ahead: arm.handAhead, size: arm.handAheadSize, pose: arm.handAheadPose } : null)) : [null, null];
     },
     /** Etat du chargement du skin : idle, loading, ready ou failed (diagnostic). */
     status(id) {

@@ -339,7 +339,8 @@ function render(face, landmarks, body, hands) {
     if (is3D(def)) {
       const renderer = ensureRenderer3d();
       drew3d = Boolean(renderer?.render(face, skin, def.model));
-      const ahead = renderer?.handsAhead().map((cm) => (cm === null ? '-' : `${cm > 0 ? '+' : ''}${cm.toFixed(0)}`)).join(' / ');
+      const cm = (v) => (v === null || v === undefined ? '?' : `${v > 0 ? '+' : ''}${v.toFixed(0)}`);
+      const ahead = renderer?.handsAhead().map((hand) => (hand ? `${cm(hand.ahead)} (taille ${cm(hand.size)}, corps ${cm(hand.pose)})` : '-')).join(' / ');
       state.info3d = renderer ? `3D ${renderer.status(skin)}${face.pose ? ` z=${face.pose[14]}` : ' sans pose'}${state.debug ? ` - mains ${ahead} cm` : ''}` : '3D chargement du moteur';
     } else {
       if (!face.lost) def.draw(ctx, face);

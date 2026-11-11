@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
+  BODY_LANDMARKS, BODY_JOINT, HAND_POINTS, sanitizeBody, sanitizeHands, handFrame, clearTorso, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
 } from '../src/integrations/camskin/web/body-rig.js';
 import { normalizeSkinManifest } from '../src/integrations/camskin/web/skin-manifest.js';
 import { sanitizeFace } from '../src/integrations/camskin.js';
@@ -375,12 +375,47 @@ test('sanitizeFace : les mains ne passent qu avec un corps valide', () => {
 });
 
 test('solveBody : une main qui parait plus grande est plus pres de la camera, sans jamais s y coller', () => {
-  const wristZ = (size) => solveBody(standingBody({ wristL: [0.6, 0.3, 0, 0.98] }), VIEW, 60, {}, [flatHand(0.6, 0.3, -1, size), null]).arms[0].wrist[2];
+  const wristZ = (size) => solveBody(standingBody({ wristL: [0.6, 0.3, 0.9, 0.98] }), VIEW, 60, {}, [flatHand(0.6, 0.3, -1, size), null]).arms[0].wrist[2];
   assert.ok(wristZ(0.12) > wristZ(0.05), 'Z moins negatif = plus pres');
   assert.ok(wristZ(0.6) <= -60 * 0.45 + 1e-6, 'borne proche : 45 % de la distance de la tete');
   assert.ok(wristZ(0.001) >= -60 * 1.5 - 1e-6, 'borne lointaine');
-  const ahead = (size) => solveBody(standingBody({ wristL: [0.6, 0.3, 0, 0.98] }), VIEW, 60, {}, [flatHand(0.6, 0.3, -1, size), null]).arms[0].handAhead;
+  const ahead = (size) => solveBody(standingBody({ wristL: [0.6, 0.3, 0.9, 0.98] }), VIEW, 60, {}, [flatHand(0.6, 0.3, -1, size), null]).arms[0].handAhead;
   assert.ok(ahead(0.25) > 0, 'grande main : devant le visage');
   assert.ok(ahead(0.03) < 0, 'petite main : derriere le plan du visage');
   assert.equal(solveBody(standingBody(), VIEW, 60).arms[0].handAhead, null);
+});
+
+test('clearTorso : un point enfoui dans le torse est avance vers la camera sur le meme pixel', () => {
+  // Torse a 60 cm, face a la camera : +Y vers le bas, +Z (ventre) vers la camera.
+  const torso = { position: [0, 10, -60], x: [-1, 0, 0], y: [0, -1, 0], z: [0, 0, 1] };
+  const shape = { halfWidth: 20, front: 15, top: -5, bottom: 45 };
+  const buried = [5, -10, -58];
+  const out = clearTorso(buried, torso, shape, 6);
+  assert.ok(out[2] > buried[2] + 5, 'plus pres de la camera');
+  near(out[0] / out[2], buried[0] / buried[2]);
+  near(out[1] / out[2], buried[1] / buried[2]);
+  assert.ok(out[2] - torso.position[2] >= 15, 'devant la surface du ventre');
+  // Deja devant, a cote du torse, ou franchement derriere (main dans le dos) : inchange.
+  assert.deepEqual(clearTorso([5, -10, -30], torso, shape, 6), [5, -10, -30]);
+  assert.deepEqual(clearTorso([40, -10, -58], torso, shape, 6), [40, -10, -58]);
+  assert.deepEqual(clearTorso([5, -10, -85], torso, shape, 6), [5, -10, -85]);
+});
+
+test('solveBody : avec l ecart des yeux, une paume aussi grande que cet ecart est a la profondeur de la tete', () => {
+  // flatHand : paume = `size` en hauteur d'image ; en largeur d'image : size * h / w.
+  const palm = (0.1 * VIEW.h) / VIEW.w;
+  const arm = (eyeSpan) => solveBody(standingBody({ wristL: [0.6, 0.3, 0.9, 0.98] }), VIEW, 60, { eyeSpan }, [flatHand(0.6, 0.3, -1, 0.1), null]).arms[0];
+  near(arm(palm).handAhead, 0);
+  assert.ok(arm(palm * 1.5).handAhead < 0, 'main plus petite que prevu : derriere');
+  assert.ok(arm(palm * 0.7).handAhead > 0, 'main plus grande que prevu : devant');
+});
+
+test('solveBody : une main n est derriere la tete que si la taille ET le modele du corps le disent', () => {
+  const small = flatHand(0.6, 0.3, -1, 0.03); // parait petite : la taille seule la dirait loin derriere
+  const ahead = (wristZ) => solveBody(standingBody({ wristL: [0.6, 0.3, wristZ, 0.98] }), VIEW, 60, {}, [small, null]).arms[0];
+  // Le modele du corps la voit au niveau de la tete (main vue par la tranche, collee a la joue) : pas derriere.
+  near(ahead(0).handAhead, 0);
+  assert.ok(ahead(0).handAheadSize < -10);
+  // Les deux la voient derriere : elle l'est.
+  assert.ok(ahead(0.3).handAhead < -10);
 });
