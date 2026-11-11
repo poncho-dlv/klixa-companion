@@ -307,6 +307,31 @@ export function segmentFrame(from, to, hint, fallbackHint = [0, 0, 1]) {
 }
 
 /**
+ * Repere d'un segment de bras, sans retournement : la pose de repos (bras le long du corps, +Y vers le bas,
+ * +X vers `outward`) est amenee sur la direction du segment par la plus petite rotation possible. Le bras
+ * ne tourne donc pas sur lui-meme quand il passe a l'horizontale (un indice fixe y devient colineaire au
+ * segment et ferait basculer le repere d'un quart de tour). Bras pointe droit vers le haut : demi-tour
+ * dans le plan de l'image (bras leve par le cote).
+ * @returns {{ position: number[], x: number[], y: number[], z: number[], length: number }}
+ */
+export function limbFrame(from, to, outward) {
+  const down = [0, -1, 0];
+  const dir = normalize(sub(to, from));
+  const axis = cross(down, dir);
+  const sin = length(axis);
+  const cos = dot(down, dir);
+  let x;
+  if (sin < 1e-4) {
+    x = cos > 0 ? [...outward] : mul(outward, -1);
+  } else {
+    const k = mul(axis, 1 / sin);
+    // Rotation de Rodrigues de `outward` autour de k.
+    x = add(add(mul(outward, cos), mul(cross(k, outward), sin)), mul(k, dot(k, outward) * (1 - cos)));
+  }
+  return segmentFrame(from, to, x, x);
+}
+
+/**
  * Repere du torse : de la mi-epaules vers la mi-hanches ; +X vers la gauche de l'image (donc le
  * ventre, +Z, regarde la camera quand la personne est debout et de face).
  */

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BODY_LANDMARKS, BODY_JOINT, sanitizeBody, unproject, solveBody, blendSkeleton, segmentFrame, torsoFrame
+  BODY_LANDMARKS, BODY_JOINT, sanitizeBody, unproject, solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame
 } from '../src/integrations/camskin/web/body-rig.js';
 import { normalizeSkinManifest } from '../src/integrations/camskin/web/skin-manifest.js';
 import { sanitizeFace } from '../src/integrations/camskin.js';
@@ -265,4 +265,25 @@ test('createBodyFilter.predict : extrapole un mouvement regulier, immobile = pas
   const still = createBodyFilter();
   for (let i = 0; i < 60; i++) still.filter([[0.4, 0.5, 0.1, 0.9]], i / 30);
   assert.ok(Math.abs(still.predict(0.08)[0][0] - 0.4) < 1e-6);
+});
+
+test('limbFrame : pas de retournement quand le bras passe a l horizontale', () => {
+  const out = [1, 0, 0];
+  // Au repos (bras vers le bas) : meme repere que la pose de repos.
+  const rest = limbFrame([0, 0, 0], [0, -10, 0], out);
+  nearVec(rest.x, [1, 0, 0]);
+  nearVec(rest.z, [0, 0, -1]);
+  // Du bas vers l horizontale exterieure, par petits pas : la face arriere (+Z) ne bascule jamais brutalement.
+  let prev = rest;
+  for (let deg = 5; deg <= 175; deg += 5) {
+    const a = (deg * Math.PI) / 180;
+    const f = limbFrame([0, 0, 0], [10 * Math.sin(a), -10 * Math.cos(a), 0], out);
+    const turn = f.z[0] * prev.z[0] + f.z[1] * prev.z[1] + f.z[2] * prev.z[2];
+    assert.ok(turn > 0.95, `saut du repere a ${deg} degres (${turn})`);
+    nearVec(f.z, [0, 0, -1]);
+    prev = f;
+  }
+  // Bras tendu vers la camera : toujours continu.
+  const forward = limbFrame([0, 0, 0], [0, -1, 10], out);
+  nearVec(forward.x, [1, 0, 0]);
 });

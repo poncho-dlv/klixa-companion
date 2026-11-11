@@ -7,7 +7,7 @@
 // camera : le skin s'aligne sur l'image quel que soit le vrai champ de la webcam.
 import * as THREE from '/vendor-three/three.module.js';
 import { GLTFLoader } from '/vendor-three-addons/loaders/GLTFLoader.js';
-import { solveBody, blendSkeleton, segmentFrame, torsoFrame } from './body-rig.js';
+import { solveBody, blendSkeleton, segmentFrame, limbFrame, torsoFrame } from './body-rig.js';
 import { BLEND_NAMES, normalizeSkinManifest, resolveModelUrl, jawAngle, gazeAngles, breathValue, poseHoldWeight, smoothingFactor, isBlendName } from './skin-manifest.js';
 
 const FOV = 63;
@@ -272,9 +272,9 @@ export function createSkin3DRenderer({ canvas } = {}) {
     placePart(body.parts.Neck, segmentFrame(base, neckPoint.toArray(), torso.x.map((c) => -c)), rest.neck, thick);
 
     skeleton.arms.forEach((arm, i) => {
-      const upper = segmentFrame(arm.shoulder, arm.elbow, arm.outward);
-      const fore = segmentFrame(arm.elbow, arm.wrist, arm.outward);
-      const hand = segmentFrame(arm.wrist, arm.tip, arm.outward);
+      const upper = limbFrame(arm.shoulder, arm.elbow, arm.outward);
+      const fore = limbFrame(arm.elbow, arm.wrist, arm.outward);
+      const hand = limbFrame(arm.wrist, arm.tip, arm.outward);
       placePart(body.parts.UpperArm[i], upper, rest.upperArm, armThick);
       placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
       // Main : echelle uniforme calee sur la longueur mesuree (la patte grossit avec la main a l'ecran, en
