@@ -5,7 +5,8 @@
     "desktop/renderer/renderer.js",
     "desktop/preload.cjs",
     "src/integrations/camskin/web/overlay.js",
-    "src/integrations/camskin/web/tracker.js"
+    "src/integrations/camskin/web/tracker.js",
+    "src/integrations/camskin/web/pose-worker.js"
   ],
   "ignoreUnresolved": ["/vendor/vision_bundle.mjs", "/vendor-three/three.module.js", "/vendor-three-addons/loaders/GLTFLoader.js"],
   "project": [

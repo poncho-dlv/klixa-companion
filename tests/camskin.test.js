@@ -116,6 +116,11 @@ test('le serveur sert la page, le modele et le wasm ; refuse la traversee de che
     const wasm = await get(camskin.port, '/vendor/wasm/vision_wasm_internal.wasm');
     assert.equal(wasm.status, 200);
     assert.equal(wasm.headers['content-type'], 'application/wasm');
+    // Worker de pose : il charge la bibliotheque par importScripts, qui exige un type JavaScript.
+    assert.match((await get(camskin.port, '/pose-worker.js')).headers['content-type'], /text\/javascript/);
+    const bundle = await get(camskin.port, '/vendor/vision_bundle.cjs');
+    assert.equal(bundle.status, 200);
+    assert.match(bundle.headers['content-type'], /text\/javascript/);
     // three.js (rendu des skins 3D) : le module principal et les addons sont servis localement.
     const three = await get(camskin.port, '/vendor-three/three.module.js');
     assert.equal(three.status, 200);

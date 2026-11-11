@@ -225,7 +225,7 @@ async function openCamera(deviceId) {
   // resizeMode 'none' : sans ca Chrome recadre/etire l'image vers le ratio demande (16:9) au lieu
   // de garder le format natif de la camera (4:3...), d'ou un ratio different de celui d'OBS.
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 30 }, resizeMode: 'none' },
+    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 }, resizeMode: 'none' },
     audio: false
   });
   video.srcObject = stream;
@@ -339,33 +339,46 @@ async function main() {
   const engine = await createFaceEngine();
   let lastVideoTime = -1;
 
+  let lastStatus = '';
   const loop = () => {
-    if (video.currentTime !== lastVideoTime) {
+    // Image prete (pas pendant un changement de camera) et nouvelle depuis le dernier passage.
+    if (video.readyState >= 2 && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
       stats.frames++;
-      let result = { face: null, landmarks: null };
-      // Sans skin a afficher, on ne lance pas l'inference (la fenetre reste une simple camera).
-      if (state.override || state.serverSkin || state.debug) {
-        const t = performance.now();
-        const skinId = state.override || state.serverSkin;
-        result = engine.detect(video, state.debug, state.body && hasBody(SKINS[skinId]));
-        stats.inferMs.push(performance.now() - t);
-        if (state.serverSkin) send(result.face);
-      } else {
-        engine.reset();
+      // Une erreur ponctuelle (image invalide, contexte graphique perdu...) ne doit pas arreter le suivi.
+      try {
+        let result = { face: null, landmarks: null };
+        // Sans skin a afficher, on ne lance pas l'inference (la fenetre reste une simple camera).
+        if (state.override || state.serverSkin || state.debug) {
+          const t = performance.now();
+          const skinId = state.override || state.serverSkin;
+          result = engine.detect(video, state.debug, state.body && hasBody(SKINS[skinId]));
+          stats.inferMs.push(performance.now() - t);
+          if (state.serverSkin) send(result.face);
+        } else {
+          engine.reset();
+        }
+        // Fenetre cachee (suivi pour OBS seulement) : l'apercu n'est vu par personne, on economise le rendu.
+        if (!document.hidden) render(result.face, result.landmarks, result.body);
+      } catch (error) {
+        console.error('Suivi : image ignoree', error);
       }
-      // Fenetre cachee (suivi pour OBS seulement) : l'apercu n'est vu par personne, on economise le rendu.
-      if (!document.hidden) render(result.face, result.landmarks, result.body);
     }
     const now = performance.now();
     if (now - stats.lastLog >= 1000) {
       const avg = stats.inferMs.reduce((s, v) => s + v, 0) / (stats.inferMs.length || 1);
-      stats.text = `${engine.delegate} - ${(stats.frames / ((now - stats.lastLog) / 1000)).toFixed(0)} fps - suivi ${avg.toFixed(1)} ms - ${video.videoWidth}x${video.videoHeight} - OBS : ${state.overlays} overlay${state.info3d ? ` - ${state.info3d}` : ''}`;
+      const pose = engine.poseInfo();
+      const poseText = ['worker', 'inline'].includes(pose.mode) ? ` - corps ${pose.mode} ${pose.rate.toFixed(0)}/s ${pose.ms.toFixed(0)} ms` : '';
+      stats.text = `${engine.delegate} - ${(stats.frames / ((now - stats.lastLog) / 1000)).toFixed(0)} fps - suivi ${avg.toFixed(1)} ms - ${video.videoWidth}x${video.videoHeight} ${poseText} - OBS : ${state.overlays} overlay${state.info3d ? ` - ${state.info3d}` : ''}`;
       stats.frames = 0;
       stats.inferMs = [];
       stats.lastLog = now;
     }
-    $('status').textContent = state.error ? `Erreur camera : ${state.error}` : stats.text;
+    const status = state.error ? `Erreur camera : ${state.error}` : stats.text;
+    if (status !== lastStatus) {
+      lastStatus = status;
+      $('status').textContent = status;
+    }
     // Minuteur et non requestAnimationFrame : dans une fenetre cachee, rAF est ralenti a ~1 image/s.
     // 1 ms : une attente plus longue fait rater des images a 60 fps.
     setTimeout(loop, 1);

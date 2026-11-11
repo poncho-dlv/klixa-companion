@@ -9,7 +9,6 @@ const L = { eyeA: 33, eyeB: 263, nose: 1, mouthTop: 13, mouthBottom: 14 };
 const OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176,
   149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
 
-const SMOOTH = 0.55;
 const lerp = (a, b, k) => a + (b - a) * k;
 const round = (n) => Math.round(n * 10) / 10;
 const round4 = (n) => Math.round(n * 10000) / 10000;
@@ -29,8 +28,8 @@ async function createLandmarker() {
   }
 }
 
-// Modele "heavy" (le plus precis) sur GPU : ~10 ms par image ; sur CPU il passe a ~80 ms, on y prefere
-// "full" (~24 ms). Mesures sur webcam 1280x720.
+// Repli quand le worker de pose est indisponible : pose dans le fil principal. Modele "heavy" (le plus
+// precis) sur GPU : ~10 ms par image ; sur CPU il passe a ~80 ms, on y prefere "full" (~24 ms).
 async function createPoseLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks('/vendor/wasm');
   const options = { runningMode: 'VIDEO', numPoses: 1 };
@@ -43,12 +42,15 @@ async function createPoseLandmarker() {
   }
 }
 
-// Cadence de la pose adaptee a la camera : a chaque image, le visage (~7 ms) ; la pose "heavy" (~10 ms) n'est
-// ajoutee que si les deux tiennent dans l'intervalle entre deux images (60 fps = 16,6 ms -> une image sur
-// deux ; 30 fps ou moins -> a chaque image). Les durees et l'intervalle sont mesures en continu.
-// Marge pour le rendu 3D et l'envoi de la trame, par image.
+// Largeur de l'image envoyee au worker de pose : le modele travaille en 256x256 sur la zone du corps,
+// une image plus grande ne lui apporte rien et coute a copier.
+const POSE_WIDTH = 640;
+// Repli (pose dans le fil principal) : marge par image pour le rendu 3D et l'envoi de la trame.
 const RENDER_MS = 4;
 const clampInt = (n, min, max) => Math.min(max, Math.max(min, n));
+// Lissage du repere 2D du visage : constante de temps (s), independante du nombre d'images par seconde.
+const FACE_TAU = 0.042;
+const JAW_TAU = 0.048;
 
 /**
  * @returns {Promise<{ delegate: string, detect: (video: HTMLVideoElement, landmarks?: boolean, body?: boolean) => { face: object|null, landmarks: object[]|null }, reset: () => void }>}
@@ -56,40 +58,101 @@ const clampInt = (n, min, max) => Math.min(max, Math.max(min, n));
 export async function createFaceEngine() {
   const { landmarker, delegate } = await createLandmarker();
   let smooth = null;
-  // Suivi du corps : charge a la premiere demande (inutile pour un skin sans corps).
+  // Suivi du corps : charge a la premiere demande (inutile pour un skin sans corps). Il tourne dans un
+  // worker (fil separe) ; si le worker echoue, repli dans le fil principal a cadence reduite.
+  let poseMode = 'idle'; // idle | loading | worker | inline | failed
+  let poseWorker = null;
+  let poseBusy = false;
   let poseLandmarker = null;
-  let poseLoading = false;
   let lastBody = null;
   let poseFrame = 0;
+  let poseRate = 0; // mesures de pose par seconde (moyenne mobile)
+  let lastPoseAt = 0;
   const perf = { frame: 33, face: 7, pose: 10 }; // ms, moyennes mobiles
   const track = (key, value) => { perf[key] += (value - perf[key]) * 0.1; };
   let lastMediaTime = -1;
-  function poseDue() {
-    const every = clampInt(Math.ceil((perf.face + perf.pose + RENDER_MS) / Math.max(8, perf.frame)), 1, 4);
-    return poseFrame++ % every === 0;
-  }
   // Derniere trame de visage valide : sert de base quand le visage sort du champ mais que le corps reste visible.
   let lastFace = null;
   const bodyFilter = createBodyFilter();
 
-  function ensurePose() {
-    if (poseLandmarker || poseLoading) return;
-    poseLoading = true;
+  function fallbackInline(reason) {
+    console.warn('Pose : worker indisponible, repli dans le fil principal', reason);
+    poseWorker?.terminate();
+    poseWorker = null;
+    poseBusy = false;
+    poseMode = 'loading';
     createPoseLandmarker()
-      .then((landmarker) => { poseLandmarker = landmarker; })
-      .catch((error) => { console.error('Suivi du corps indisponible', error); });
+      .then((created) => { poseLandmarker = created; poseMode = 'inline'; })
+      .catch((error) => { poseMode = 'failed'; console.error('Suivi du corps indisponible', error); });
   }
 
-  // Points utiles du corps : [x, y, z monde (m), visibilite], dans l'ordre de BODY_LANDMARKS.
-  function detectBody(video) {
+  // Points utiles du corps : [x, y, z monde (m), visibilite], dans l'ordre de BODY_LANDMARKS, filtres
+  // (One Euro) a l'horloge de la video : l'intervalle reel entre deux images, sans la gigue du traitement.
+  function applyBody(points, mediaTime) {
+    const now = performance.now();
+    if (lastPoseAt) poseRate += (1000 / Math.max(1, now - lastPoseAt) - poseRate) * 0.1;
+    lastPoseAt = now;
+    if (!points) {
+      lastBody = null;
+      bodyFilter.reset();
+      return;
+    }
+    lastBody = bodyFilter.filter(points, mediaTime).map(([x, y, z, v]) => [round4(x), round4(y), round4(z), Math.round(v * 100) / 100]);
+  }
+
+  function ensurePose() {
+    if (poseMode !== 'idle') return;
+    poseMode = 'loading';
+    try {
+      poseWorker = new Worker('/pose-worker.js');
+      poseWorker.onmessage = ({ data }) => {
+        if (data.type === 'ready') {
+          poseMode = 'worker';
+        } else if (data.type === 'pose') {
+          poseBusy = false;
+          track('pose', data.ms);
+          applyBody(data.points, data.t);
+        } else if (data.type === 'error') {
+          fallbackInline(data.message);
+        }
+      };
+      poseWorker.onerror = (event) => fallbackInline(event.message);
+      poseWorker.postMessage({ type: 'init', landmarks: BODY_LANDMARKS });
+    } catch (error) {
+      fallbackInline(error?.message);
+    }
+  }
+
+  function detectInline(video) {
     const started = performance.now();
     const res = poseLandmarker.detectForVideo(video, started);
     track('pose', performance.now() - started);
     const lms = res.landmarks?.[0];
     const world = res.worldLandmarks?.[0];
-    if (!lms || !world) return null;
-    const raw = BODY_LANDMARKS.map((i) => [lms[i].x, lms[i].y, world[i].z, lms[i].visibility ?? 0]);
-    return bodyFilter.filter(raw, performance.now() / 1000).map(([x, y, z, v]) => [round4(x), round4(y), round4(z), Math.round(v * 100) / 100]);
+    return lms && world ? BODY_LANDMARKS.map((i) => [lms[i].x, lms[i].y, world[i].z, lms[i].visibility ?? 0]) : null;
+  }
+
+  // Lance une mesure de pose si c'est possible ; le resultat met `lastBody` a jour (plus tard si worker).
+  function pumpPose(video) {
+    ensurePose();
+    if (poseMode === 'worker') {
+      if (poseBusy) return;
+      poseBusy = true;
+      const t = video.currentTime;
+      const scale = Math.min(1, POSE_WIDTH / video.videoWidth);
+      createImageBitmap(video, {
+        resizeWidth: Math.round(video.videoWidth * scale), resizeHeight: Math.round(video.videoHeight * scale), resizeQuality: 'low'
+      })
+        .then((bitmap) => {
+          if (poseWorker) poseWorker.postMessage({ type: 'frame', bitmap, t }, [bitmap]);
+          else bitmap.close();
+        })
+        .catch(() => { poseBusy = false; });
+    } else if (poseMode === 'inline') {
+      // Fil principal : la pose n'est ajoutee que si visage + pose tiennent entre deux images.
+      const every = clampInt(Math.ceil((perf.face + perf.pose + RENDER_MS) / Math.max(8, perf.frame)), 1, 4);
+      if (poseFrame++ % every === 0) applyBody(detectInline(video), video.currentTime);
+    }
   }
 
   // Repere visage derive des landmarks, lisse par moyenne exponentielle. Coordonnees en
@@ -111,15 +174,17 @@ export async function createFaceEngine() {
       look: { x: (blend.eyeLookOutRight ?? 0) - (blend.eyeLookInRight ?? 0), y: (blend.eyeLookDownRight ?? 0) - (blend.eyeLookUpRight ?? 0) }
     };
     const prev = smooth;
+    const k = 1 - Math.exp(-perf.frame / 1000 / FACE_TAU);
+    const kJaw = 1 - Math.exp(-perf.frame / 1000 / JAW_TAU);
     const face = prev
       ? {
-          cx: lerp(prev.cx, raw.cx, SMOOTH),
-          cy: lerp(prev.cy, raw.cy, SMOOTH),
-          u: lerp(prev.u, raw.u, SMOOTH),
-          angle: prev.angle + Math.atan2(Math.sin(raw.angle - prev.angle), Math.cos(raw.angle - prev.angle)) * SMOOTH,
-          jaw: lerp(prev.jaw, raw.jaw, 0.5),
-          nose: { x: lerp(prev.nose.x, raw.nose.x, SMOOTH), y: lerp(prev.nose.y, raw.nose.y, SMOOTH) },
-          mouth: { x: lerp(prev.mouth.x, raw.mouth.x, SMOOTH), y: lerp(prev.mouth.y, raw.mouth.y, SMOOTH) },
+          cx: lerp(prev.cx, raw.cx, k),
+          cy: lerp(prev.cy, raw.cy, k),
+          u: lerp(prev.u, raw.u, k),
+          angle: prev.angle + Math.atan2(Math.sin(raw.angle - prev.angle), Math.cos(raw.angle - prev.angle)) * k,
+          jaw: lerp(prev.jaw, raw.jaw, kJaw),
+          nose: { x: lerp(prev.nose.x, raw.nose.x, k), y: lerp(prev.nose.y, raw.nose.y, k) },
+          mouth: { x: lerp(prev.mouth.x, raw.mouth.x, k), y: lerp(prev.mouth.y, raw.mouth.y, k) },
           look: raw.look
         }
       : raw;
@@ -151,6 +216,10 @@ export async function createFaceEngine() {
 
   return {
     delegate,
+    /** Etat du suivi du corps pour le diagnostic : mode (worker, inline...) et duree moyenne d'une mesure (ms). */
+    poseInfo() {
+      return { mode: poseMode, ms: perf.pose, rate: poseRate };
+    },
     reset() {
       smooth = null;
       lastFace = null;
@@ -171,8 +240,7 @@ export async function createFaceEngine() {
         // Visage perdu (hors champ, tete baissee...) : si le corps est encore la, on garde le skin
         // en place (tete figee, expressions neutres) au lieu de tout faire disparaitre.
         if (withBody && lastFace) {
-          ensurePose();
-          if (poseLandmarker && poseDue()) lastBody = detectBody(video);
+          pumpPose(video);
           if (lastBody) {
             const { pose: _pose, ...rest } = lastFace;
             const face = { ...rest, blend: {}, lip: 0, lost: true, body: lastBody };
@@ -185,8 +253,7 @@ export async function createFaceEngine() {
       const blend = Object.fromEntries((res.faceBlendshapes?.[0]?.categories ?? []).map((c) => [c.categoryName, c.score]));
       const face = buildFace(lms, blend, w, h, res.facialTransformationMatrixes?.[0]?.data);
       if (withBody) {
-        ensurePose();
-        if (poseLandmarker && poseDue()) lastBody = detectBody(video);
+        pumpPose(video);
         if (lastBody) face.body = lastBody;
       } else {
         lastBody = null;
