@@ -142,9 +142,14 @@ const DEFAULT_BODY_PARAMS = {
   // Hors de l'image, le modele invente la position : la confiance tombe entre ces deux distances au bord
   // (en fraction de l'image).
   offFrame: [0.1, 0.45],
-  // Les points index/auriculaire de la pose sont aux articulations des doigts, pas au bout : la main
-  // reelle depasse d'autant. Facteur applique a la longueur de la main du squelette.
+  // Longueur de la main du squelette. Les points index/auriculaire de la pose sont aux articulations des
+  // doigts, pas au bout. Main mesuree : distance poignet -> articulations x knuckleReach (la patte couvre
+  // alors la vraie main, quelle que soit sa taille a l'ecran), bornee a [handMin, handMax] x la longueur de
+  // repos. Main non mesuree : longueur de repos x handReach.
   handReach: 1.45,
+  knuckleReach: 1.6,
+  handMin: 0.7,
+  handMax: 2.6,
   restShoulder: 40,
   lengths: { torso: 45, neck: 14, upperArm: 28, forearm: 26, hand: 10 }
 };
@@ -222,7 +227,7 @@ export function solveBody(body, view, headDepth, options = {}) {
       const outward = [Math.sign(shoulder[0] - shoulderMid[0]) || 1, 0, 0];
       const upper = p.lengths.upperArm * scale;
       const lower = p.lengths.forearm * scale;
-      const hand = p.lengths.hand * scale * p.handReach;
+      const handBase = p.lengths.hand * scale;
       // Chaque articulation glisse entre une position deduite et sa position mesuree, selon la confiance.
       // Le poignet est juge seul : main levee dans l'image avec le coude hors champ, c'est le cas courant
       // devant une webcam. Le coude manquant est alors deduit de l'epaule et du poignet (bras plie vers
@@ -240,9 +245,17 @@ export function solveBody(body, view, headDepth, options = {}) {
       const wrist = wristMeasured ? mix(add(elbow, mul(forearmDir, lower)), wristMeasured, wristWeight) : add(elbow, mul(forearmDir, lower));
       // Direction de la main : poignet -> milieu index/auriculaire, sinon dans le prolongement de l'avant-bras.
       const alongForearm = normalize(sub(wrist, elbow), forearmDir);
-      const handDir = handWeight > 0
-        ? normalize(mix(alongForearm, normalize(sub(mid(point(pinkyIndex), point(indexIndex)), point(wristIndex)), alongForearm), handWeight), alongForearm)
-        : alongForearm;
+      let handDir = alongForearm;
+      let hand = handBase * p.handReach;
+      if (handWeight > 0) {
+        handDir = normalize(mix(alongForearm, normalize(sub(mid(point(pinkyIndex), point(indexIndex)), wristMeasured), alongForearm), handWeight), alongForearm);
+        // Taille mesuree dans le plan du poignet (la profondeur de chaque point est trop bruitee pour une longueur).
+        const depth = -wristMeasured[2];
+        const flat = (i) => unproject(body[i][0], body[i][1], view.w, view.h, depth, p.fov);
+        const knuckles = length(sub(mid(flat(pinkyIndex), flat(indexIndex)), wristMeasured));
+        const measured = clamp(knuckles * p.knuckleReach, handBase * p.handMin, handBase * p.handMax);
+        hand += (measured - hand) * handWeight;
+      }
       return { outward, shoulder, elbow, wrist, tip: add(wrist, mul(handDir, hand)), hasElbow: elbowWeight > 0.5, hasWrist: wristWeight > 0.5 };
     }
   );

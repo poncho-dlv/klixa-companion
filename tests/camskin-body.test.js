@@ -119,6 +119,18 @@ test('solveBody : main levee visible, coude hors champ : la patte suit la main, 
   assert.ok(arm.tip[1] > arm.wrist[1], 'les doigts pointent vers le haut');
 });
 
+test('solveBody : la longueur de la patte suit la taille mesuree de la main, bornee', () => {
+  const hand = (spread) => solveBody(standingBody({
+    wristL: [0.85, 0.5, 0, 0.98], pinkyL: [0.87, 0.5 - spread, 0, 0.98], indexL: [0.83, 0.5 - spread, 0, 0.98]
+  }), VIEW, 60).arms[0];
+  const size = (arm) => Math.hypot(arm.tip[0] - arm.wrist[0], arm.tip[1] - arm.wrist[1], arm.tip[2] - arm.wrist[2]);
+  const small = size(hand(0.08));
+  const big = size(hand(0.16));
+  assert.ok(big > small * 1.6, `main deux fois plus grande a l ecran : ${small} -> ${big}`);
+  assert.ok(size(hand(0.9)) <= size(hand(0.5)) + 1e-6, 'borne haute');
+  assert.ok(size(hand(0.001)) > 0, 'borne basse');
+});
+
 test('solveBody : la profondeur du corps suit la pose monde, bornee', () => {
   const closer = solveBody(standingBody({ shoulderL: [0.65, 0.62, -5, 0.99] }), VIEW, 60);
   const flat = solveBody(standingBody(), VIEW, 60);

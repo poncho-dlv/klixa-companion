@@ -277,7 +277,9 @@ export function createSkin3DRenderer({ canvas } = {}) {
       const hand = segmentFrame(arm.wrist, arm.tip, arm.outward);
       placePart(body.parts.UpperArm[i], upper, rest.upperArm, armThick);
       placePart(body.parts.Forearm[i], fore, rest.forearm, armThick);
-      placePart(body.parts.Hand[i], hand, rest.hand, armThick);
+      // Main : echelle uniforme calee sur la longueur mesuree (la patte grossit avec la main a l'ecran, en
+      // longueur comme en largeur), jamais plus fine que le bras.
+      placePart(body.parts.Hand[i], hand, rest.hand, Math.min(3, Math.max(armThick * 0.85, hand.length / rest.hand)));
       placeJoint(body.parts.Shoulder[i], upper, arm.shoulder, armThick);
       placeJoint(body.parts.Elbow[i], fore, arm.elbow, armThick);
       placeJoint(body.parts.Wrist[i], hand, arm.wrist, armThick);
