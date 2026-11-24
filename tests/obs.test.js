@@ -62,3 +62,37 @@ test('resolveOverlayUrlUpdate: update réécrit le token sur une source overlay'
   assert.equal(r.action, 'update');
   assert.equal(extractToken(r.url), 'new');
 });
+
+import { overlayIdFromUrl, buildSceneItems } from '../src/integrations/obs.js';
+
+test('overlayIdFromUrl: id d\'overlay en minuscules, jamais le token', () => {
+  assert.equal(overlayIdFromUrl(`${BASE}/Alerts/?wsToken=secret`, BASE), 'alerts');
+  assert.equal(overlayIdFromUrl(`${BASE}/Mascot/`, `${BASE}/`), 'mascot');
+  assert.equal(overlayIdFromUrl('https://autre.site/Alerts/', BASE), '');
+  assert.equal(overlayIdFromUrl(`${BASE}/`, BASE), '');
+});
+
+test('buildSceneItems: classe les sources, ne fuit ni URL ni token', () => {
+  const out = buildSceneItems({
+    sceneName: 'Live',
+    canvas: { baseWidth: 1920, baseHeight: 1080 },
+    items: [
+      { sourceName: 'Alertes', sceneItemId: 1, sceneItemEnabled: true, inputKind: 'browser_source',
+        sceneItemTransform: { positionX: 100, positionY: 50, scaleX: 0.5, scaleY: 0.5, sourceWidth: 1920, sourceHeight: 1080, alignment: 5 } },
+      { sourceName: 'Web', sceneItemId: 2, inputKind: 'browser_source', sceneItemTransform: {} },
+      { sourceName: 'Cam', sceneItemId: 3, sceneItemEnabled: false, inputKind: 'dshow_input', sceneItemTransform: {} }
+    ],
+    inputs: {
+      Alertes: { url: `${BASE}/Alerts/?wsToken=secret`, width: 1920, height: 1080 },
+      Web: { url: 'https://exemple.org/?wsToken=secret' }
+    }
+  }, BASE);
+  assert.deepEqual(out.canvas, { width: 1920, height: 1080 });
+  assert.equal(out.currentScene, 'Live');
+  assert.deepEqual(out.items.map((i) => i.kind), ['overlay', 'browser', 'other']);
+  assert.equal(out.items[0].overlay, 'alerts');
+  assert.equal(out.items[0].transform.scaleX, 0.5);
+  assert.equal(out.items[2].enabled, false);
+  assert.ok(!JSON.stringify(out).includes('secret'));
+  assert.ok(!JSON.stringify(out).includes('http'));
+});

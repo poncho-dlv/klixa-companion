@@ -1,4 +1,4 @@
-import OBSWebSocket from 'obs-websocket-js';
+import OBSWebSocket, { EventSubscription } from 'obs-websocket-js';
 import { createLogger } from '../logger.js';
 import { t } from '../i18n/core.js';
 
@@ -54,6 +54,61 @@ export function resolveOverlayUrlUpdate(currentUrl, base, token) {
   return { action: 'update', url: setToken(currentUrl, token) };
 }
 
+// Identifiant d'overlay Klixa d'une source navigateur : premier segment du chemin, en minuscules
+// (`https://overlays.klixa.live/Alerts/?wsToken=…` → `alerts`). Jamais l'URL ni le token : ils ne
+// quittent pas le compagnon (la commande obs.get-scene-items ne renvoie que cet identifiant).
+export function overlayIdFromUrl(rawUrl, base) {
+  if (!urlMatchesBase(rawUrl, base)) return '';
+  try {
+    const basePath = new URL(base).pathname.replace(/\/+$/, '');
+    const rest = new URL(rawUrl).pathname.slice(basePath.length);
+    const id = rest.split('/').filter(Boolean)[0] || '';
+    return /^[A-Za-z0-9_-]{1,40}$/.test(id) ? id.toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+const num = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+
+/**
+ * Forme de la réponse `obs.get-scene-items` (pure + testée) à partir des réponses brutes d'obs-websocket.
+ * @param {{ sceneName: string, canvas: {baseWidth:number, baseHeight:number}, items: object[], inputs: Record<string, object> }} raw
+ *   `items` = GetSceneItemList ; `inputs` = sourceName → inputSettings des sources navigateur.
+ * @param {string} overlayBase  Origine overlay Klixa (identifie les sources navigateur Klixa).
+ */
+export function buildSceneItems({ sceneName, canvas, items, inputs }, overlayBase) {
+  const out = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const sourceName = String(item?.sourceName || '');
+    if (!sourceName) continue;
+    const t = item.sceneItemTransform || {};
+    const settings = inputs?.[sourceName] || null;
+    const isBrowser = item.inputKind === 'browser_source';
+    const overlay = isBrowser && settings ? overlayIdFromUrl(String(settings.url || ''), overlayBase) : '';
+    out.push({
+      sourceName,
+      sceneItemId: num(item.sceneItemId),
+      enabled: item.sceneItemEnabled !== false,
+      kind: overlay ? 'overlay' : isBrowser ? 'browser' : 'other',
+      ...(overlay ? { overlay } : {}),
+      isGroup: item.isGroup === true,
+      sourceWidth: num(t.sourceWidth, num(settings?.width)),
+      sourceHeight: num(t.sourceHeight, num(settings?.height)),
+      transform: {
+        positionX: num(t.positionX), positionY: num(t.positionY),
+        scaleX: num(t.scaleX, 1), scaleY: num(t.scaleY, 1),
+        rotation: num(t.rotation),
+        alignment: num(t.alignment, 5),
+        cropLeft: num(t.cropLeft), cropRight: num(t.cropRight), cropTop: num(t.cropTop), cropBottom: num(t.cropBottom),
+        width: num(t.width), height: num(t.height),
+        boundsType: String(t.boundsType || 'OBS_BOUNDS_NONE')
+      }
+    });
+  }
+  return { canvas: { width: num(canvas?.baseWidth), height: num(canvas?.baseHeight) }, currentScene: String(sceneName || ''), items: out };
+}
+
 /**
  * Intégration OBS NATIVE (obs-websocket) : le compagnon parle directement à OBS sur
  * le LAN. Remplace l'action Streamer.bot ObsSyncOverlayToken.cs ET la souscription SB
@@ -86,7 +141,10 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
         obs.disconnect().catch(() => {});
         reject(new Error(t('errors.obsConnectTimeout')));
       }, 10000);
-      obs.connect(url, obsConfig.password || undefined)
+      // SceneItemTransformChanged est un event « haut volume » : absent de `All`, à demander explicitement.
+      obs.connect(url, obsConfig.password || undefined, {
+        eventSubscriptions: EventSubscription.All | EventSubscription.SceneItemTransformChanged
+      })
         .then(() => { clearTimeout(timer); resolve(); })
         .catch((err) => { clearTimeout(timer); reject(err); });
     });
@@ -130,6 +188,21 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
       data: {}
     });
   });
+
+  // Disposition de la scène modifiée (élément activé/masqué, déplacé, redimensionné) : notification
+  // minimale, anti-rafale (un glisser-déposer dans OBS émet des dizaines d'events) ; le serveur relit
+  // alors obs.get-scene-items. Aucun contenu de scène ne transite dans l'event.
+  let itemsTimer = null;
+  function notifySceneItemsChanged() {
+    clearTimeout(itemsTimer);
+    itemsTimer = setTimeout(() => {
+      emitEvent?.({ event: { source: 'Obs', type: 'SceneItemsChanged' }, data: {} });
+    }, 400);
+  }
+  obs.on('SceneItemEnableStateChanged', notifySceneItemsChanged);
+  obs.on('SceneItemTransformChanged', notifySceneItemsChanged);
+  obs.on('SceneItemCreated', notifySceneItemsChanged);
+  obs.on('SceneItemRemoved', notifySceneItemsChanged);
 
   connect();
 
@@ -260,6 +333,33 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     return { sourceName, filterName, enabled: filterEnabled };
   }
 
+  // obs.get-scene-items — éléments de la scène programme courante avec leur transformation, pour que
+  // Klixa place la mascotte dans le repère commun du canevas (docs/mascot-movement-plan.md, étape 3).
+  // Les URLs des sources navigateur (qui portent le token overlay) ne sont JAMAIS renvoyées : seul
+  // l'identifiant d'overlay déduit de l'URL l'est (cf. overlayIdFromUrl).
+  async function getSceneItems(payload = {}) {
+    if (!connected) throw new Error(t('errors.obsNotConnected'));
+
+    const overlayBase = String(payload.overlayBase || '').trim();
+    const [{ sceneName }, canvas] = await Promise.all([
+      obs.call('GetCurrentProgramScene'),
+      obs.call('GetVideoSettings')
+    ]);
+    const { sceneItems } = await obs.call('GetSceneItemList', { sceneName });
+
+    const inputs = {};
+    await Promise.all((sceneItems || [])
+      .filter((item) => item?.inputKind === 'browser_source' && item.sourceName)
+      .map(async (item) => {
+        try {
+          const { inputSettings } = await obs.call('GetInputSettings', { inputName: item.sourceName });
+          inputs[item.sourceName] = inputSettings;
+        } catch { /* source illisible : traitée comme navigateur non Klixa */ }
+      }));
+
+    return buildSceneItems({ sceneName, canvas, items: sceneItems, inputs }, overlayBase);
+  }
+
   async function healthcheck() {
     if (!connected) throw new Error(t('errors.obsNotConnected'));
     return { url, connected };
@@ -270,12 +370,13 @@ export function createObsIntegration(obsConfig = {}, { emitEvent } = {}) {
     commands: {
       'obs.sync-overlay-token': syncOverlayToken,
       'obs.get-scenes': getScenes,
+      'obs.get-scene-items': getSceneItems,
       'obs.set-scene': setScene,
       'obs.get-sources': getSources,
       'obs.get-source-filters': getSourceFilters,
       'obs.set-source-filter-enabled': setSourceFilterEnabled
     },
     healthcheck,
-    stop() { stopped = true; clearTimeout(reconnectTimer); obs.disconnect().catch(() => {}); }
+    stop() { stopped = true; clearTimeout(reconnectTimer); clearTimeout(itemsTimer); obs.disconnect().catch(() => {}); }
   };
 }
